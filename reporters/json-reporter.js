@@ -3,11 +3,14 @@
  *
  * Collects results from all collectors and produces a single JSON file
  * with metadata (date, Meteor version, git SHA, scenario, app).
+ *
+ * Pure: meteor info is an input, not derived here. The caller (cli/run.js,
+ * via meteor-source.js) is the sole owner of git introspection — keeps
+ * this file mockable-free and side-effect-free aside from disk writes.
  */
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { execSync } from 'node:child_process';
 
 /**
  * Build a result object from collector outputs.
@@ -15,31 +18,17 @@ import { execSync } from 'node:child_process';
  * @param {string} options.scenario - Scenario name
  * @param {string} options.app - App name
  * @param {string} options.tag - Version tag (e.g., "v3.5", "devel")
- * @param {Object} options.meteorCheckoutPath - Path to Meteor checkout
+ * @param {{version: string, sha: string}} options.meteor - Resolved meteor info
  * @param {Object[]} options.collectorResults - Array of parsed JSON from collectors
  * @param {number} options.wallClockMs - Total wall-clock time
  * @returns {Object} Complete result object
  */
-function buildResult({ scenario, app, tag, meteorCheckoutPath, collectorResults, wallClockMs }) {
-  let meteorVersion = 'unknown';
-  let meteorSha = 'unknown';
-
-  if (meteorCheckoutPath) {
-    try {
-      meteorSha = execSync('git rev-parse --short HEAD', { cwd: meteorCheckoutPath, encoding: 'utf8' }).trim();
-      meteorVersion = execSync('git describe --tags --always', { cwd: meteorCheckoutPath, encoding: 'utf8' }).trim();
-    } catch {
-      // Not a git repo or git not available
-    }
-  }
-
+function buildResult({ scenario, app, tag, meteor, collectorResults, wallClockMs }) {
+  const meteorInfo = meteor ?? { version: 'unknown', sha: 'unknown' };
   return {
     timestamp: new Date().toISOString(),
-    tag: tag || meteorVersion,
-    meteor: {
-      version: meteorVersion,
-      sha: meteorSha,
-    },
+    tag: tag || meteorInfo.version,
+    meteor: meteorInfo,
     scenario,
     app,
     wall_clock_ms: wallClockMs,

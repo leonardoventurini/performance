@@ -23,6 +23,7 @@ import { parseArgs } from 'node:util';
 import SimpleDDP from 'simpleddp';
 import ws from 'ws';
 import config from './bench.config.js';
+import { resolveMeteorSource } from './meteor-source.js';
 import { buildResult, writeResult, appendToHistory } from './reporters/json-reporter.js';
 import { compare, toMarkdown } from './reporters/regression-detector.js';
 
@@ -63,23 +64,8 @@ function splitEnvArgs(rawEnvArray) {
 }
 const extraEnv = splitEnvArgs(values.env);
 
-function getMeteorCmd() {
-  if (config.meteorCheckoutPath && fs.existsSync(path.join(config.meteorCheckoutPath, 'meteor'))) {
-    return path.join(config.meteorCheckoutPath, 'meteor');
-  }
-  return 'meteor';
-}
-
-function getMeteorInfo() {
-  const meteorPath = config.meteorCheckoutPath;
-  if (!meteorPath) return { version: 'system', sha: 'unknown' };
-  try {
-    const sha = execSync('git rev-parse --short HEAD', { cwd: meteorPath, encoding: 'utf8' }).trim();
-    const branch = execSync('git branch --show-current', { cwd: meteorPath, encoding: 'utf8' }).trim();
-    return { version: branch, sha };
-  } catch {
-    return { version: 'unknown', sha: 'unknown' };
-  }
+function resolveSource() {
+  return resolveMeteorSource({ flags: values, env: process.env, config });
 }
 
 function waitForApp(port, timeoutSec = 300) {
@@ -114,15 +100,17 @@ function cmdList() {
   for (const [name, a] of Object.entries(config.apps)) {
     console.log(`  ${name.padEnd(20)} ${a.description}`);
   }
-  console.log(`\nMeteor checkout: ${config.meteorCheckoutPath}`);
-  const info = getMeteorInfo();
-  console.log(`  Branch: ${info.version}  SHA: ${info.sha}\n`);
+  const source = resolveSource();
+  console.log(`\nMeteor source: ${source.mode}`);
+  if (source.mode === 'checkout') console.log(`  Checkout: ${source.checkoutPath}`);
+  console.log(`  Version: ${source.version}  SHA: ${source.sha}\n`);
 }
 
 async function cmdRun() {
+  const source = resolveSource();
   const scenarioName = values.scenario || 'reactive-crud';
   const appName = values.app || config.defaultApp;
-  const tag = values.tag || getMeteorInfo().version;
+  const tag = values.tag || source.version;
   const outputPath = values.output || path.join(config.results.dir, `${scenarioName}-${tag}-${Date.now()}.json`);
 
   const scenario = config.scenarios[scenarioName];
@@ -130,10 +118,9 @@ async function cmdRun() {
   if (!scenario) { console.error(`Unknown scenario: ${scenarioName}`); process.exit(1); }
   if (!app) { console.error(`Unknown app: ${appName}`); process.exit(1); }
 
-  const info = getMeteorInfo();
   console.log(`\n🔧 Benchmark: ${scenarioName}`);
   console.log(`   App: ${appName}`);
-  console.log(`   Meteor: ${info.version} (${info.sha})`);
+  console.log(`   Meteor: ${source.version} (${source.sha})`);
   console.log(`   Tag: ${tag}`);
   if (Object.keys(extraEnv).length > 0) {
     console.log(`   Env: ${Object.entries(extraEnv).map(([k, v]) => `${k}=${v}`).join(', ')}`);
@@ -141,15 +128,15 @@ async function cmdRun() {
   console.log('');
 
   if (scenario.driver === 'script') {
-    return cmdScript({ scenarioName, scenario, appName, app, tag, outputPath, info });
+    return cmdScript({ scenarioName, scenario, appName, app, tag, outputPath, source });
   }
 
   if (scenario.driver === 'cli') {
     if (scenarioName === 'cold-start') {
-      return cmdColdStart({ scenarioName, appName, app, tag, outputPath, info });
+      return cmdColdStart({ scenarioName, appName, app, tag, outputPath, source });
     }
     if (scenarioName === 'bundle-size') {
-      return cmdBundleSize({ scenarioName, appName, app, tag, outputPath, info });
+      return cmdBundleSize({ scenarioName, appName, app, tag, outputPath, source });
     }
     console.log(`CLI scenario "${scenarioName}" — not yet implemented.`);
     process.exit(0);
@@ -163,7 +150,7 @@ async function cmdRun() {
   }
 
   // Clean and start Meteor app
-  const meteorCmd = getMeteorCmd();
+  const meteorCmd = source.meteorCmd;
   console.log('Cleaning app state...');
   execSync(`${meteorCmd} reset`, { cwd: app.path, stdio: 'inherit' });
 
@@ -280,7 +267,7 @@ async function cmdRun() {
     scenario: scenarioName,
     app: appName,
     tag,
-    meteorCheckoutPath: config.meteorCheckoutPath,
+    meteor: { version: source.version, sha: source.sha },
     collectorResults,
     wallClockMs,
   });
@@ -296,8 +283,8 @@ async function cmdRun() {
   }
 }
 
-async function cmdScript({ scenarioName, scenario, appName, app, tag, outputPath, info }) {
-  const meteorCmd = getMeteorCmd();
+async function cmdScript({ scenarioName, scenario, appName, app, tag, outputPath, source }) {
+  const meteorCmd = source.meteorCmd;
 
   // Install app npm deps if needed
   const nodeModulesPath = path.join(app.path, 'node_modules');
@@ -419,7 +406,7 @@ async function cmdScript({ scenarioName, scenario, appName, app, tag, outputPath
     scenario: scenarioName,
     app: appName,
     tag,
-    meteorCheckoutPath: config.meteorCheckoutPath,
+    meteor: { version: source.version, sha: source.sha },
     collectorResults,
     wallClockMs,
   });
@@ -439,8 +426,8 @@ async function cmdScript({ scenarioName, scenario, appName, app, tag, outputPath
   }
 }
 
-async function cmdColdStart({ scenarioName, appName, app, tag, outputPath, info }) {
-  const meteorCmd = getMeteorCmd();
+async function cmdColdStart({ scenarioName, appName, app, tag, outputPath, source }) {
+  const meteorCmd = source.meteorCmd;
   const runs = parseInt(values.runs || '3', 10);
   const startupTimes = [];
 
@@ -487,7 +474,7 @@ async function cmdColdStart({ scenarioName, appName, app, tag, outputPath, info 
     scenario: scenarioName,
     app: appName,
     tag,
-    meteorCheckoutPath: config.meteorCheckoutPath,
+    meteor: { version: source.version, sha: source.sha },
     collectorResults: [{
       metric: 'cold_start',
       startup_median_ms: median,
@@ -503,8 +490,8 @@ async function cmdColdStart({ scenarioName, appName, app, tag, outputPath, info 
   console.log(`Results written to: ${outputPath}`);
 }
 
-async function cmdBundleSize({ scenarioName, appName, app, tag, outputPath, info }) {
-  const meteorCmd = getMeteorCmd();
+async function cmdBundleSize({ scenarioName, appName, app, tag, outputPath, source }) {
+  const meteorCmd = source.meteorCmd;
   const buildDir = path.join('/tmp', `meteor-bundle-${Date.now()}`);
 
   console.log(`\nBundle size benchmark\n`);
@@ -562,7 +549,7 @@ async function cmdBundleSize({ scenarioName, appName, app, tag, outputPath, info
     scenario: scenarioName,
     app: appName,
     tag,
-    meteorCheckoutPath: config.meteorCheckoutPath,
+    meteor: { version: source.version, sha: source.sha },
     collectorResults: [{
       metric: 'bundle_size',
       client_js_kb: Math.round(clientSizeKb),

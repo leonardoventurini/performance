@@ -1,13 +1,7 @@
-// Commit 6 scope: cover the pure paths of buildResult — top-level shape, tag
-// fallback (without checkout), and metric keying. The git-shelling branch
-// (meteorCheckoutPath set) is deliberately NOT covered here: mocking
-// `node:child_process.execSync` requires `mock.method` against a frozen
-// namespace export, which fails with "Cannot redefine property: execSync".
-//
-// Per the user's "less is more" preference, we don't fight stdlib for code
-// that's about to be deleted: commit 7 makes buildResult take meteor:
-// {version, sha} as a pure input (the execSync calls go away entirely), and
-// commit 7 will add tests asserting that purity directly.
+// buildResult is pure as of commit 7: it takes meteor: {version, sha} as input
+// and no longer shells out to git. The dashboard JSON contract (top-level
+// timestamp/tag/meteor.{version,sha}/scenario/app/wall_clock_ms/metrics + nested
+// metric keys) is preserved.
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
@@ -18,14 +12,16 @@ import { buildResult } from '../../reporters/json-reporter.js';
 const FIXTURES = path.join(import.meta.dirname, 'fixtures');
 const load = (name) => JSON.parse(fs.readFileSync(path.join(FIXTURES, name), 'utf8'));
 
+const METEOR = { version: 'release/3.5', sha: 'abc1234' };
+
 describe('buildResult — top-level shape', () => {
-  test('returns dashboard-contract fields with no checkout and no collectors', () => {
+  test('returns dashboard-contract fields with no collectors', () => {
     const before = Date.now();
     const result = buildResult({
       scenario: 'reactive-light',
       app: 'tasks-3.x',
       tag: 'mytag',
-      meteorCheckoutPath: null,
+      meteor: METEOR,
       collectorResults: [],
       wallClockMs: 1234,
     });
@@ -35,7 +31,7 @@ describe('buildResult — top-level shape', () => {
     assert.equal(result.scenario, 'reactive-light');
     assert.equal(result.app, 'tasks-3.x');
     assert.equal(result.wall_clock_ms, 1234);
-    assert.deepEqual(result.meteor, { version: 'unknown', sha: 'unknown' });
+    assert.deepEqual(result.meteor, METEOR);
     assert.deepEqual(result.metrics, {});
 
     const ts = Date.parse(result.timestamp);
@@ -47,30 +43,59 @@ describe('buildResult — top-level shape', () => {
   test('every required top-level field is present', () => {
     const result = buildResult({
       scenario: 's', app: 'a', tag: 't',
-      meteorCheckoutPath: null, collectorResults: [], wallClockMs: 0,
+      meteor: METEOR, collectorResults: [], wallClockMs: 0,
     });
     for (const key of ['timestamp', 'tag', 'meteor', 'scenario', 'app', 'wall_clock_ms', 'metrics']) {
       assert.ok(key in result, `missing top-level key: ${key}`);
     }
     assert.ok('version' in result.meteor && 'sha' in result.meteor);
   });
+
+  test('meteor input is passed through byte-for-byte (no shelling, no mutation)', () => {
+    const input = { version: 'devel', sha: 'release:3.1.2' };
+    const result = buildResult({
+      scenario: 's', app: 'a', tag: 't',
+      meteor: input, collectorResults: [], wallClockMs: 0,
+    });
+    assert.equal(result.meteor.version, 'devel');
+    assert.equal(result.meteor.sha, 'release:3.1.2');
+    assert.deepEqual(input, { version: 'devel', sha: 'release:3.1.2' });
+  });
+
+  test('omitted meteor defaults to {version: "unknown", sha: "unknown"}', () => {
+    const result = buildResult({
+      scenario: 's', app: 'a', tag: 't',
+      collectorResults: [], wallClockMs: 0,
+    });
+    assert.deepEqual(result.meteor, { version: 'unknown', sha: 'unknown' });
+  });
 });
 
 describe('buildResult — tag fallback', () => {
-  test('falls back to meteor.version ("unknown") when tag is undefined and no checkout', () => {
+  test('falls back to meteor.version when tag is undefined', () => {
     const result = buildResult({
       scenario: 's', app: 'a', tag: undefined,
-      meteorCheckoutPath: null, collectorResults: [], wallClockMs: 0,
+      meteor: { version: 'release/3.5', sha: 'abc1234' },
+      collectorResults: [], wallClockMs: 0,
     });
-    assert.equal(result.tag, 'unknown');
+    assert.equal(result.tag, 'release/3.5');
   });
 
   test('explicit tag wins over the fallback', () => {
     const result = buildResult({
       scenario: 's', app: 'a', tag: 'my-explicit-tag',
-      meteorCheckoutPath: null, collectorResults: [], wallClockMs: 0,
+      meteor: METEOR, collectorResults: [], wallClockMs: 0,
     });
     assert.equal(result.tag, 'my-explicit-tag');
+  });
+
+  test('empty-string tag falls back to meteor.version (|| semantics)', () => {
+    const result = buildResult({
+      scenario: 's', app: 'a', tag: '',
+      meteor: { version: 'devel', sha: 'def' },
+      collectorResults: [], wallClockMs: 0,
+    });
+    assert.equal(result.tag, 'devel');
   });
 });
 
@@ -82,7 +107,7 @@ describe('buildResult — metrics keying', () => {
     ];
     const result = buildResult({
       scenario: 's', app: 'a', tag: 't',
-      meteorCheckoutPath: null, collectorResults, wallClockMs: 0,
+      meteor: METEOR, collectorResults, wallClockMs: 0,
     });
     assert.deepEqual(Object.keys(result.metrics).sort(), ['app_resources', 'gc']);
     assert.deepEqual(result.metrics.app_resources, collectorResults[0]);
@@ -95,7 +120,7 @@ describe('buildResult — metrics keying', () => {
       scenario: baseline.scenario,
       app: baseline.app,
       tag: baseline.tag,
-      meteorCheckoutPath: null,
+      meteor: baseline.meteor,
       collectorResults: Object.values(baseline.metrics),
       wallClockMs: baseline.wall_clock_ms,
     });
@@ -106,12 +131,13 @@ describe('buildResult — metrics keying', () => {
     assert.deepEqual(result.metrics.app_resources, baseline.metrics.app_resources);
     assert.deepEqual(result.metrics.gc, baseline.metrics.gc);
     assert.deepEqual(result.metrics.event_loop_delay, baseline.metrics.event_loop_delay);
+    assert.deepEqual(result.meteor, baseline.meteor);
   });
 
   test('later collectorResults with duplicate metric overwrite earlier ones', () => {
     const result = buildResult({
       scenario: 's', app: 'a', tag: 't',
-      meteorCheckoutPath: null,
+      meteor: METEOR,
       collectorResults: [
         { metric: 'gc', count: 1 },
         { metric: 'gc', count: 99 },
