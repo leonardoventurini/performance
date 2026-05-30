@@ -9,9 +9,9 @@
  * and must return a promise (no done callback).
  */
 
-const SimpleDDP = require('simpleddp');
-const ws = require('ws');
-const crypto = require('crypto');
+import SimpleDDP from 'simpleddp';
+import ws from 'ws';
+import crypto from 'node:crypto';
 
 const TARGET = process.env.REMOTE_URL || 'http://localhost:3000';
 const TASK_COUNT = parseInt(process.env.TASK_COUNT || '20', 10);
@@ -92,7 +92,4 @@ async function nonReactiveCrud(context, events) {
   ddp.disconnect();
 }
 
-module.exports = {
-  reactiveCrud,
-  nonReactiveCrud,
-};
+export { reactiveCrud, nonReactiveCrud };

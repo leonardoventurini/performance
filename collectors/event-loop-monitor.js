@@ -8,7 +8,7 @@
  * Connects via IPC or writes JSON to stdout on SIGTERM.
  */
 
-const { monitorEventLoopDelay } = require('node:perf_hooks');
+import { monitorEventLoopDelay } from 'node:perf_hooks';
 
 const RESOLUTION_MS = 20; // histogram resolution in ms
 

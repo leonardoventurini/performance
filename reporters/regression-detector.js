@@ -5,8 +5,7 @@
  * based on configured thresholds.
  */
 
-const fs = require('fs');
-const config = require('../bench.config');
+import config from '../bench.config.js';
 
 /**
  * Compare two result objects and return a report.
@@ -147,28 +146,4 @@ function toMarkdown(report) {
   return md;
 }
 
-/**
- * CLI: node regression-detector.js <baseline.json> <target.json> [--format markdown|json]
- */
-if (require.main === module) {
-  const args = process.argv.slice(2);
-  if (args.length < 2) {
-    console.error('Usage: node regression-detector.js <baseline.json> <target.json> [--format markdown|json]');
-    process.exit(1);
-  }
-
-  const baseline = JSON.parse(fs.readFileSync(args[0], 'utf8'));
-  const target = JSON.parse(fs.readFileSync(args[1], 'utf8'));
-  const format = args.includes('--format') ? args[args.indexOf('--format') + 1] : 'markdown';
-  const report = compare(baseline, target);
-
-  if (format === 'json') {
-    console.log(JSON.stringify(report, null, 2));
-  } else {
-    console.log(toMarkdown(report));
-  }
-
-  process.exit(report.summary.passed ? 0 : 1);
-}
-
-module.exports = { compare, toMarkdown };
+export { compare, toMarkdown };

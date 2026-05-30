@@ -1,3 +1,5 @@
+// CJS: injected via SERVER_NODE_OPTIONS=--require which is CJS-only. Do not convert.
+
 /**
  * GC Monitor
  *
@@ -8,7 +10,7 @@
  * so it's designed to be injected via --require or SERVER_NODE_OPTIONS.
  *
  * Usage:
- *   SERVER_NODE_OPTIONS="--require /path/to/gc-monitor.js" meteor run
+ *   SERVER_NODE_OPTIONS="--require /path/to/gc-monitor.cjs" meteor run
  *
  * On SIGTERM/SIGINT, writes JSON results to the file specified by
  * GC_MONITOR_OUTPUT env var (defaults to stdout).

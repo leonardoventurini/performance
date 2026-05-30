@@ -1,7 +1,8 @@
 {
   "name": "performance",
   "version": "1.0.0",
-  "main": "index.js",
+  "type": "module",
+  "main": "bench.js",
   "scripts": {},
   "author": "",
   "license": "ISC",
@@ -15,7 +16,6 @@
     "@types/node": "^20.14.11",
     "artillery": "^2.0.17",
     "m": "^1.9.0",
-    "minimist": "^1.2.8",
     "pidusage": "^3.0.2"
   },
   "volta": {

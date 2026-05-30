@@ -5,9 +5,9 @@
  * with metadata (date, Meteor version, git SHA, scenario, app).
  */
 
-const fs = require('fs');
-const path = require('path');
-const { execSync } = require('child_process');
+import fs from 'node:fs';
+import path from 'node:path';
+import { execSync } from 'node:child_process';
 
 /**
  * Build a result object from collector outputs.
@@ -71,4 +71,4 @@ function appendToHistory(result, historyDir) {
   writeResult(result, path.join(historyDir, filename));
 }
 
-module.exports = { buildResult, writeResult, appendToHistory };
+export { buildResult, writeResult, appendToHistory };

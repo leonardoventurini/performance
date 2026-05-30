@@ -14,15 +14,23 @@
  *   node tests/fanout-bench.js [--subscribers 100] [--writes 50] [--url http://localhost:3000]
  */
 
-const SimpleDDP = require('simpleddp');
-const ws = require('ws');
-const crypto = require('crypto');
-const minimist = require('minimist');
+import SimpleDDP from 'simpleddp';
+import ws from 'ws';
+import crypto from 'node:crypto';
+import { parseArgs } from 'node:util';
 
-const args = minimist(process.argv.slice(2));
-const TARGET = args.url || process.env.REMOTE_URL || 'http://localhost:3000';
-const NUM_SUBSCRIBERS = parseInt(args.subscribers || '100', 10);
-const NUM_WRITES = parseInt(args.writes || '50', 10);
+const { values } = parseArgs({
+  options: {
+    url: { type: 'string' },
+    subscribers: { type: 'string' },
+    writes: { type: 'string' },
+  },
+  strict: false,
+  allowPositionals: true,
+});
+const TARGET = values.url || process.env.REMOTE_URL || 'http://localhost:3000';
+const NUM_SUBSCRIBERS = parseInt(values.subscribers || '100', 10);
+const NUM_WRITES = parseInt(values.writes || '50', 10);
 
 function wsUrl(httpUrl) {
   return httpUrl.replace(/^http/, 'ws') + '/websocket';

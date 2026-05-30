@@ -6,7 +6,7 @@
  * Also prints periodic human-readable updates to stderr.
  */
 
-const pidusage = require('pidusage');
+import pidusage from 'pidusage';
 
 const INTERVAL_MS = 1000;
 

@@ -5,9 +5,11 @@
  * and the local Meteor checkout path for version switching.
  */
 
-const path = require('path');
+import path from 'node:path';
 
-module.exports = {
+const __dirname = import.meta.dirname;
+
+export default {
   // Local Meteor checkout — switch branches here to benchmark different versions
   meteorCheckoutPath: process.env.METEOR_CHECKOUT_PATH || path.resolve(__dirname, '../../meteor'),
 

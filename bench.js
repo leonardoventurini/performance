@@ -16,28 +16,52 @@
  *   5. node bench.js compare --baseline results/v3.5.json --target results/devel.json
  */
 
-const { execSync, spawn } = require('child_process');
-const path = require('path');
-const fs = require('fs');
-const minimist = require('minimist');
-const config = require('./bench.config');
-const { buildResult, writeResult, appendToHistory } = require('./reporters/json-reporter');
-const { compare, toMarkdown } = require('./reporters/regression-detector');
+import { execSync, spawn } from 'node:child_process';
+import path from 'node:path';
+import fs from 'node:fs';
+import { parseArgs } from 'node:util';
+import SimpleDDP from 'simpleddp';
+import ws from 'ws';
+import config from './bench.config.js';
+import { buildResult, writeResult, appendToHistory } from './reporters/json-reporter.js';
+import { compare, toMarkdown } from './reporters/regression-detector.js';
 
-const args = minimist(process.argv.slice(2));
-const command = args._[0];
+const __dirname = import.meta.dirname;
 
-// Parse --env KEY=VALUE flags into an object
-function parseEnvArgs() {
-  const envArgs = {};
-  const envList = Array.isArray(args.env) ? args.env : (args.env ? [args.env] : []);
-  for (const e of envList) {
+const { values, positionals } = parseArgs({
+  args: process.argv.slice(2),
+  options: {
+    scenario: { type: 'string' },
+    app: { type: 'string' },
+    tag: { type: 'string' },
+    output: { type: 'string' },
+    runs: { type: 'string' },
+    env: { type: 'string', multiple: true },
+    baseline: { type: 'string' },
+    target: { type: 'string' },
+    format: { type: 'string' },
+    result: { type: 'string' },
+    url: { type: 'string' },
+    key: { type: 'string' },
+    'run-id': { type: 'string' },
+    runId: { type: 'string' },
+  },
+  allowPositionals: true,
+  strict: false,
+});
+const command = positionals[0];
+
+function splitEnvArgs(rawEnvArray) {
+  const out = {};
+  if (!rawEnvArray) return out;
+  const list = Array.isArray(rawEnvArray) ? rawEnvArray : [rawEnvArray];
+  for (const e of list) {
     const idx = e.indexOf('=');
-    if (idx > 0) envArgs[e.slice(0, idx)] = e.slice(idx + 1);
+    if (idx > 0) out[e.slice(0, idx)] = e.slice(idx + 1);
   }
-  return envArgs;
+  return out;
 }
-const extraEnv = parseEnvArgs();
+const extraEnv = splitEnvArgs(values.env);
 
 function getMeteorCmd() {
   if (config.meteorCheckoutPath && fs.existsSync(path.join(config.meteorCheckoutPath, 'meteor'))) {
@@ -96,10 +120,10 @@ function cmdList() {
 }
 
 async function cmdRun() {
-  const scenarioName = args.scenario || 'reactive-crud';
-  const appName = args.app || config.defaultApp;
-  const tag = args.tag || getMeteorInfo().version;
-  const outputPath = args.output || path.join(config.results.dir, `${scenarioName}-${tag}-${Date.now()}.json`);
+  const scenarioName = values.scenario || 'reactive-crud';
+  const appName = values.app || config.defaultApp;
+  const tag = values.tag || getMeteorInfo().version;
+  const outputPath = values.output || path.join(config.results.dir, `${scenarioName}-${tag}-${Date.now()}.json`);
 
   const scenario = config.scenarios[scenarioName];
   const app = config.apps[appName];
@@ -144,7 +168,7 @@ async function cmdRun() {
   execSync(`${meteorCmd} reset`, { cwd: app.path, stdio: 'inherit' });
 
   // GC monitor: inject into Meteor's server process via SERVER_NODE_OPTIONS
-  const gcMonitorPath = path.resolve(__dirname, 'collectors/gc-monitor.js');
+  const gcMonitorPath = path.resolve(__dirname, 'collectors/gc-monitor.cjs');
   const resultsDir = path.resolve(__dirname, 'results');
   if (!fs.existsSync(resultsDir)) fs.mkdirSync(resultsDir, { recursive: true });
   const gcOutputPath = path.join(resultsDir, `gc-${tag}-${Date.now()}.json`);
@@ -287,7 +311,7 @@ async function cmdScript({ scenarioName, scenario, appName, app, tag, outputPath
   execSync(`${meteorCmd} reset`, { cwd: app.path, stdio: 'inherit' });
 
   // GC monitor
-  const gcMonitorPath = path.resolve(__dirname, 'collectors/gc-monitor.js');
+  const gcMonitorPath = path.resolve(__dirname, 'collectors/gc-monitor.cjs');
   const resultsDir = path.resolve(__dirname, 'results');
   if (!fs.existsSync(resultsDir)) fs.mkdirSync(resultsDir, { recursive: true });
   const gcOutputPath = path.join(resultsDir, `gc-${tag}-${Date.now()}.json`);
@@ -417,7 +441,7 @@ async function cmdScript({ scenarioName, scenario, appName, app, tag, outputPath
 
 async function cmdColdStart({ scenarioName, appName, app, tag, outputPath, info }) {
   const meteorCmd = getMeteorCmd();
-  const runs = parseInt(args.runs || '3', 10);
+  const runs = parseInt(values.runs || '3', 10);
   const startupTimes = [];
 
   console.log(`\nCold-start benchmark: ${runs} runs\n`);
@@ -555,9 +579,9 @@ async function cmdBundleSize({ scenarioName, appName, app, tag, outputPath, info
 }
 
 function cmdCompare() {
-  const baselinePath = args.baseline;
-  const targetPath = args.target;
-  const format = args.format || 'markdown';
+  const baselinePath = values.baseline;
+  const targetPath = values.target;
+  const format = values.format || 'markdown';
 
   if (!baselinePath || !targetPath) {
     console.error('Usage: node bench.js compare --baseline <file> --target <file>');
@@ -578,9 +602,9 @@ function cmdCompare() {
 }
 
 async function cmdPush() {
-  const resultPath = args.result;
-  const url = args.url || config.dashboardUrl || 'ws://localhost:4000/websocket';
-  const apiKey = args.key || process.env.BENCH_API_KEY || config.dashboardApiKey || 'dev-bench-key-change-in-prod';
+  const resultPath = values.result;
+  const url = values.url || config.dashboardUrl || 'ws://localhost:4000/websocket';
+  const apiKey = values.key || process.env.BENCH_API_KEY || config.dashboardApiKey || 'dev-bench-key-change-in-prod';
 
   if (!resultPath) {
     console.error('Usage: node bench.js push --result <file.json> [--url <ws-url>] [--key <api-key>]');
@@ -589,9 +613,6 @@ async function cmdPush() {
 
   const result = JSON.parse(fs.readFileSync(resultPath, 'utf8'));
   console.log(`Pushing ${resultPath} to ${url}...`);
-
-  const SimpleDDP = require('simpleddp');
-  const ws = require('ws');
 
   const ddp = new SimpleDDP({
     endpoint: url,
@@ -612,10 +633,10 @@ async function cmdPush() {
 }
 
 async function cmdBaseline() {
-  const scenario = args.scenario;
-  const runId = args['run-id'] || args.runId;
-  const url = args.url || config.dashboardUrl || 'ws://localhost:4000/websocket';
-  const apiKey = args.key || process.env.BENCH_API_KEY || config.dashboardApiKey || 'dev-bench-key-change-in-prod';
+  const scenario = values.scenario;
+  const runId = values['run-id'] || values.runId;
+  const url = values.url || config.dashboardUrl || 'ws://localhost:4000/websocket';
+  const apiKey = values.key || process.env.BENCH_API_KEY || config.dashboardApiKey || 'dev-bench-key-change-in-prod';
 
   if (!scenario || !runId) {
     console.error('Usage: node bench.js baseline --scenario <name> --run-id <id> [--url <ws-url>]');
@@ -623,9 +644,6 @@ async function cmdBaseline() {
   }
 
   console.log(`Setting baseline for "${scenario}" to run ${runId}...`);
-
-  const SimpleDDP = require('simpleddp');
-  const ws = require('ws');
 
   const ddp = new SimpleDDP({
     endpoint: url,
