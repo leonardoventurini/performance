@@ -158,7 +158,6 @@ async function cmdRun() {
     cwd: app.path,
     env: {
       ...process.env, ...extraEnv,
-      METEOR_PACKAGE_DIRS: path.resolve(__dirname, 'packages'),
       SERVER_NODE_OPTIONS: serverNodeOptions,
       GC_MONITOR_OUTPUT: gcOutputPath,
     },
@@ -298,7 +297,6 @@ async function cmdScript({ scenarioName, scenario, appName, app, tag, outputPath
     cwd: app.path,
     env: {
       ...process.env, ...extraEnv,
-      METEOR_PACKAGE_DIRS: path.resolve(__dirname, 'packages'),
       SERVER_NODE_OPTIONS: `--require ${gcMonitorPath}`,
       GC_MONITOR_OUTPUT: gcOutputPath,
       METEOR_NO_DEPRECATION: 'true',
@@ -435,8 +433,7 @@ async function cmdColdStart({ scenarioName, appName, app, tag, outputPath, info 
       cwd: app.path,
       env: {
         ...process.env, ...extraEnv,
-        METEOR_PACKAGE_DIRS: path.resolve(__dirname, 'packages'),
-        METEOR_NO_DEPRECATION: 'true',
+          METEOR_NO_DEPRECATION: 'true',
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -503,7 +500,6 @@ async function cmdBundleSize({ scenarioName, appName, app, tag, outputPath, info
     stdio: 'inherit',
     env: {
       ...process.env, ...extraEnv,
-      METEOR_PACKAGE_DIRS: path.resolve(__dirname, 'packages'),
     },
   });
   const buildTimeMs = Date.now() - buildStart;
