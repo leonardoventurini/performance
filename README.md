@@ -140,7 +140,6 @@ artillery/
   non-reactive-stress.yml     240 VUs, methods only
 apps/
   tasks-3.x/              Meteor 3 React benchmark app
-  tasks-2.x/              Meteor 2 React benchmark app
   dashboard/              Blaze dashboard (Galaxy)
 .github/workflows/
   benchmark-pr.yml        PR benchmark workflow

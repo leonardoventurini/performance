@@ -33,9 +33,9 @@ To run a stress test on a galaxy server:
 
 - Prepare a new application container on Galaxy
 - Prepare secrets on `.env.prod` file
-    - `MONGO_URL_TASKS_3_X` and `MONGO_URL_TASKS_2_X`. Url to connect to the MongoDB instance for each application.
-    - `MONGO_VERSION` Version of MongoDB used to pre-clean your environment
-    - `REMOTE_URL_TASKS_3_X` `REMOTE_URL_TASKS_2_X`. Public endpoint to connect to your application.
+    - `MONGO_URL_TASKS_3_X`. URL to connect to the MongoDB instance for the application.
+    - `MONGO_VERSION`. Version of MongoDB used to pre-clean your environment.
+    - `REMOTE_URL_TASKS_3_X`. Public endpoint to connect to your application.
 
 Run the following monitoring command to start benchmarking:
 
@@ -64,7 +64,6 @@ To deploy each app after changes:
 
 Current apps are accessible at:
 
-- tasks-2.x: http://tasks-2.0-perf.meteorapp.com
 - tasks-3.x: http://tasks-3.0-perf.meteorapp.com
 
 

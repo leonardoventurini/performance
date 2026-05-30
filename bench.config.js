@@ -26,10 +26,6 @@ module.exports = {
       path: path.resolve(__dirname, 'apps/tasks-3.x'),
       description: 'Meteor 3 React task app',
     },
-    'tasks-2.x': {
-      path: path.resolve(__dirname, 'apps/tasks-2.x'),
-      description: 'Meteor 2 React task app',
-    },
   },
 
   // Scenarios
