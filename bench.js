@@ -38,6 +38,8 @@ const { values, positionals } = parseArgs({
     output: { type: 'string' },
     runs: { type: 'string' },
     env: { type: 'string', multiple: true },
+    'meteor-version': { type: 'string' },
+    'meteor-checkout': { type: 'string' },
     baseline: { type: 'string' },
     target: { type: 'string' },
     format: { type: 'string' },
@@ -66,6 +68,14 @@ const extraEnv = splitEnvArgs(values.env);
 
 function resolveSource() {
   return resolveMeteorSource({ flags: values, env: process.env, config });
+}
+
+function meteorArgv(source, subcommandArgs) {
+  return source.releaseArg ? [source.releaseArg, ...subcommandArgs] : subcommandArgs;
+}
+
+function meteorShellPrefix(source) {
+  return source.releaseArg ? `${source.meteorCmd} ${source.releaseArg}` : source.meteorCmd;
 }
 
 function waitForApp(port, timeoutSec = 300) {
@@ -150,9 +160,8 @@ async function cmdRun() {
   }
 
   // Clean and start Meteor app
-  const meteorCmd = source.meteorCmd;
   console.log('Cleaning app state...');
-  execSync(`${meteorCmd} reset`, { cwd: app.path, stdio: 'inherit' });
+  execSync(`${meteorShellPrefix(source)} reset`, { cwd: app.path, stdio: 'inherit' });
 
   // GC monitor: inject into Meteor's server process via SERVER_NODE_OPTIONS
   const gcMonitorPath = path.resolve(__dirname, 'collectors/gc-monitor.cjs');
@@ -165,7 +174,7 @@ async function cmdRun() {
 
   console.log(`Starting Meteor app (with GC monitor)...`);
   console.log(`SERVER_NODE_OPTIONS=${serverNodeOptions}`);
-  const meteorProc = spawn(meteorCmd, ['run', '--port', String(config.appPort)], {
+  const meteorProc = spawn(source.meteorCmd, meteorArgv(source, ['run', '--port', String(config.appPort)]), {
     cwd: app.path,
     env: {
       ...process.env, ...extraEnv,
@@ -284,7 +293,6 @@ async function cmdRun() {
 }
 
 async function cmdScript({ scenarioName, scenario, appName, app, tag, outputPath, source }) {
-  const meteorCmd = source.meteorCmd;
 
   // Install app npm deps if needed
   const nodeModulesPath = path.join(app.path, 'node_modules');
@@ -295,7 +303,7 @@ async function cmdScript({ scenarioName, scenario, appName, app, tag, outputPath
 
   // Clean and start Meteor app
   console.log('Cleaning app state...');
-  execSync(`${meteorCmd} reset`, { cwd: app.path, stdio: 'inherit' });
+  execSync(`${meteorShellPrefix(source)} reset`, { cwd: app.path, stdio: 'inherit' });
 
   // GC monitor
   const gcMonitorPath = path.resolve(__dirname, 'collectors/gc-monitor.cjs');
@@ -304,7 +312,7 @@ async function cmdScript({ scenarioName, scenario, appName, app, tag, outputPath
   const gcOutputPath = path.join(resultsDir, `gc-${tag}-${Date.now()}.json`);
 
   console.log('Starting Meteor app...');
-  const meteorProc = spawn(meteorCmd, ['run', '--port', String(config.appPort)], {
+  const meteorProc = spawn(source.meteorCmd, meteorArgv(source, ['run', '--port', String(config.appPort)]), {
     cwd: app.path,
     env: {
       ...process.env, ...extraEnv,
@@ -427,7 +435,6 @@ async function cmdScript({ scenarioName, scenario, appName, app, tag, outputPath
 }
 
 async function cmdColdStart({ scenarioName, appName, app, tag, outputPath, source }) {
-  const meteorCmd = source.meteorCmd;
   const runs = parseInt(values.runs || '3', 10);
   const startupTimes = [];
 
@@ -437,10 +444,10 @@ async function cmdColdStart({ scenarioName, appName, app, tag, outputPath, sourc
     console.log(`--- Run ${i + 1}/${runs} ---`);
 
     // Clean state
-    execSync(`${meteorCmd} reset`, { cwd: app.path, stdio: 'inherit' });
+    execSync(`${meteorShellPrefix(source)} reset`, { cwd: app.path, stdio: 'inherit' });
 
     // Start Meteor
-    const meteorProc = spawn(meteorCmd, ['run', '--port', String(config.appPort)], {
+    const meteorProc = spawn(source.meteorCmd, meteorArgv(source, ['run', '--port', String(config.appPort)]), {
       cwd: app.path,
       env: {
         ...process.env, ...extraEnv,
@@ -491,7 +498,6 @@ async function cmdColdStart({ scenarioName, appName, app, tag, outputPath, sourc
 }
 
 async function cmdBundleSize({ scenarioName, appName, app, tag, outputPath, source }) {
-  const meteorCmd = source.meteorCmd;
   const buildDir = path.join('/tmp', `meteor-bundle-${Date.now()}`);
 
   console.log(`\nBundle size benchmark\n`);
@@ -506,7 +512,7 @@ async function cmdBundleSize({ scenarioName, appName, app, tag, outputPath, sour
   // Build
   console.log('Building production bundle...');
   const buildStart = Date.now();
-  execSync(`${meteorCmd} build ${buildDir} --directory`, {
+  execSync(`${meteorShellPrefix(source)} build ${buildDir} --directory`, {
     cwd: app.path,
     stdio: 'inherit',
     env: {

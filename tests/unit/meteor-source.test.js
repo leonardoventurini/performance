@@ -1,6 +1,5 @@
-// Covers resolveMeteorSource and getMeteorInfo for checkout and system modes.
-// Release mode (--meteor-version / METEOR_RELEASE / config.meteorVersion +
-// mutual-exclusion) lands in commit 8.
+// Covers resolveMeteorSource and getMeteorInfo for all three modes:
+// checkout, system, and release (release added in commit 8).
 
 import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
@@ -154,14 +153,138 @@ describe('getMeteorInfo', () => {
   });
 });
 
-// TODO(commit 8): add release-mode cases.
-//   - flags['meteor-version'] set → { mode: 'release', meteorCmd: 'meteor',
-//     releaseArg: '--release=<version>', version: <version>, sha: 'release:<version>' }
-//   - env.METEOR_RELEASE set (no flag) → release mode
-//   - config.meteorVersion set (no flag, no env) → release mode
-//   - precedence flag > env > config for release mode (parallel to checkout)
-//   - both --meteor-version and --meteor-checkout set → throws
-//     "--meteor-version and --meteor-checkout are mutually exclusive; got
-//     version=X and checkout=Y. Pick one." (both values in the message)
-//   - getMeteorInfo not called for release mode (resolveMeteorSource pre-fills
-//     version and sha)
+describe('resolveMeteorSource — release mode', () => {
+  test('flags["meteor-version"] → release mode with --release arg and "release:" sha prefix', () => {
+    const src = resolveMeteorSource({
+      flags: { 'meteor-version': '3.1.2' },
+      env: {},
+      config: {},
+    });
+    assert.equal(src.mode, 'release');
+    assert.equal(src.meteorCmd, 'meteor');
+    assert.equal(src.releaseArg, '--release=3.1.2');
+    assert.equal(src.version, '3.1.2');
+    assert.equal(src.sha, 'release:3.1.2');
+    assert.equal(src.checkoutPath, null);
+  });
+
+  test('env.METEOR_RELEASE (no flag, no config) → release mode', () => {
+    const src = resolveMeteorSource({
+      flags: {},
+      env: { METEOR_RELEASE: '3.2.0' },
+      config: {},
+    });
+    assert.equal(src.mode, 'release');
+    assert.equal(src.version, '3.2.0');
+    assert.equal(src.sha, 'release:3.2.0');
+    assert.equal(src.releaseArg, '--release=3.2.0');
+  });
+
+  test('config.meteorVersion (no flag, no env) → release mode', () => {
+    const src = resolveMeteorSource({
+      flags: {},
+      env: {},
+      config: { meteorVersion: '3.0.0' },
+    });
+    assert.equal(src.mode, 'release');
+    assert.equal(src.version, '3.0.0');
+    assert.equal(src.sha, 'release:3.0.0');
+    assert.equal(src.releaseArg, '--release=3.0.0');
+  });
+
+  test('precedence: flag > env > config for version', () => {
+    const src = resolveMeteorSource({
+      flags: { 'meteor-version': '9.9.9' },
+      env: { METEOR_RELEASE: '5.5.5' },
+      config: { meteorVersion: '1.1.1' },
+    });
+    assert.equal(src.version, '9.9.9');
+
+    const envBeatsConfig = resolveMeteorSource({
+      flags: {},
+      env: { METEOR_RELEASE: '5.5.5' },
+      config: { meteorVersion: '1.1.1' },
+    });
+    assert.equal(envBeatsConfig.version, '5.5.5');
+  });
+
+  test('sha carries the literal "release:" prefix (pinned so commit 12 polish does not drop it)', () => {
+    const src = resolveMeteorSource({
+      flags: { 'meteor-version': '3.1.2' },
+      env: {}, config: {},
+    });
+    assert.equal(src.sha, 'release:3.1.2');
+    assert.match(src.sha, /^release:/);
+  });
+
+  test('getMeteorInfo on a release source returns pre-baked {version, sha} (no git shelling)', () => {
+    // Construct the release source via resolveMeteorSource so the test exercises
+    // the contract end-to-end. checkoutPath is null, so if getMeteorInfo
+    // attempted to shell out it would throw — we assert it does not.
+    const src = resolveMeteorSource({
+      flags: { 'meteor-version': '3.1.2' },
+      env: {}, config: {},
+    });
+    const info = getMeteorInfo(src);
+    assert.deepEqual(info, { version: '3.1.2', sha: 'release:3.1.2' });
+  });
+});
+
+describe('resolveMeteorSource — mutual exclusion of version + checkout', () => {
+  function assertMutualExclusionError(fn, { version, checkout }) {
+    assert.throws(fn, (err) => {
+      assert.ok(err instanceof Error);
+      assert.match(err.message, /mutually exclusive/i, `message should mention "mutually exclusive"; got: ${err.message}`);
+      assert.ok(err.message.includes(version), `message should include version=${version}; got: ${err.message}`);
+      assert.ok(err.message.includes(checkout), `message should include checkout=${checkout}; got: ${err.message}`);
+      return true;
+    });
+  }
+
+  test('both set in flags → throws with both values in the message', () => {
+    const checkout = makeFakeCheckout({ git: true });
+    assertMutualExclusionError(
+      () => resolveMeteorSource({
+        flags: { 'meteor-version': '3.1.2', 'meteor-checkout': checkout },
+        env: {}, config: {},
+      }),
+      { version: '3.1.2', checkout }
+    );
+  });
+
+  test('both set in env → throws', () => {
+    const checkout = makeFakeCheckout({ git: true });
+    assertMutualExclusionError(
+      () => resolveMeteorSource({
+        flags: {},
+        env: { METEOR_RELEASE: '3.2.0', METEOR_CHECKOUT_PATH: checkout },
+        config: {},
+      }),
+      { version: '3.2.0', checkout }
+    );
+  });
+
+  test('both set in config → throws', () => {
+    const checkout = makeFakeCheckout({ git: true });
+    assertMutualExclusionError(
+      () => resolveMeteorSource({
+        flags: {},
+        env: {},
+        config: { meteorVersion: '3.0.0', meteorCheckoutPath: checkout },
+      }),
+      { version: '3.0.0', checkout }
+    );
+  });
+
+  test('mixed sources (flag version + env checkout) → throws (cross-source check)', () => {
+    const checkout = makeFakeCheckout({ git: true });
+    assertMutualExclusionError(
+      () => resolveMeteorSource({
+        flags: { 'meteor-version': '3.1.2' },
+        env: { METEOR_CHECKOUT_PATH: checkout },
+        config: {},
+      }),
+      { version: '3.1.2', checkout }
+    );
+  });
+});

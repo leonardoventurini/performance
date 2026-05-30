@@ -13,6 +13,10 @@ export default {
   // Local Meteor checkout — switch branches here to benchmark different versions
   meteorCheckoutPath: process.env.METEOR_CHECKOUT_PATH || path.resolve(__dirname, '../../meteor'),
 
+  // Pinned Meteor release — uncomment to benchmark a published release without a local checkout.
+  // Mutually exclusive with meteorCheckoutPath (and with --meteor-checkout / METEOR_CHECKOUT_PATH).
+  // meteorVersion: '3.1.2',
+
   // Default app to benchmark
   defaultApp: 'tasks-3.x',
 

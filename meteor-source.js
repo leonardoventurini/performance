@@ -7,17 +7,26 @@
  *
  * Resolution precedence (per input): flag > env > config.
  * Modes:
+ *   - release:  pinned Meteor release (no local checkout needed).
  *   - checkout: a local meteor checkout (with git history).
- *   - system:   no checkout configured; falls back to `meteor` on PATH.
+ *   - system:   no version or checkout configured; falls back to `meteor` on PATH.
  *
- * Release mode (--meteor-version / METEOR_RELEASE / config.meteorVersion)
- * is added in commit 8; the function signature already accepts those
- * inputs so commit 8 only extends the resolution rule.
+ * Release-vs-checkout is mutually exclusive: pinning a release with a
+ * local checkout is meaningless (the checkout's release is whatever its
+ * tooling/_finished-upgraders says it is). The function throws rather
+ * than silently picking a winner so misconfigured runs fail loud.
  */
 
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+
+function pickVersion({ flags, env, config }) {
+  return flags['meteor-version']
+      ?? env.METEOR_RELEASE
+      ?? config.meteorVersion
+      ?? null;
+}
 
 function pickCheckoutPath({ flags, env, config }) {
   return flags['meteor-checkout']
@@ -27,8 +36,31 @@ function pickCheckoutPath({ flags, env, config }) {
 }
 
 export function resolveMeteorSource({ flags = {}, env = {}, config = {} } = {}) {
+  const version = pickVersion({ flags, env, config });
   const checkoutPath = pickCheckoutPath({ flags, env, config });
   const hasBinary = checkoutPath && fs.existsSync(path.join(checkoutPath, 'meteor'));
+
+  // Mutual exclusion only fires when both inputs would actually be USED — a stale
+  // config.meteorCheckoutPath pointing at a non-existent path shouldn't block
+  // --meteor-version. Same shape as the checkout-mode "binary missing → fall
+  // through to system" handling.
+  if (version && hasBinary) {
+    throw new Error(
+      `--meteor-version and --meteor-checkout are mutually exclusive; ` +
+      `got version=${version} and checkout=${checkoutPath}. Pick one.`
+    );
+  }
+
+  if (version) {
+    return {
+      mode: 'release',
+      meteorCmd: 'meteor',
+      releaseArg: `--release=${version}`,
+      checkoutPath: null,
+      version,
+      sha: `release:${version}`,
+    };
+  }
 
   if (hasBinary) {
     const source = {

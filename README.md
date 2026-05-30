@@ -55,6 +55,27 @@ METEOR_CHECKOUT_PATH=/path/to/meteor \
 node bench.js compare --baseline results/baseline.json --target results/target.json
 ```
 
+## Meteor source
+
+The harness can drive either a local Meteor checkout (build from source) or a pinned published release. Both modes produce result JSON with the same shape; only `meteor.version` and `meteor.sha` differ.
+
+| Mode | When to use | CLI flag | Env var | Config field |
+|------|-------------|----------|---------|--------------|
+| Pinned release | Compare published versions; reproducible CI runs | `--meteor-version <version>` | `METEOR_RELEASE` | `meteorVersion` |
+| Local checkout | Benchmark in-progress changes against a meteor branch | `--meteor-checkout <path>` | `METEOR_CHECKOUT_PATH` | `meteorCheckoutPath` |
+
+Precedence is flag > env > config. The two modes are mutually exclusive — passing both fails fast with a message naming the conflicting values.
+
+```bash
+# Pinned release
+node bench.js run --meteor-version 3.1.2 --scenario reactive-light --tag v3.1.2
+
+# Local checkout
+node bench.js run --meteor-checkout /path/to/meteor --scenario reactive-light --tag devel
+```
+
+When neither is provided, the harness falls back to the `meteor` binary on `PATH` and records `meteor.version = "system"`, `meteor.sha = "unknown"`.
+
 ## CLI commands
 
 | Command | Description |
