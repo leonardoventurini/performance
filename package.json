@@ -3,7 +3,9 @@
   "version": "1.0.0",
   "type": "module",
   "main": "bench.js",
-  "scripts": {},
+  "scripts": {
+    "test": "node --test 'tests/unit/**/*.test.js'"
+  },
   "author": "",
   "license": "ISC",
   "description": "",
