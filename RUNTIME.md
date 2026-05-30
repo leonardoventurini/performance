@@ -46,15 +46,13 @@ npm install
 
 This will set up the remote context needed to run the playwright script.
 
-Remote stress testing helps gather extra metrics from MontiAPM for deeper performance analysis.
+Remote stress testing exercises the app on a real Galaxy container, giving more realistic numbers than a local run.
 
 For each benchmark, we recommend using a new Galaxy container to ensure a clean environment, preventing any interference with your performance results.
 
 ### Deploy
 
-The apps are deployed to Galaxy to benefit of further analysis with MontiAPM tool.
-
-To enable MontiAPM, use `ENABLE_APM`. MontiAPM may overload the app, so measure the metrics carefully, especially during CPU profiling. Enable or disable it in both apps for a fair comparison.
+The apps are deployed to Galaxy for remote stress testing.
 
 To deploy each app after changes:
 
