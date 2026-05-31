@@ -16,7 +16,7 @@
  *   5. node bench.js compare --baseline results/v3.5.json --target results/devel.json
  */
 
-import { execSync, spawn } from 'node:child_process';
+import { execSync } from 'node:child_process';
 import path from 'node:path';
 import fs from 'node:fs';
 import { parseArgs } from 'node:util';
@@ -26,6 +26,14 @@ import config from './bench.config.js';
 import { resolveMeteorSource } from './meteor-source.js';
 import { buildResult, writeResult, appendToHistory } from './reporters/json-reporter.js';
 import { compare, toMarkdown } from './reporters/regression-detector.js';
+import {
+  ensureAppDeps,
+  resetMeteorApp,
+  startMeteorApp,
+  stopMeteorApp,
+} from './runner/meteor-process.js';
+import { waitForApp } from './runner/wait-for-app.js';
+import { startCollectors, stopCollectors } from './runner/collectors.js';
 
 const __dirname = import.meta.dirname;
 
@@ -70,33 +78,20 @@ function resolveSource() {
   return resolveMeteorSource({ flags: values, env: process.env, config });
 }
 
-function meteorArgv(source, subcommandArgs) {
-  return source.releaseArg ? [source.releaseArg, ...subcommandArgs] : subcommandArgs;
-}
-
+// Transitional shell-prefix helper for cmdBundleSize's `meteor build` call.
+// Commit 10 moves that into drivers/bundle-size.js as a spawn(argv) call and
+// this helper goes away.
 function meteorShellPrefix(source) {
   return source.releaseArg ? `${source.meteorCmd} ${source.releaseArg}` : source.meteorCmd;
 }
 
-function waitForApp(port, timeoutSec = 300) {
-  const start = Date.now();
-  while (Date.now() - start < timeoutSec * 1000) {
-    try {
-      execSync(`curl -s -o /dev/null -w "%{http_code}" http://localhost:${port}`, { encoding: 'utf8' });
-      return true;
-    } catch {
-      execSync('sleep 1');
-    }
-  }
-  throw new Error(`App did not start within ${timeoutSec}s`);
-}
-
-function getPid(pattern) {
-  try {
-    return execSync(`pgrep -f "${pattern}"`, { encoding: 'utf8' }).trim().split('\n')[0];
-  } catch {
-    return null;
-  }
+function prepareGcOutput(tag) {
+  const resultsDir = path.resolve(__dirname, 'results');
+  if (!fs.existsSync(resultsDir)) fs.mkdirSync(resultsDir, { recursive: true });
+  return {
+    gcMonitorPath: path.resolve(__dirname, 'collectors/gc-monitor.cjs'),
+    gcOutputPath: path.join(resultsDir, `gc-${tag}-${Date.now()}.json`),
+  };
 }
 
 // ─── Commands ────────────────────────────────────────────────────────
@@ -152,77 +147,25 @@ async function cmdRun() {
     process.exit(0);
   }
 
-  // Install app npm deps if needed
-  const nodeModulesPath = path.join(app.path, 'node_modules');
-  if (!fs.existsSync(nodeModulesPath)) {
-    console.log('Installing app npm dependencies...');
-    execSync('npm install', { cwd: app.path, stdio: 'inherit' });
-  }
+  ensureAppDeps(app.path);
+  resetMeteorApp(source, app.path);
 
-  // Clean and start Meteor app
-  console.log('Cleaning app state...');
-  execSync(`${meteorShellPrefix(source)} reset`, { cwd: app.path, stdio: 'inherit' });
-
-  // GC monitor: inject into Meteor's server process via SERVER_NODE_OPTIONS
-  const gcMonitorPath = path.resolve(__dirname, 'collectors/gc-monitor.cjs');
-  const resultsDir = path.resolve(__dirname, 'results');
-  if (!fs.existsSync(resultsDir)) fs.mkdirSync(resultsDir, { recursive: true });
-  const gcOutputPath = path.join(resultsDir, `gc-${tag}-${Date.now()}.json`);
-  const serverNodeOptions = `--require ${gcMonitorPath}`;
+  const { gcMonitorPath, gcOutputPath } = prepareGcOutput(tag);
   console.log(`GC monitor: ${gcMonitorPath}`);
   console.log(`GC output: ${gcOutputPath}`);
 
-  console.log(`Starting Meteor app (with GC monitor)...`);
-  console.log(`SERVER_NODE_OPTIONS=${serverNodeOptions}`);
-  const meteorProc = spawn(source.meteorCmd, meteorArgv(source, ['run', '--port', String(config.appPort)]), {
-    cwd: app.path,
-    env: {
-      ...process.env, ...extraEnv,
-      SERVER_NODE_OPTIONS: serverNodeOptions,
-      GC_MONITOR_OUTPUT: gcOutputPath,
-    },
-    stdio: ['ignore', 'pipe', 'pipe'],
+  console.log('Starting Meteor app (with GC monitor)...');
+  const meteorProc = startMeteorApp({
+    source, appPath: app.path, port: config.appPort, env: extraEnv, gcMonitorPath, gcOutputPath,
   });
-
-  // Log meteor output to stderr
-  meteorProc.stdout.on('data', (d) => process.stderr.write(d));
-  meteorProc.stderr.on('data', (d) => process.stderr.write(d));
 
   console.log('Waiting for app to start...');
   const startTime = Date.now();
-  waitForApp(config.appPort);
-  const startupMs = Date.now() - startTime;
-  console.log(`App started in ${(startupMs / 1000).toFixed(1)}s`);
+  await waitForApp(config.appPort);
+  console.log(`App started in ${((Date.now() - startTime) / 1000).toFixed(1)}s`);
 
-  // Start collectors
-  const collectorProcs = [];
-  const collectorResults = [];
+  const collectors = startCollectors({ appName, gcOutputPath });
 
-  // Process monitor for app
-  const appPid = getPid(`${appName}/.meteor/local/build/main.js`);
-  if (appPid) {
-    const proc = spawn('node', [path.resolve(__dirname, 'collectors/process-monitor.js'), appPid, 'APP'], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    proc.stderr.on('data', (d) => process.stderr.write(d));
-    let stdout = '';
-    proc.stdout.on('data', (d) => { stdout += d; });
-    collectorProcs.push({ proc, getResult: () => stdout });
-  }
-
-  // Process monitor for MongoDB
-  const dbPid = getPid(`${appName}/.meteor/local/db`);
-  if (dbPid) {
-    const proc = spawn('node', [path.resolve(__dirname, 'collectors/process-monitor.js'), dbPid, 'DB'], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    proc.stderr.on('data', (d) => process.stderr.write(d));
-    let stdout = '';
-    proc.stdout.on('data', (d) => { stdout += d; });
-    collectorProcs.push({ proc, getResult: () => stdout });
-  }
-
-  // Run Artillery
   console.log(`\nRunning Artillery: ${scenario.config}...`);
   const artilleryStart = Date.now();
   try {
@@ -236,42 +179,10 @@ async function cmdRun() {
   }
   const wallClockMs = Date.now() - artilleryStart;
 
-  // Stop collectors and gather results
-  for (const { proc, getResult } of collectorProcs) {
-    proc.kill('SIGTERM');
-    // Give collector time to output
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-    const raw = getResult().trim();
-    if (raw) {
-      try { collectorResults.push(JSON.parse(raw)); } catch {}
-    }
-  }
+  const collectorResults = await stopCollectors(collectors);
+  await stopMeteorApp(meteorProc);
+  collectorResults.push(...await drainPostStopGc(collectors));
 
-  // Stop Meteor (SIGTERM triggers gc-monitor output)
-  meteorProc.kill('SIGTERM');
-  await new Promise((resolve) => setTimeout(resolve, 3000));
-
-  // Collect GC metrics from output file
-  if (fs.existsSync(gcOutputPath)) {
-    try {
-      const gcData = JSON.parse(fs.readFileSync(gcOutputPath, 'utf8'));
-      collectorResults.push(gcData);
-      console.log(`GC: ${gcData.count} collections, ${gcData.total_pause_ms}ms total pause, ${gcData.max_pause_ms}ms max`);
-      console.log(`  Minor: ${gcData.minor.count} (${gcData.minor.total_ms}ms) | Major: ${gcData.major.count} (${gcData.major.total_ms}ms)`);
-      fs.unlinkSync(gcOutputPath); // cleanup temp file
-    } catch (err) {
-      console.error('Could not read GC metrics:', err.message);
-    }
-  } else {
-    console.log(`GC metrics not collected — file not found: ${gcOutputPath}`);
-    // List results dir to debug
-    try {
-      const files = fs.readdirSync(resultsDir).filter(f => f.startsWith('gc-'));
-      if (files.length > 0) console.log(`  Found GC files: ${files.join(', ')}`);
-    } catch {}
-  }
-
-  // Build and write result
   const result = buildResult({
     scenario: scenarioName,
     app: appName,
@@ -292,75 +203,45 @@ async function cmdRun() {
   }
 }
 
-async function cmdScript({ scenarioName, scenario, appName, app, tag, outputPath, source }) {
-
-  // Install app npm deps if needed
-  const nodeModulesPath = path.join(app.path, 'node_modules');
-  if (!fs.existsSync(nodeModulesPath)) {
-    console.log('Installing app npm dependencies...');
-    execSync('npm install', { cwd: app.path, stdio: 'inherit' });
+// gc-monitor writes its output file on Meteor's SIGTERM, so the gc result may
+// only appear after stopMeteorApp returns. stopCollectors already reads the
+// file once; we re-check here in case Meteor took longer than the collector
+// drain to flush. Returns [] when no late-arriving gc data is found.
+async function drainPostStopGc({ gcOutputPath }) {
+  if (!gcOutputPath || !fs.existsSync(gcOutputPath)) return [];
+  try {
+    const gcData = JSON.parse(fs.readFileSync(gcOutputPath, 'utf8'));
+    console.log(`GC (late): ${gcData.count} collections, ${gcData.total_pause_ms}ms total pause`);
+    fs.unlinkSync(gcOutputPath);
+    return [gcData];
+  } catch (err) {
+    console.error(`Could not read late GC metrics from ${gcOutputPath}: ${err.message}`);
+    return [];
   }
+}
 
-  // Clean and start Meteor app
-  console.log('Cleaning app state...');
-  execSync(`${meteorShellPrefix(source)} reset`, { cwd: app.path, stdio: 'inherit' });
+async function cmdScript({ scenarioName, scenario, appName, app, tag, outputPath, source }) {
+  ensureAppDeps(app.path);
+  resetMeteorApp(source, app.path);
 
-  // GC monitor
-  const gcMonitorPath = path.resolve(__dirname, 'collectors/gc-monitor.cjs');
-  const resultsDir = path.resolve(__dirname, 'results');
-  if (!fs.existsSync(resultsDir)) fs.mkdirSync(resultsDir, { recursive: true });
-  const gcOutputPath = path.join(resultsDir, `gc-${tag}-${Date.now()}.json`);
+  const { gcMonitorPath, gcOutputPath } = prepareGcOutput(tag);
 
   console.log('Starting Meteor app...');
-  const meteorProc = spawn(source.meteorCmd, meteorArgv(source, ['run', '--port', String(config.appPort)]), {
-    cwd: app.path,
-    env: {
-      ...process.env, ...extraEnv,
-      SERVER_NODE_OPTIONS: `--require ${gcMonitorPath}`,
-      GC_MONITOR_OUTPUT: gcOutputPath,
-      METEOR_NO_DEPRECATION: 'true',
-    },
-    stdio: ['ignore', 'pipe', 'pipe'],
+  const meteorProc = startMeteorApp({
+    source, appPath: app.path, port: config.appPort, env: extraEnv, gcMonitorPath, gcOutputPath,
   });
-  meteorProc.stdout.on('data', (d) => process.stderr.write(d));
-  meteorProc.stderr.on('data', (d) => process.stderr.write(d));
 
   console.log('Waiting for app to start...');
-  waitForApp(config.appPort);
+  await waitForApp(config.appPort);
   console.log('App started.');
 
-  // Start process collectors
-  const collectorProcs = [];
-  const collectorResults = [];
+  const collectors = startCollectors({ appName, gcOutputPath });
 
-  const appPid = getPid(`${appName}/.meteor/local/build/main.js`);
-  if (appPid) {
-    const proc = spawn('node', [path.resolve(__dirname, 'collectors/process-monitor.js'), appPid, 'APP'], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    proc.stderr.on('data', (d) => process.stderr.write(d));
-    let stdout = '';
-    proc.stdout.on('data', (d) => { stdout += d; });
-    collectorProcs.push({ proc, getResult: () => stdout });
-  }
-
-  const dbPid = getPid(`${appName}/.meteor/local/db`);
-  if (dbPid) {
-    const proc = spawn('node', [path.resolve(__dirname, 'collectors/process-monitor.js'), dbPid, 'DB'], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    proc.stderr.on('data', (d) => process.stderr.write(d));
-    let stdout = '';
-    proc.stdout.on('data', (d) => { stdout += d; });
-    collectorProcs.push({ proc, getResult: () => stdout });
-  }
-
-  // Run the benchmark script
   const scriptPath = path.resolve(__dirname, scenario.script);
   const scriptArgs = scenario.args || '';
   console.log(`\nRunning: node ${scenario.script} ${scriptArgs}\n`);
 
-  const artilleryStart = Date.now();
+  const scriptStart = Date.now();
   let scriptOutput = '';
   try {
     scriptOutput = execSync(`node "${scriptPath}" ${scriptArgs}`, {
@@ -374,40 +255,17 @@ async function cmdScript({ scenarioName, scenario, appName, app, tag, outputPath
     console.error('Script failed:', err.stderr || err.message);
     scriptOutput = err.stdout || '';
   }
-  const wallClockMs = Date.now() - artilleryStart;
+  const wallClockMs = Date.now() - scriptStart;
 
-  // Parse script JSON output
   let scriptMetrics = {};
   const jsonLine = scriptOutput.trim().split('\n').pop();
   if (jsonLine) {
     try { scriptMetrics = JSON.parse(jsonLine); } catch {}
   }
 
-  // Stop collectors
-  for (const { proc, getResult } of collectorProcs) {
-    proc.kill('SIGTERM');
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-    const raw = getResult().trim();
-    if (raw) {
-      try { collectorResults.push(JSON.parse(raw)); } catch {}
-    }
-  }
-
-  // Stop Meteor
-  meteorProc.kill('SIGTERM');
-  await new Promise((resolve) => setTimeout(resolve, 3000));
-
-  // Collect GC metrics
-  if (fs.existsSync(gcOutputPath)) {
-    try {
-      const gcData = JSON.parse(fs.readFileSync(gcOutputPath, 'utf8'));
-      collectorResults.push(gcData);
-      console.log(`GC: ${gcData.count} collections, ${gcData.total_pause_ms}ms total pause`);
-      fs.unlinkSync(gcOutputPath);
-    } catch {}
-  }
-
-  // Add script metrics as a collector result
+  const collectorResults = await stopCollectors(collectors);
+  await stopMeteorApp(meteorProc);
+  collectorResults.push(...await drainPostStopGc(collectors));
   collectorResults.push({ metric: 'fanout', ...scriptMetrics });
 
   const result = buildResult({
@@ -442,34 +300,18 @@ async function cmdColdStart({ scenarioName, appName, app, tag, outputPath, sourc
 
   for (let i = 0; i < runs; i++) {
     console.log(`--- Run ${i + 1}/${runs} ---`);
-
-    // Clean state
-    execSync(`${meteorShellPrefix(source)} reset`, { cwd: app.path, stdio: 'inherit' });
-
-    // Start Meteor
-    const meteorProc = spawn(source.meteorCmd, meteorArgv(source, ['run', '--port', String(config.appPort)]), {
-      cwd: app.path,
-      env: {
-        ...process.env, ...extraEnv,
-          METEOR_NO_DEPRECATION: 'true',
-      },
-      stdio: ['ignore', 'pipe', 'pipe'],
+    resetMeteorApp(source, app.path);
+    const meteorProc = startMeteorApp({
+      source, appPath: app.path, port: config.appPort, env: extraEnv,
     });
-    meteorProc.stdout.on('data', (d) => process.stderr.write(d));
-    meteorProc.stderr.on('data', (d) => process.stderr.write(d));
-
     const startTime = Date.now();
-    waitForApp(config.appPort);
+    await waitForApp(config.appPort);
     const startupMs = Date.now() - startTime;
     startupTimes.push(startupMs);
     console.log(`Startup: ${(startupMs / 1000).toFixed(1)}s`);
-
-    // Stop Meteor
-    meteorProc.kill('SIGTERM');
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+    await stopMeteorApp(meteorProc, { graceMs: 2000 });
   }
 
-  // Sort and take median
   startupTimes.sort((a, b) => a - b);
   const median = startupTimes[Math.floor(startupTimes.length / 2)];
   const min = startupTimes[0];
@@ -502,27 +344,18 @@ async function cmdBundleSize({ scenarioName, appName, app, tag, outputPath, sour
 
   console.log(`\nBundle size benchmark\n`);
 
-  // Install deps if needed
-  const nodeModulesPath = path.join(app.path, 'node_modules');
-  if (!fs.existsSync(nodeModulesPath)) {
-    console.log('Installing app npm dependencies...');
-    execSync('npm install', { cwd: app.path, stdio: 'inherit' });
-  }
+  ensureAppDeps(app.path);
 
-  // Build
   console.log('Building production bundle...');
   const buildStart = Date.now();
   execSync(`${meteorShellPrefix(source)} build ${buildDir} --directory`, {
     cwd: app.path,
     stdio: 'inherit',
-    env: {
-      ...process.env, ...extraEnv,
-    },
+    env: { ...process.env, ...extraEnv },
   });
   const buildTimeMs = Date.now() - buildStart;
   console.log(`Build time: ${(buildTimeMs / 1000).toFixed(1)}s`);
 
-  // Measure client bundle size
   const webBrowserDir = path.join(buildDir, 'bundle', 'programs', 'web.browser');
   let clientSizeKb = 0;
   if (fs.existsSync(webBrowserDir)) {
@@ -532,7 +365,6 @@ async function cmdBundleSize({ scenarioName, appName, app, tag, outputPath, sour
     }
   }
 
-  // Measure server bundle size
   const serverDir = path.join(buildDir, 'bundle', 'programs', 'server');
   let serverSizeKb = 0;
   if (fs.existsSync(serverDir)) {
@@ -540,7 +372,6 @@ async function cmdBundleSize({ scenarioName, appName, app, tag, outputPath, sour
     serverSizeKb = parseInt(du.split('\t')[0], 10);
   }
 
-  // Total bundle
   const totalDu = execSync(`du -sk "${path.join(buildDir, 'bundle')}"`, { encoding: 'utf8' }).trim();
   const totalSizeKb = parseInt(totalDu.split('\t')[0], 10);
 
@@ -548,7 +379,6 @@ async function cmdBundleSize({ scenarioName, appName, app, tag, outputPath, sour
   console.log(`Server: ${serverSizeKb} KB`);
   console.log(`Total bundle: ${totalSizeKb} KB`);
 
-  // Cleanup
   execSync(`rm -rf "${buildDir}"`);
 
   const result = buildResult({
