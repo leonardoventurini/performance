@@ -1,20 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-
-// Mirror of splitEnvArgs in bench.js. Duplicated rather than imported because
-// bench.js runs top-level CLI dispatch on import (parseArgs + switch on positionals).
-// Once cli/run.js exists (commit 10), this test will import from there and the
-// duplicate can be deleted.
-function splitEnvArgs(rawEnvArray) {
-  const out = {};
-  if (!rawEnvArray) return out;
-  const list = Array.isArray(rawEnvArray) ? rawEnvArray : [rawEnvArray];
-  for (const e of list) {
-    const idx = e.indexOf('=');
-    if (idx > 0) out[e.slice(0, idx)] = e.slice(idx + 1);
-  }
-  return out;
-}
+import { splitEnvArgs } from '../../cli/run.js';
 
 test('multiple KEY=VALUE pairs', () => {
   assert.deepEqual(splitEnvArgs(['A=1', 'B=2']), { A: '1', B: '2' });

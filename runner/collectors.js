@@ -14,7 +14,17 @@ import { findPid } from './meteor-process.js';
 
 const HERE = import.meta.dirname;
 const PROCESS_MONITOR = path.resolve(HERE, '..', 'collectors', 'process-monitor.js');
+const GC_MONITOR = path.resolve(HERE, '..', 'collectors', 'gc-monitor.cjs');
+const RESULTS_DIR = path.resolve(HERE, '..', 'results');
 const COLLECTOR_DRAIN_MS = 1000;
+
+export function prepareGcOutput(tag) {
+  if (!io.existsSync(RESULTS_DIR)) io.mkdirSync(RESULTS_DIR, { recursive: true });
+  return {
+    gcMonitorPath: GC_MONITOR,
+    gcOutputPath: path.join(RESULTS_DIR, `gc-${tag}-${Date.now()}.json`),
+  };
+}
 
 function spawnProcessMonitor(pid, name) {
   const proc = io.spawn('node', [PROCESS_MONITOR, pid, name], {
@@ -76,4 +86,22 @@ export async function stopCollectors({ procs, gcOutputPath }) {
   }
 
   return results;
+}
+
+// gc-monitor writes its output file on Meteor's SIGTERM, so the gc result may
+// only appear after stopMeteorApp returns. stopCollectors reads it once during
+// its own drain (1s); this re-checks after stopMeteorApp's grace period in
+// case Meteor took longer than the collector drain to flush. Returns [] when
+// no late-arriving gc data is found.
+export function drainPostStopGc(gcOutputPath) {
+  if (!gcOutputPath || !io.existsSync(gcOutputPath)) return [];
+  try {
+    const gcData = JSON.parse(io.readFileSync(gcOutputPath, 'utf8'));
+    console.log(`GC (late): ${gcData.count} collections, ${gcData.total_pause_ms}ms total pause`);
+    io.unlinkSync(gcOutputPath);
+    return [gcData];
+  } catch (err) {
+    console.error(`Could not read late GC metrics from ${gcOutputPath}: ${err.message}`);
+    return [];
+  }
 }
