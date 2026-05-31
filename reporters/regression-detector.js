@@ -81,7 +81,49 @@ function compare(baseline, target) {
   }
 
   for (const { key, label, baseVal, targetVal } of metricPairs) {
-    if (baseVal == null || targetVal == null || baseVal === 0) continue;
+    const metricName = label || key;
+
+    // Missing on either side — the metric simply isn't comparable. Emit a
+    // visible skip row instead of silently dropping it; the old behavior hid
+    // collector-config drift (a metric present in baseline but missing in
+    // target looked like nothing happened).
+    if (baseVal == null || targetVal == null) {
+      details.push({
+        metric: metricName,
+        status: 'skip',
+        reason: 'missing_target',
+        baseline: baseVal ?? null,
+        target: targetVal ?? null,
+      });
+      continue;
+    }
+
+    // Zero baseline — a percentage delta against 0 is mathematically
+    // undefined (any positive target would compute as Infinity). Skip
+    // explicitly rather than emit a misleading number.
+    if (baseVal === 0) {
+      details.push({
+        metric: metricName,
+        status: 'skip',
+        reason: 'zero_baseline',
+        baseline: 0,
+        target: targetVal,
+      });
+      continue;
+    }
+
+    // Non-finite target (NaN/Infinity/-Infinity) — flag explicitly rather
+    // than letting the delta calculation propagate NaN downstream.
+    if (!Number.isFinite(targetVal)) {
+      details.push({
+        metric: metricName,
+        status: 'skip',
+        reason: 'non_finite',
+        baseline: baseVal,
+        target: targetVal,
+      });
+      continue;
+    }
 
     const delta = ((targetVal - baseVal) / baseVal) * 100;
     const threshold = config.thresholds[key];
@@ -98,7 +140,7 @@ function compare(baseline, target) {
     }
 
     details.push({
-      metric: label || key,
+      metric: metricName,
       baseline: baseVal,
       target: targetVal,
       delta: +delta.toFixed(2),
@@ -124,6 +166,12 @@ function compare(baseline, target) {
  * @param {Object} report - From compare()
  * @returns {string} Markdown string
  */
+const SKIP_REASON_TEXT = {
+  zero_baseline: 'baseline was zero',
+  missing_target: 'target metric missing',
+  non_finite: 'target value non-finite',
+};
+
 function toMarkdown(report) {
   const { summary, details } = report;
   const icon = summary.passed ? (summary.warnings > 0 ? '⚠️' : '✅') : '❌';
@@ -134,6 +182,13 @@ function toMarkdown(report) {
   md += `|--------|----------|--------|-------|--------|\n`;
 
   for (const d of details) {
+    if (d.status === 'skip') {
+      const reasonText = SKIP_REASON_TEXT[d.reason] || d.reason;
+      const baselineCell = d.baseline ?? '';
+      const targetCell = d.target ?? '';
+      md += `| ${d.metric} | ${baselineCell} | ${targetCell} |  | ⏭ (${reasonText}) |\n`;
+      continue;
+    }
     const deltaStr = d.delta > 0 ? `+${d.delta}%` : `${d.delta}%`;
     const statusIcon = d.status === 'FAIL' ? '❌' : d.status === 'WARN' ? '⚠️' : '✅';
     md += `| ${d.metric} | ${d.baseline} | ${d.target} | ${deltaStr} | ${statusIcon} |\n`;

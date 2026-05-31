@@ -83,8 +83,8 @@ describe('compare() — happy paths', () => {
   });
 });
 
-describe('compare() — edge cases', () => {
-  test('missing metric in target: silently skipped (no row, no crash)', () => {
+describe('compare() — edge cases (no metric pair produced at all)', () => {
+  test('metric deleted from target.metrics: no row at all (the pair was never built)', () => {
     const target = clone(load('target.json'));
     delete target.metrics.gc;
     const report = compare(load('baseline.json'), target);
@@ -93,7 +93,7 @@ describe('compare() — edge cases', () => {
     assert.ok(!report.details.some((d) => d.metric === 'GC max pause'));
   });
 
-  test('missing metric in baseline: pair skipped (continue on !baseMetric)', () => {
+  test('metric deleted from baseline.metrics: pair skipped via `if (!baseMetric) continue`', () => {
     const baseline = clone(load('baseline.json'));
     delete baseline.metrics.event_loop_delay;
     const report = compare(baseline, load('target.json'));
@@ -131,59 +131,128 @@ describe('compare() — edge cases', () => {
     assert.equal(report.details.length, 1);
     assert.equal(report.details[0].metric, 'wall_clock_ms');
   });
+});
 
-  // TODO commit 11: this asserts CURRENT (buggy) behavior. After commit 11,
-  // baseVal === 0 should produce a row with { status: 'skip', reason: 'zero_baseline' }
-  // instead of being silently dropped.
-  test('zero baseline value is silently dropped (CURRENT buggy behavior, fixed in commit 11)', () => {
+describe('compare() — skip rows (commit 11 bug fix)', () => {
+  test('baseVal === 0 → skip row with reason: "zero_baseline" (no Infinity delta)', () => {
     const baseline = clone(load('baseline.json'));
     baseline.metrics.gc.total_pause_ms = 0;
     const report = compare(baseline, load('target.json'));
-    assert.ok(
-      !report.details.some((d) => d.metric === 'GC total pause'),
-      'CURRENT behavior: zero baseline → silent skip (no row produced)'
-    );
+    const row = report.details.find((d) => d.metric === 'GC total pause');
+    assert.ok(row, 'GC total pause should now produce a visible row (was silently dropped before commit 11)');
+    assert.equal(row.status, 'skip');
+    assert.equal(row.reason, 'zero_baseline');
+    assert.equal(row.baseline, 0);
+    assert.equal(row.target, load('target.json').metrics.gc.total_pause_ms);
   });
 
-  // TODO commit 11: this asserts CURRENT (buggy) behavior. After commit 11,
-  // null/undefined target should become { status: 'skip', reason: 'missing_target' }
-  // (using the target-non-finite.json fixture as the input for this case).
-  test('null target value is silently dropped (CURRENT buggy behavior, fixed in commit 11)', () => {
+  test('end-to-end via baseline-with-zero.json fixture (wall_clock_ms: 0) → wall_clock skip row', () => {
+    const report = compare(load('baseline-with-zero.json'), load('target.json'));
+    const row = report.details.find((d) => d.metric === 'wall_clock_ms');
+    assert.ok(row);
+    assert.equal(row.status, 'skip');
+    assert.equal(row.reason, 'zero_baseline');
+    assert.equal(row.baseline, 0);
+  });
+
+  test('targetVal null (target-non-finite.json fixture) → skip row with reason: "missing_target"', () => {
+    // app_resources.cpu.avg is null in the fixture; the cpu pair gets built
+    // with targetVal=null, which trips the missing_target branch (== null
+    // catches both null and undefined, in that order before zero/non_finite).
     const report = compare(load('baseline.json'), load('target-non-finite.json'));
-    // app_resources.cpu.avg is null in the fixture
-    assert.ok(
-      !report.details.some((d) => d.metric === 'APP CPU avg'),
-      'CURRENT behavior: null target → silent skip (no row produced)'
-    );
-    // RAM and GC are still finite, so those rows should exist
-    assert.ok(report.details.some((d) => d.metric === 'APP RAM avg'));
-    assert.ok(report.details.some((d) => d.metric === 'GC total pause'));
+    const row = report.details.find((d) => d.metric === 'APP CPU avg');
+    assert.ok(row, 'APP CPU avg row should now be visible (was silently dropped before commit 11)');
+    assert.equal(row.status, 'skip');
+    assert.equal(row.reason, 'missing_target');
+    assert.equal(row.target, null);
+    // RAM and GC are still finite → normal ok rows.
+    const ram = report.details.find((d) => d.metric === 'APP RAM avg');
+    assert.equal(ram.status, 'ok');
   });
 
-  // TODO commit 11: NaN target should become { status: 'skip', reason: 'non_finite' }.
-  // Currently produces a row with delta: NaN, status: 'ok' (because NaN > threshold is false).
-  test('NaN target value produces a row with NaN delta (CURRENT buggy behavior, fixed in commit 11)', () => {
-    const baseline = load('baseline.json');
+  test('NaN target value → skip row with reason: "non_finite"', () => {
     const target = clone(load('target.json'));
     target.metrics.app_resources.cpu.avg = NaN;
-    const report = compare(baseline, target);
-    const cpu = report.details.find((d) => d.metric === 'APP CPU avg');
-    assert.ok(cpu, 'CURRENT behavior: NaN still produces a row');
-    assert.ok(Number.isNaN(cpu.delta), 'delta is NaN');
-    assert.equal(cpu.status, 'ok');
+    const report = compare(load('baseline.json'), target);
+    const row = report.details.find((d) => d.metric === 'APP CPU avg');
+    assert.ok(row);
+    assert.equal(row.status, 'skip');
+    assert.equal(row.reason, 'non_finite');
+    // delta is NOT computed for skip rows.
+    assert.equal(row.delta, undefined);
   });
 
-  // TODO commit 11: Infinity target should become { status: 'skip', reason: 'non_finite' }.
-  // Currently produces a row with delta: Infinity, status: 'FAIL' (Infinity > any threshold).
-  test('Infinity target value produces FAIL row (CURRENT buggy behavior, fixed in commit 11)', () => {
-    const baseline = load('baseline.json');
+  test('Infinity target value → skip row with reason: "non_finite" (no longer a misleading FAIL)', () => {
     const target = clone(load('target.json'));
     target.metrics.app_resources.cpu.avg = Infinity;
+    const report = compare(load('baseline.json'), target);
+    const row = report.details.find((d) => d.metric === 'APP CPU avg');
+    assert.ok(row);
+    assert.equal(row.status, 'skip');
+    assert.equal(row.reason, 'non_finite');
+  });
+
+  test('-Infinity target value → skip row with reason: "non_finite"', () => {
+    const target = clone(load('target.json'));
+    target.metrics.app_resources.cpu.avg = -Infinity;
+    const report = compare(load('baseline.json'), target);
+    const row = report.details.find((d) => d.metric === 'APP CPU avg');
+    assert.ok(row);
+    assert.equal(row.status, 'skip');
+    assert.equal(row.reason, 'non_finite');
+  });
+
+  test('skip-detection order: missing_target wins over zero_baseline (both conditions true)', () => {
+    // baseline gc.total_pause_ms = 0 AND target gc.total_pause_ms = null
+    // The `baseVal == null || targetVal == null` check runs FIRST in
+    // compare(), so we expect missing_target, not zero_baseline.
+    const baseline = clone(load('baseline.json'));
+    baseline.metrics.gc.total_pause_ms = 0;
+    const target = clone(load('target.json'));
+    target.metrics.gc.total_pause_ms = null;
     const report = compare(baseline, target);
-    const cpu = report.details.find((d) => d.metric === 'APP CPU avg');
-    assert.ok(cpu, 'CURRENT behavior: Infinity still produces a row');
-    assert.equal(cpu.delta, Infinity);
-    assert.equal(cpu.status, 'FAIL');
+    const row = report.details.find((d) => d.metric === 'GC total pause');
+    assert.equal(row.status, 'skip');
+    assert.equal(row.reason, 'missing_target');
+  });
+});
+
+describe('compare() — exit-code semantics (skip rows do NOT count as failures)', () => {
+  test('skip-only run (no ok/warn/fail rows) → passed: true, failures: 0', () => {
+    // Construct a comparison where every pair is a skip: wall_clock zero baseline
+    // + APP CPU null target + GC NaN target. No rows should be ok/warn/fail.
+    const baseline = clone(load('baseline-with-zero.json')); // wall_clock_ms: 0
+    const target = clone(load('target.json'));
+    target.metrics.app_resources.cpu.avg = null;
+    target.metrics.gc.total_pause_ms = NaN;
+    const report = compare(baseline, target);
+    assert.equal(report.summary.passed, true);
+    assert.equal(report.summary.failures, 0);
+    assert.equal(report.summary.warnings, 0);
+    // Confirm at least one skip row exists.
+    assert.ok(report.details.some((d) => d.status === 'skip'));
+  });
+
+  test('mixed skip + ok rows → passed: true (skips do not pollute pass/fail)', () => {
+    const baseline = clone(load('baseline.json'));
+    baseline.metrics.gc.total_pause_ms = 0; // skip
+    const report = compare(baseline, load('target.json'));
+    assert.equal(report.summary.passed, true);
+    assert.equal(report.summary.failures, 0);
+    assert.ok(report.details.some((d) => d.status === 'skip'));
+    assert.ok(report.details.some((d) => d.status === 'ok'));
+  });
+
+  test('mixed skip + FAIL → passed: false (skip never cancels a real failure)', () => {
+    const baseline = clone(load('baseline.json'));
+    baseline.metrics.gc.total_pause_ms = 0; // skip
+    const target = clone(load('target.json'));
+    target.wall_clock_ms = baseline.wall_clock_ms * 1.40; // +40% FAIL
+    const report = compare(baseline, target);
+    assert.equal(report.summary.passed, false);
+    assert.ok(report.summary.failures >= 1);
+    assert.ok(report.details.some((d) => d.status === 'skip'));
+    assert.ok(report.details.some((d) => d.status === 'FAIL'));
   });
 });
 
@@ -243,9 +312,36 @@ describe('toMarkdown()', () => {
     assert.match(md, /\| wall_clock_ms \| .* \| ✅ \|/);
   });
 
-  // TODO commit 11/12: empty details should render "no metrics compared" instead of
-  // an empty table. Pinning current behavior for now.
-  test('empty details renders header + empty table (CURRENT behavior, polished in commit 11/12)', () => {
+  test('skip row renders with its reason text visible (zero_baseline)', () => {
+    const baseline = clone(load('baseline.json'));
+    baseline.metrics.gc.total_pause_ms = 0;
+    const md = toMarkdown(compare(baseline, load('target.json')));
+    assert.match(md, /\| GC total pause \|.*baseline was zero.*\|/);
+  });
+
+  test('skip row renders with its reason text visible (missing_target)', () => {
+    const md = toMarkdown(compare(load('baseline.json'), load('target-non-finite.json')));
+    assert.match(md, /\| APP CPU avg \|.*target metric missing.*\|/);
+  });
+
+  test('skip row renders with its reason text visible (non_finite)', () => {
+    const target = clone(load('target.json'));
+    target.metrics.app_resources.cpu.avg = Infinity;
+    const md = toMarkdown(compare(load('baseline.json'), target));
+    assert.match(md, /\| APP CPU avg \|.*target value non-finite.*\|/);
+  });
+
+  test('skip row does NOT count toward the "regression(s) detected" footer', () => {
+    // Skip-only run → no failures → no footer.
+    const baseline = clone(load('baseline-with-zero.json'));
+    const target = clone(load('target.json'));
+    const md = toMarkdown(compare(baseline, target));
+    assert.doesNotMatch(md, /regression\(s\) detected/);
+  });
+
+  test('empty details renders header + empty table (still pinned — commit 12 polish)', () => {
+    // Commit 12 may upgrade this to an explicit "no metrics compared" line.
+    // For now we still tolerate the bare table.
     const md = toMarkdown({
       summary: { baseline_tag: 'a', target_tag: 'b', scenario: 'empty', passed: true, warnings: 0, failures: 0 },
       details: [],
