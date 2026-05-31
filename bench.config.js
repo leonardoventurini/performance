@@ -23,9 +23,6 @@ export default {
   // Port for the Meteor app
   appPort: 3000,
 
-  // Collector interval in ms
-  collectorInterval: 1000,
-
   // Apps available for benchmarking
   apps: {
     'tasks-3.x': {

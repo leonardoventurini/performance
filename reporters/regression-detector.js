@@ -1,18 +1,10 @@
-/**
- * Regression Detector
- *
- * Compares two benchmark result files and flags regressions
- * based on configured thresholds.
- */
+// Compares two benchmark result files and flags regressions against the
+// thresholds configured in bench.config.js. Skip rows (zero baseline, missing
+// target, non-finite target) are emitted explicitly instead of silently
+// dropped; the exit-code semantics only count `fail` rows toward `failures`.
 
 import config from '../bench.config.js';
 
-/**
- * Compare two result objects and return a report.
- * @param {Object} baseline - Baseline result (JSON parsed)
- * @param {Object} target - Target result (JSON parsed)
- * @returns {Object} { summary, details[], passed, warnings, failures }
- */
 function compare(baseline, target) {
   const details = [];
   let warnings = 0;
@@ -161,11 +153,6 @@ function compare(baseline, target) {
   };
 }
 
-/**
- * Format report as markdown table.
- * @param {Object} report - From compare()
- * @returns {string} Markdown string
- */
 const SKIP_REASON_TEXT = {
   zero_baseline: 'baseline was zero',
   missing_target: 'target metric missing',
@@ -178,6 +165,12 @@ function toMarkdown(report) {
 
   let md = `## ${icon} Benchmark: ${summary.scenario}\n\n`;
   md += `**${summary.baseline_tag}** → **${summary.target_tag}**\n\n`;
+
+  if (details.length === 0) {
+    md += `_No metrics compared._\n`;
+    return md;
+  }
+
   md += `| Metric | Baseline | Target | Delta | Status |\n`;
   md += `|--------|----------|--------|-------|--------|\n`;
 

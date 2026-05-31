@@ -339,15 +339,14 @@ describe('toMarkdown()', () => {
     assert.doesNotMatch(md, /regression\(s\) detected/);
   });
 
-  test('empty details renders header + empty table (still pinned — commit 12 polish)', () => {
-    // Commit 12 may upgrade this to an explicit "no metrics compared" line.
-    // For now we still tolerate the bare table.
+  test('empty details renders explicit "No metrics compared." line, no table header', () => {
     const md = toMarkdown({
       summary: { baseline_tag: 'a', target_tag: 'b', scenario: 'empty', passed: true, warnings: 0, failures: 0 },
       details: [],
     });
     assert.match(md, /^## ✅ Benchmark: empty/);
-    assert.match(md, /\| Metric \| Baseline \| Target \| Delta \| Status \|/);
+    assert.match(md, /No metrics compared\./);
+    assert.doesNotMatch(md, /\| Metric \| Baseline \| Target \| Delta \| Status \|/);
     assert.doesNotMatch(md, /regression\(s\) detected/);
   });
 });

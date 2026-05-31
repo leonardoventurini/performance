@@ -39,7 +39,7 @@ function pickDriver(scenarioName, scenario) {
 export async function runBenchmark({ values, config }) {
   const source = resolveMeteorSource({ flags: values, env: process.env, config });
   const extraEnv = splitEnvArgs(values.env);
-  const scenarioName = values.scenario || 'reactive-crud';
+  const scenarioName = values.scenario || 'reactive-light';
   const appName = values.app || config.defaultApp;
   const tag = values.tag || source.version;
   const outputPath = values.output || path.join(config.results.dir, `${scenarioName}-${tag}-${Date.now()}.json`);

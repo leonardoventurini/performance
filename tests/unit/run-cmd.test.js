@@ -106,15 +106,18 @@ describe('runBenchmark — argv validation', () => {
     assert.match(errText, /Available apps: tasks-3\.x/);
   });
 
-  test('defaults: --scenario reactive-crud (would be unknown in our fake config) → exits with list', async () => {
-    // The hard-coded default in runBenchmark is "reactive-crud" — not in our test
-    // config — which exercises the no-scenario-provided default + unknown-scenario
-    // path together. Commit 12 will change the default to reactive-light.
-    await assert.rejects(
-      () => runBenchmark({ values: {}, config: makeConfig() }),
-      (err) => err instanceof ExitError && err.code === 1
-    );
-    assert.match(errors.join('\n'), /Unknown scenario: reactive-crud/);
+  test('defaults: no --scenario → "reactive-light" (resolves + dispatches the artillery driver)', async () => {
+    // Commit 12 changed the default from reactive-crud (not in any user config
+    // by default) to reactive-light (always present, matches README). We assert
+    // the default name flows through to the dispatched driver rather than
+    // bouncing off an "unknown scenario" check.
+    let dispatched = null;
+    mock.method(drivers, 'runArtilleryDriver', async (args) => {
+      dispatched = args;
+      return fakeDriverResult();
+    });
+    await runBenchmark({ values: {}, config: makeConfig() });
+    assert.equal(dispatched.scenarioName, 'reactive-light');
   });
 });
 

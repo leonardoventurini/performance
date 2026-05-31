@@ -62,7 +62,11 @@ export async function runScriptDriver({ scenario, scenarioName, app, appName, so
   let scriptMetrics = {};
   const jsonLine = scriptOutput.trim().split('\n').pop();
   if (jsonLine) {
-    try { scriptMetrics = JSON.parse(jsonLine); } catch {}
+    try {
+      scriptMetrics = JSON.parse(jsonLine);
+    } catch (err) {
+      console.error(`Could not parse script metrics JSON from last stdout line: ${err.message}. Last line was: ${jsonLine.slice(0, 200)}`);
+    }
   }
 
   const collectorResults = await stopCollectors(collectors);

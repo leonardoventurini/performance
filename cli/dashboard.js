@@ -41,7 +41,7 @@ export async function runPush({ values, config }) {
     const docId = await ddp.call('runs.insert', apiKey, result);
     console.log(`Pushed successfully. Document ID: ${docId}`);
   } catch (err) {
-    console.error('Push failed:', err.message || err);
+    console.error(`Push failed: ${err.message || err}. Check the dashboard URL (${url}) is reachable and BENCH_API_KEY is valid.`);
     process.exit(1);
   } finally {
     ddp.disconnect();
@@ -67,7 +67,7 @@ export async function runBaseline({ values, config }) {
     await ddp.call('baselines.set', apiKey, scenario, runId);
     console.log('Baseline set successfully.');
   } catch (err) {
-    console.error('Failed:', err.message || err);
+    console.error(`Setting baseline failed: ${err.message || err}. Check the dashboard URL (${url}) is reachable and BENCH_API_KEY is valid.`);
     process.exit(1);
   } finally {
     ddp.disconnect();

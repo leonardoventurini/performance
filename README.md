@@ -83,6 +83,7 @@ When neither is provided, the harness falls back to the `meteor` binary on `PATH
 | `bench.js run` | Run a benchmark scenario |
 | `bench.js compare` | Compare two result files |
 | `bench.js push` | Push results to the Galaxy dashboard |
+| `bench.js baseline` | Mark a previously-pushed run as the baseline for a scenario |
 | `bench.js list` | List available scenarios and apps |
 
 ### `run` options
@@ -93,6 +94,21 @@ When neither is provided, the harness falls back to the `meteor` binary on `PATH
 | `--tag` | Label for this run (branch name, version) | required |
 | `--output` | Output JSON file path | `results/<scenario>-<tag>-<timestamp>.json` |
 | `--app` | App directory to benchmark | `tasks-3.x` |
+
+### `baseline` options
+
+Pin an already-pushed run as the baseline used by the dashboard's regression comparisons.
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--scenario` | Scenario whose baseline to set | required |
+| `--run-id` | Document ID of the run (printed by `bench.js push`) | required |
+| `--url` | Dashboard WebSocket URL | `bench.config.js` `dashboardUrl` |
+| `--key` | Dashboard API key | `BENCH_API_KEY` env var |
+
+```bash
+node bench.js baseline --scenario reactive-light --run-id abc123
+```
 
 ## Scenarios
 
@@ -147,31 +163,53 @@ Source: `apps/dashboard/`
 ## Project structure
 
 ```
-bench.js                  CLI entry point
-bench.config.js           Thresholds, scenarios, config
+bench.js                  CLI entry: parseArgs + command switch + help
+bench.config.js           Apps, scenarios, regression thresholds, dashboard
+meteor-source.js          Resolves --meteor-version / --meteor-checkout / system
+cli/
+  list.js                 bench.js list
+  run.js                  bench.js run (driver dispatch + --env splitter)
+  compare.js              bench.js compare
+  dashboard.js            bench.js push + baseline (DDP)
+drivers/
+  artillery.js            artillery-playwright + artillery scenarios
+  script.js               node-script scenarios (e.g. fanout)
+  cold-start.js           N-run median startup
+  bundle-size.js          meteor build + fs-based size measurement
+runner/
+  meteor-process.js       reset/start/findPid/stop the Meteor app
+  wait-for-app.js         fetch + node:timers/promises poll loop
+  collectors.js           spawn process/gc monitors, drain, parse
+  _io.js                  mockable facade over node:* stdlib + DDP/ws
 collectors/
   process-monitor.js      CPU/RAM collector (pidusage)
-  gc-monitor.js           GC collector (perf_hooks)
+  gc-monitor.cjs          GC collector (perf_hooks; CJS — --require only)
+  event-loop-monitor.js   Event-loop delay collector
 reporters/
-  json-reporter.js        JSON output
-  regression-detector.js  Comparison + regression detection
+  json-reporter.js        buildResult + writeResult + appendToHistory
+  regression-detector.js  compare + toMarkdown
 artillery/
   reactive-stress.yml         240 VUs (heavy)
   reactive-stress-light.yml   30 VUs (light)
   non-reactive-stress.yml     240 VUs, methods only
 apps/
-  tasks-3.x/              Meteor 3 React benchmark app
+  tasks-3.x/              Meteor 3 React benchmark app (+ packages/tasks-common)
   dashboard/              Blaze dashboard (Galaxy)
+tests/
+  unit/                   node:test unit suite (npm test, <5s, no Meteor)
+  reactive.spec.js        Playwright integration
+  non-reactive.spec.js    Playwright integration
 .github/workflows/
   benchmark-pr.yml        PR benchmark workflow
   benchmark-nightly.yml   Nightly benchmark workflow
+  benchmark-transport.yml sockjs vs uws transport matrix
 ```
 
 ## Requirements
 
-- Node.js >= 20
+- Node.js >= 24
 - Chromium (installed via Playwright)
-- A Meteor checkout (for comparing branches)
+- Either a Meteor checkout (`--meteor-checkout`) or a pinned Meteor release (`--meteor-version`); falls back to the `meteor` binary on `PATH`
 
 ## Legacy
 

@@ -156,7 +156,7 @@ describe('runPush', () => {
       () => runPush({ values: { result: '/x', url: 'ws://x' }, config: {} }),
       (err) => err instanceof ExitError && err.code === 1
     );
-    assert.ok(errors.some((e) => e.includes('Push failed:') && e.includes('boom auth fail')));
+    assert.ok(errors.some((e) => e.includes('Push failed:') && e.includes('boom auth fail') && e.includes('ws://x')));
     // finally-block runs even on error → disconnect was called.
     assert.ok(FakeDDP.wasDisconnected());
   });
@@ -217,7 +217,7 @@ describe('runBaseline', () => {
       }),
       (err) => err instanceof ExitError && err.code === 1
     );
-    assert.ok(errors.some((e) => e.includes('Failed:') && e.includes('network down')));
+    assert.ok(errors.some((e) => e.includes('Setting baseline failed:') && e.includes('network down') && e.includes('ws://x')));
     assert.ok(FakeDDP.wasDisconnected());
   });
 });

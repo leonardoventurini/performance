@@ -62,12 +62,14 @@ describe('buildResult — top-level shape', () => {
     assert.deepEqual(input, { version: 'devel', sha: 'release:3.1.2' });
   });
 
-  test('omitted meteor defaults to {version: "unknown", sha: "unknown"}', () => {
-    const result = buildResult({
-      scenario: 's', app: 'a', tag: 't',
-      collectorResults: [], wallClockMs: 0,
-    });
-    assert.deepEqual(result.meteor, { version: 'unknown', sha: 'unknown' });
+  test('throws if meteor info is omitted (no silent "unknown" fallback)', () => {
+    assert.throws(
+      () => buildResult({
+        scenario: 's', app: 'a', tag: 't',
+        collectorResults: [], wallClockMs: 0,
+      }),
+      /meteor/,
+    );
   });
 });
 
