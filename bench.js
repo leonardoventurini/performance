@@ -16,10 +16,9 @@
 import { parseArgs } from 'node:util';
 import config from './bench.config.js';
 import { resolveMeteorSource } from './meteor-source.js';
-import { runList } from './cli/list.js';
-import { runBenchmark } from './cli/run.js';
-import { runCompare } from './cli/compare.js';
-import { runPush, runBaseline } from './cli/dashboard.js';
+import * as cli from './cli/index.js';
+
+const { runList, runBenchmark, runCompare, runPush, runBaseline } = cli;
 
 const OPTIONS = {
   scenario: { type: 'string' },
