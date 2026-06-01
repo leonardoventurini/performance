@@ -41,20 +41,31 @@ export async function runArtilleryDriver({ scenario, scenarioName, app, appName,
   const collectors = startCollectors({ appName, gcOutputPath });
 
   // Override the YAML's hard-coded target so artillery hits whichever
-  // port the harness picked via BENCH_PORT (defaults to 3000). Without
-  // this, a BENCH_PORT=3100 run starts Meteor on 3100 but artillery
-  // pummels 3000 instead.
+  // port the harness picked via BENCH_PORT (defaults to 3000). Also
+  // export REMOTE_URL with the same value so artillery processor scripts
+  // (tests/ddp-helpers.js) that open their own DDP connection in
+  // beforeScenario hit the same port — without it they default to
+  // http://localhost:3000 hard-coded and hang on a closed/wrong port.
+  // The 5-minute timeout caps the whole artillery exec: a hung VU
+  // (DDP connect that never resolves, etc.) used to lock the harness
+  // forever; now we abort and surface partial metrics instead.
   const targetUrl = `http://localhost:${config.appPort}`;
+  const ARTILLERY_TIMEOUT_MS = 5 * 60 * 1000;
   console.log(`\nRunning Artillery: ${scenario.config} (--target ${targetUrl})...`);
   const artilleryStart = Date.now();
   try {
     io.execFileSync('npx', ['artillery', 'run', '--target', targetUrl, path.resolve(HERE, '..', scenario.config)], {
       cwd: path.resolve(HERE, '..'),
       stdio: 'inherit',
-      env: { ...process.env },
+      env: { ...process.env, REMOTE_URL: targetUrl },
+      timeout: ARTILLERY_TIMEOUT_MS,
     });
   } catch (err) {
-    console.error('Artillery failed:', err.message);
+    if (err.signal === 'SIGTERM') {
+      console.error(`Artillery exceeded ${ARTILLERY_TIMEOUT_MS / 1000}s timeout — aborted. Partial collector data preserved.`);
+    } else {
+      console.error('Artillery failed:', err.message);
+    }
   }
   const wallClockMs = Date.now() - artilleryStart;
 
