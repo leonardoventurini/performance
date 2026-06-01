@@ -40,10 +40,15 @@ export async function runArtilleryDriver({ scenario, scenarioName, app, appName,
 
   const collectors = startCollectors({ appName, gcOutputPath });
 
-  console.log(`\nRunning Artillery: ${scenario.config}...`);
+  // Override the YAML's hard-coded target so artillery hits whichever
+  // port the harness picked via BENCH_PORT (defaults to 3000). Without
+  // this, a BENCH_PORT=3100 run starts Meteor on 3100 but artillery
+  // pummels 3000 instead.
+  const targetUrl = `http://localhost:${config.appPort}`;
+  console.log(`\nRunning Artillery: ${scenario.config} (--target ${targetUrl})...`);
   const artilleryStart = Date.now();
   try {
-    io.execFileSync('npx', ['artillery', 'run', path.resolve(HERE, '..', scenario.config)], {
+    io.execFileSync('npx', ['artillery', 'run', '--target', targetUrl, path.resolve(HERE, '..', scenario.config)], {
       cwd: path.resolve(HERE, '..'),
       stdio: 'inherit',
       env: { ...process.env },
