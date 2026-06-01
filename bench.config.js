@@ -20,8 +20,9 @@ export default {
   // Default app to benchmark
   defaultApp: 'tasks-3.x',
 
-  // Port for the Meteor app
-  appPort: 3000,
+  // Port for the Meteor app. BENCH_PORT env var overrides for sharing the
+  // box with another local dev server on 3000.
+  appPort: parseInt(process.env.BENCH_PORT, 10) || 3000,
 
   // Apps available for benchmarking
   apps: {
