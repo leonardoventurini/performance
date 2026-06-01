@@ -14,6 +14,36 @@ const load = (name) => JSON.parse(fs.readFileSync(path.join(FIXTURES, name), 'ut
 
 const METEOR = { version: 'release/3.5', sha: 'abc1234' };
 
+describe('buildResult — runtime field (commit 16 addition)', () => {
+  test('defaults runtime to empty object when caller omits it (e.g. bundle-size driver)', () => {
+    const result = buildResult({
+      scenario: 'bundle-size', app: 'tasks-3.x', tag: 't',
+      meteor: METEOR, collectorResults: [], wallClockMs: 0,
+    });
+    assert.deepEqual(result.runtime, {});
+  });
+
+  test('passes runtime through verbatim when caller provides it (artillery/script/cold-start drivers)', () => {
+    const runtime = { observer_driver: 'oplog', transport: 'uws' };
+    const result = buildResult({
+      scenario: 'reactive-light', app: 'tasks-3.x', tag: 't',
+      meteor: METEOR, runtime, collectorResults: [], wallClockMs: 0,
+    });
+    assert.deepEqual(result.runtime, runtime);
+  });
+
+  test('runtime sits at top level (peer of meteor, not nested under it)', () => {
+    const result = buildResult({
+      scenario: 's', app: 'a', tag: 't',
+      meteor: METEOR, runtime: { observer_driver: 'changeStreams', transport: 'sockjs' },
+      collectorResults: [], wallClockMs: 0,
+    });
+    assert.equal(result.runtime.observer_driver, 'changeStreams');
+    assert.equal(result.meteor.sha, METEOR.sha);
+    assert.equal(result.meteor.runtime, undefined, 'runtime is NOT nested under meteor');
+  });
+});
+
 describe('buildResult — top-level shape', () => {
   test('returns dashboard-contract fields with no collectors', () => {
     const before = Date.now();
@@ -45,7 +75,7 @@ describe('buildResult — top-level shape', () => {
       scenario: 's', app: 'a', tag: 't',
       meteor: METEOR, collectorResults: [], wallClockMs: 0,
     });
-    for (const key of ['timestamp', 'tag', 'meteor', 'scenario', 'app', 'wall_clock_ms', 'metrics']) {
+    for (const key of ['timestamp', 'tag', 'meteor', 'runtime', 'scenario', 'app', 'wall_clock_ms', 'metrics']) {
       assert.ok(key in result, `missing top-level key: ${key}`);
     }
     assert.ok('version' in result.meteor && 'sha' in result.meteor);

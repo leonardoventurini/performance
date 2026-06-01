@@ -13,14 +13,16 @@ const COLD_START_GRACE_MS = 2000;
 
 export async function runColdStartDriver({ scenarioName, app, appName, source, env, tag, config, runs = 3 }) {
   const startupTimes = [];
+  let lastGetRuntimeInfo = () => ({});
   console.log(`\nCold-start benchmark: ${runs} runs\n`);
 
   for (let i = 0; i < runs; i++) {
     console.log(`--- Run ${i + 1}/${runs} ---`);
     resetMeteorApp(source, app.path);
-    const meteorProc = startMeteorApp({
+    const { proc: meteorProc, getRuntimeInfo } = startMeteorApp({
       source, appPath: app.path, port: config.appPort, env,
     });
+    lastGetRuntimeInfo = getRuntimeInfo;
     const startTime = Date.now();
     await waitForApp(config.appPort);
     const startupMs = Date.now() - startTime;
@@ -41,6 +43,7 @@ export async function runColdStartDriver({ scenarioName, app, appName, source, e
     app: appName,
     tag,
     meteor: { version: source.version, sha: source.sha },
+    runtime: lastGetRuntimeInfo(),
     collectorResults: [{
       metric: 'cold_start',
       startup_median_ms: median,

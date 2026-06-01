@@ -6,6 +6,7 @@
 
 import path from 'node:path';
 import { io } from './_io.js';
+import { createRuntimeInfoExtractor } from './runtime-info-extractor.js';
 
 function meteorArgv(source, subcommandArgs) {
   return source.releaseArg ? [source.releaseArg, ...subcommandArgs] : subcommandArgs;
@@ -26,6 +27,9 @@ export function resetMeteorApp(source, appPath) {
   });
 }
 
+// Returns `{ proc, getRuntimeInfo }`. The returned ChildProcess is the same
+// shape callers used to get; getRuntimeInfo() returns the latest captured
+// `[runtime-info]` values (observer_driver, transport) the app printed.
 export function startMeteorApp({ source, appPath, port, env = {}, gcMonitorPath, gcOutputPath }) {
   const spawnEnv = { ...process.env, ...env, METEOR_NO_DEPRECATION: 'true' };
   if (gcMonitorPath) {
@@ -37,9 +41,11 @@ export function startMeteorApp({ source, appPath, port, env = {}, gcMonitorPath,
     env: spawnEnv,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
-  proc.stdout.on('data', (d) => process.stderr.write(d));
-  proc.stderr.on('data', (d) => process.stderr.write(d));
-  return proc;
+  const runtime = createRuntimeInfoExtractor();
+  const tee = (d) => { runtime.feed(d); process.stderr.write(d); };
+  proc.stdout.on('data', tee);
+  proc.stderr.on('data', tee);
+  return { proc, getRuntimeInfo: runtime.get };
 }
 
 // pgrep exits 1 when there's no match. That's an "expected absence" — every

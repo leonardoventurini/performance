@@ -5,7 +5,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-function buildResult({ scenario, app, tag, meteor, collectorResults, wallClockMs }) {
+function buildResult({ scenario, app, tag, meteor, runtime = {}, collectorResults, wallClockMs }) {
   if (!meteor || typeof meteor.version !== 'string' || typeof meteor.sha !== 'string') {
     throw new Error(
       'buildResult requires meteor: { version, sha }. ' +
@@ -16,6 +16,7 @@ function buildResult({ scenario, app, tag, meteor, collectorResults, wallClockMs
     timestamp: new Date().toISOString(),
     tag: tag || meteor.version,
     meteor,
+    runtime,
     scenario,
     app,
     wall_clock_ms: wallClockMs,

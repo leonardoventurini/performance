@@ -29,7 +29,7 @@ export async function runScriptDriver({ scenario, scenarioName, app, appName, so
   const { gcMonitorPath, gcOutputPath } = prepareGcOutput(tag);
 
   console.log('Starting Meteor app...');
-  const meteorProc = startMeteorApp({
+  const { proc: meteorProc, getRuntimeInfo } = startMeteorApp({
     source, appPath: app.path, port: config.appPort, env, gcMonitorPath, gcOutputPath,
   });
 
@@ -83,6 +83,7 @@ export async function runScriptDriver({ scenario, scenarioName, app, appName, so
     app: appName,
     tag,
     meteor: { version: source.version, sha: source.sha },
+    runtime: getRuntimeInfo(),
     collectorResults,
     wallClockMs,
   });

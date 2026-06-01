@@ -29,7 +29,7 @@ export async function runArtilleryDriver({ scenario, scenarioName, app, appName,
   console.log(`GC output: ${gcOutputPath}`);
 
   console.log('Starting Meteor app (with GC monitor)...');
-  const meteorProc = startMeteorApp({
+  const { proc: meteorProc, getRuntimeInfo } = startMeteorApp({
     source, appPath: app.path, port: config.appPort, env, gcMonitorPath, gcOutputPath,
   });
 
@@ -62,6 +62,7 @@ export async function runArtilleryDriver({ scenario, scenarioName, app, appName,
     app: appName,
     tag,
     meteor: { version: source.version, sha: source.sha },
+    runtime: getRuntimeInfo(),
     collectorResults,
     wallClockMs,
   });

@@ -78,11 +78,20 @@ describe('resetMeteorApp', () => {
 });
 
 describe('startMeteorApp', () => {
-  function fakeProc() {
+  // Tiny event-emitter that records the `data` handler so tests can simulate
+  // the spawned process emitting stderr/stdout chunks.
+  function fakeStream() {
+    const handlers = [];
+    return {
+      on: (evt, fn) => { if (evt === 'data') handlers.push(fn); },
+      emit: (chunk) => handlers.forEach((fn) => fn(chunk)),
+    };
+  }
+  function fakeProc({ stdout, stderr } = {}) {
     return {
       pid: 12345,
-      stdout: { on: () => {} },
-      stderr: { on: () => {} },
+      stdout: stdout || { on: () => {} },
+      stderr: stderr || { on: () => {} },
       kill: () => {},
     };
   }
@@ -93,7 +102,7 @@ describe('startMeteorApp', () => {
       captured = { cmd, args, opts };
       return fakeProc();
     });
-    const proc = startMeteorApp({
+    const { proc, getRuntimeInfo } = startMeteorApp({
       source: { mode: 'checkout', meteorCmd: '/path/to/meteor', releaseArg: null },
       appPath: '/my/app',
       port: 3000,
@@ -103,6 +112,32 @@ describe('startMeteorApp', () => {
     assert.equal(captured.opts.cwd, '/my/app');
     assert.equal(captured.opts.env.METEOR_NO_DEPRECATION, 'true');
     assert.equal(proc.pid, 12345);
+    assert.equal(typeof getRuntimeInfo, 'function');
+    assert.deepEqual(getRuntimeInfo(), {});
+  });
+
+  test('getRuntimeInfo captures [runtime-info] lines emitted on stderr', () => {
+    const stderr = fakeStream();
+    mock.method(io, 'spawn', () => fakeProc({ stderr }));
+    const { getRuntimeInfo } = startMeteorApp({
+      source: { mode: 'system', meteorCmd: 'meteor', releaseArg: null },
+      appPath: '/app', port: 3000,
+    });
+    stderr.emit('=> Meteor server running\n');
+    stderr.emit('[runtime-info] observer_driver=oplog\n');
+    stderr.emit('[runtime-info] transport=uws\n');
+    assert.deepEqual(getRuntimeInfo(), { observer_driver: 'oplog', transport: 'uws' });
+  });
+
+  test('getRuntimeInfo also captures lines emitted on stdout', () => {
+    const stdout = fakeStream();
+    mock.method(io, 'spawn', () => fakeProc({ stdout }));
+    const { getRuntimeInfo } = startMeteorApp({
+      source: { mode: 'system', meteorCmd: 'meteor', releaseArg: null },
+      appPath: '/app', port: 3000,
+    });
+    stdout.emit('[runtime-info] observer_driver=changeStreams\n');
+    assert.deepEqual(getRuntimeInfo(), { observer_driver: 'changeStreams' });
   });
 
   test('prepends --release arg when source is release-mode', () => {
