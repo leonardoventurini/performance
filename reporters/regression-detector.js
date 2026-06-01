@@ -1,7 +1,22 @@
 // Compares two benchmark result files and flags regressions against the
-// thresholds configured in bench.config.js. Skip rows (zero baseline, missing
-// target, non-finite target) are emitted explicitly instead of silently
-// dropped; the exit-code semantics only count `fail` rows toward `failures`.
+// thresholds configured in bench.config.js. Two exports:
+//
+//   compare(baseline, target) → { summary, details }
+//     - Flattens the nested collector results (cpu, memory, gc, event-loop)
+//       into a flat list of metric pairs keyed by a threshold name.
+//     - For each pair: computes delta%, looks up the threshold in
+//       bench.config.js (warn / fail bands), tags ok/WARN/FAIL.
+//     - Emits explicit skip rows for unsafe pairs (missing on either side,
+//       zero baseline, non-finite target) rather than silently dropping
+//       them — the old silent-drop hid real collector-config drift.
+//     - summary.passed === (failures === 0). Skip and WARN rows do NOT
+//       fail the comparison so a CI bench.js compare exit code only goes
+//       non-zero on threshold-crossing regressions.
+//
+//   toMarkdown(report) → string
+//     - Renders the report as a markdown table with status icons. Skip
+//       rows render `⏭ (<reason>)` so the reader can see which metrics
+//       weren't comparable and why.
 
 import config from '../bench.config.js';
 
@@ -10,11 +25,18 @@ function compare(baseline, target) {
   let warnings = 0;
   let failures = 0;
 
+  // Seed the comparison list with wall_clock — it lives at the top level of
+  // the result, not under metrics{}, so it's special-cased before we walk
+  // collector outputs below.
   const metricPairs = [
     { key: 'wall_clock_ms', baseVal: baseline.wall_clock_ms, targetVal: target.wall_clock_ms },
   ];
 
-  // Flatten metrics from collectors
+  // Each collector contributes one entry under target.metrics keyed by its
+  // self-declared `metric` field (app_resources / db_resources / gc /
+  // event_loop_delay). Walk the target's metrics and pull the matching
+  // baseline; if baseline doesn't have that key we skip — typically means
+  // the collector was disabled in the older run, not interesting.
   for (const [metricName, metricData] of Object.entries(target.metrics || {})) {
     const baseMetric = (baseline.metrics || {})[metricName];
     if (!baseMetric) continue;

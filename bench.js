@@ -1,7 +1,13 @@
 #!/usr/bin/env node
 
 /**
- * Meteor Benchmark Framework — CLI
+ * Meteor Benchmark Framework — CLI entry point.
+ *
+ * This file is intentionally thin: parse argv, dispatch to one cli/ handler,
+ * exit. All actual work (validating inputs, spawning Meteor, running load,
+ * collecting metrics, writing results) lives behind those handlers. Adding a
+ * new subcommand means: re-export it from cli/index.js, destructure here,
+ * add a case.
  *
  * Usage:
  *   node bench.js list
@@ -20,6 +26,10 @@ import * as cli from './cli/index.js';
 
 const { runList, runBenchmark, runCompare, runPush, runBaseline } = cli;
 
+// One shared schema for every subcommand — parseArgs is the single source of
+// truth for which flags exist. `multiple: true` for --env lets it be passed
+// repeatedly (`--env A=1 --env B=2`). `strict: false` makes unknown flags
+// non-fatal so future subcommands can add flags without breaking old shells.
 const OPTIONS = {
   scenario: { type: 'string' },
   app: { type: 'string' },
@@ -36,6 +46,8 @@ const OPTIONS = {
   url: { type: 'string' },
   key: { type: 'string' },
   'run-id': { type: 'string' },
+  // runId is a kebab-vs-camel alias that some workflows passed pre-refactor;
+  // kept for backwards-compat with already-deployed dispatchers.
   runId: { type: 'string' },
 };
 
@@ -45,6 +57,7 @@ const { values, positionals } = parseArgs({
   allowPositionals: true,
   strict: false,
 });
+// The first positional is the subcommand name; everything else is flags.
 const command = positionals[0];
 
 function printHelp() {
@@ -69,8 +82,13 @@ Meteor source:
 `);
 }
 
+// Sync handlers (list, compare) run inline; async handlers (run, push, baseline)
+// get a .catch so an unhandled rejection still surfaces as a non-zero exit
+// code instead of a stack trace and exit 0. Unknown command → help, no error.
 switch (command) {
   case 'list': {
+    // list is the only sync command that needs the resolved source up front
+    // (to print "Meteor source: …" in its header). Others resolve internally.
     const source = resolveMeteorSource({ flags: values, env: process.env, config });
     runList({ config, source });
     break;

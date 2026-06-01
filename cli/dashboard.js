@@ -1,19 +1,36 @@
-// `bench.js push` and `bench.js baseline` — both connect to the dashboard
-// over DDP, call one method, disconnect. Shared connection helper at the top.
+// `bench.js push` and `bench.js baseline` — both talk to the Galaxy dashboard
+// over DDP (the same protocol Meteor clients use, no REST):
+//
+//   1. Resolve the dashboard URL + API key from flag > env > config > default
+//   2. Open a SimpleDDP connection (uses io.ws under the hood so tests can mock)
+//   3. Call ONE method (runs.insert or baselines.set)
+//   4. Disconnect in a finally — even on error, so the process can exit cleanly
+//
+// SimpleDDP+ws is on runner/_io.js so the same mockable boundary works here
+// as in runner/. The shared `connect()` helper exists so push and baseline
+// stay symmetric — adding a third dashboard command means one more handler,
+// not duplicated connection code.
 
 import { io } from '../runner/_io.js';
 
+// Hard-coded fallbacks AT THE BOTTOM of the resolve chain — they exist so a
+// fresh clone of the repo can run `bench.js push` against a local dashboard
+// without setup. Production callers always override via env (BENCH_API_KEY).
 const DEFAULT_URL = 'ws://localhost:4000/websocket';
 const DEFAULT_KEY = 'dev-bench-key-change-in-prod';
 
+// Resolution precedence: explicit flag > env var > bench.config.js > default.
+// Keep this exact order — workflows pass --url/--key explicitly, dev shells
+// usually export BENCH_API_KEY, and the config is the team-shared default.
 function resolveUrl(values, config) {
   return values.url || config.dashboardUrl || DEFAULT_URL;
 }
-
 function resolveKey(values, config) {
   return values.key || process.env.BENCH_API_KEY || config.dashboardApiKey || DEFAULT_KEY;
 }
 
+// reconnectInterval kept low (5s) since these are short-lived CLI sessions —
+// a long retry doesn't help if the user is staring at the terminal waiting.
 function connect(url) {
   return new io.SimpleDDP({
     endpoint: url,

@@ -1,5 +1,12 @@
-// Measure Meteor app cold-start time across N runs, take the median.
-// Each run: reset, start, waitForApp, stop. Caller persists the result.
+// `cold-start` driver — measures how long Meteor takes to boot from a clean
+// state. Each iteration: reset (wipe DB + cache), start, time-until-2xx, stop.
+// We take N samples and report the median (not the mean) so one outlier
+// (e.g. macOS deciding to index something mid-boot) doesn't pull the number.
+//
+// `lastGetRuntimeInfo` records the runtime-info closure from the FINAL
+// iteration so the returned `runtime` field reflects what was used. All
+// iterations use the same config so any iteration would do, but the last is
+// the simplest to capture without an extra variable per loop.
 
 import {
   resetMeteorApp,

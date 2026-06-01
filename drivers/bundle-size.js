@@ -1,6 +1,17 @@
-// `meteor build`, then measure client + server + total bundle sizes via
-// fs.statSync recursion (no `du -sk` shell-out). Cleanup via fs.rmSync (no
-// `rm -rf` shell-out). Caller persists the result.
+// `bundle-size` driver — produces a production build, measures the three
+// numbers that matter, throws the build away. Doesn't spawn a running
+// Meteor app, so no collectors, no DDP, no runtime info to capture.
+//
+// Why we measure CLIENT JS by summing top-level .js files only (instead of
+// walking the whole webBrowser tree): Meteor's build emits one or more
+// numbered bundle files at the top of programs/web.browser/, plus a
+// `packages/` subdir of internal package code that the browser doesn't
+// download as part of the initial payload. The top-level .js files ARE
+// the user-facing download size, which is the number a developer cares
+// about when chasing bloat.
+//
+// SERVER and TOTAL are honest dirSizeBytes recursive sums — those are
+// what gets shipped to the cluster regardless of bundling strategy.
 
 import path from 'node:path';
 import { io } from '../runner/_io.js';
