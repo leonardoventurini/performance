@@ -15,7 +15,7 @@
 // Per the approved exception in REFACTOR_SPEC.md hard-constraint #4, this is
 // the single io facade for the whole codebase — extend it (don't fork it)
 // when a new subsystem needs a mock seam. SimpleDDP and ws live here for the
-// same reason: cli/dashboard.js's new SimpleDDP(...) needs a mockable factory
+// same reason: cli/push.js's new SimpleDDP(...) needs a mockable factory
 // and a separate facade would just be ceremony.
 
 import { execSync as _execSync, execFileSync as _execFileSync, spawn as _spawn } from 'node:child_process';

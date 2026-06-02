@@ -1,4 +1,4 @@
-// runPush / runBaseline in cli/dashboard.js. DDP and ws live on the io facade
+// runPush / runBaseline in cli/push.js. DDP and ws live on the io facade
 // (runner/_io.js) — same mockable seam as fs/spawn/sleep. Tests stub:
 //   - io.SimpleDDP with a fake constructor returning a fake-ddp instance
 //   - io.readFileSync for the result file
@@ -7,7 +7,7 @@
 import { test, describe, beforeEach, afterEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { io } from '../../runner/_io.js';
-import { runPush, runBaseline } from '../../cli/dashboard.js';
+import { runPush, runBaseline } from '../../cli/push.js';
 
 class ExitError extends Error {
   constructor(code) { super(`process.exit(${code})`); this.code = code; }
