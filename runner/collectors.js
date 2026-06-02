@@ -16,6 +16,7 @@ import { summarize } from '../lib/percentiles.js';
 const HERE = import.meta.dirname;
 const PROCESS_MONITOR = path.resolve(HERE, '..', 'collectors', 'process-monitor.js');
 const GC_MONITOR = path.resolve(HERE, '..', 'collectors', 'gc-monitor.cjs');
+const MONGO_OPS_MONITOR = path.resolve(HERE, '..', 'collectors', 'mongo-ops-monitor.js');
 const RESULTS_DIR = path.resolve(HERE, '..', 'results');
 const COLLECTOR_DRAIN_MS = 1000;
 
@@ -129,7 +130,21 @@ function spawnProcessMonitor(pid, name) {
   return { proc, name, getResult: () => stdout };
 }
 
-export function startCollectors({ appName, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath }) {
+// Mongo opcounters collector — out-of-process script that reads
+// serverStatus().opcounters baseline at startup and again on SIGTERM,
+// outputs JSON on stdout. Same shape as spawnProcessMonitor so it
+// flows through stopCollectors' generic JSON-from-stdout drain.
+function spawnMongoOpsMonitor(mongoUri) {
+  const proc = io.spawn('node', [MONGO_OPS_MONITOR, mongoUri], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  proc.stderr.on('data', (d) => process.stderr.write(d));
+  let stdout = '';
+  proc.stdout.on('data', (d) => { stdout += d; });
+  return { proc, name: 'MONGO_OPS', getResult: () => stdout };
+}
+
+export function startCollectors({ appName, mongoUri, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath }) {
   const procs = [];
 
   const appPid = findPid(`${appName}/.meteor/local/build/main.js`);
@@ -144,6 +159,10 @@ export function startCollectors({ appName, gcOutputPath, methodTimingPath, subTi
     procs.push(spawnProcessMonitor(dbPid, 'DB'));
   } else {
     console.error(`No DB pid found for ${appName}; skipping db_resources collector.`);
+  }
+
+  if (mongoUri) {
+    procs.push(spawnMongoOpsMonitor(mongoUri));
   }
 
   return { procs, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath };

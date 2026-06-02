@@ -47,7 +47,10 @@ export async function runArtilleryDriver({ scenario, scenarioName, app, appName,
   await waitForApp(config.appPort);
   console.log(`App started in ${((Date.now() - startTime) / 1000).toFixed(1)}s`);
 
-  const collectors = startCollectors({ appName, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath });
+  // Meteor's local Mongo lives on appPort + 1. BENCH_MONGO_URL overrides
+  // for external Mongo (Galaxy, separate node, etc.).
+  const mongoUri = process.env.BENCH_MONGO_URL || `mongodb://127.0.0.1:${config.appPort + 1}`;
+  const collectors = startCollectors({ appName, mongoUri, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath });
 
   // Override the YAML's hard-coded target so artillery hits whichever
   // port the harness picked via BENCH_PORT (defaults to 3000). Also

@@ -13,6 +13,7 @@ import { existsSync as _existsSync, readFileSync as _readFileSync, unlinkSync as
 import { setTimeout as _sleep } from 'node:timers/promises';
 import _SimpleDDP from 'simpleddp';
 import _ws from 'ws';
+import { MongoClient as _MongoClient } from 'mongodb';
 
 export const io = {
   execSync: _execSync,
@@ -32,4 +33,5 @@ export const io = {
   fetch: (...args) => globalThis.fetch(...args),
   SimpleDDP: _SimpleDDP,
   ws: _ws,
+  MongoClient: _MongoClient,
 };

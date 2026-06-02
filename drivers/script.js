@@ -58,7 +58,8 @@ export async function runScriptDriver({ scenario, scenarioName, app, appName, so
   await waitForApp(config.appPort);
   console.log('App started.');
 
-  const collectors = startCollectors({ appName, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath });
+  const mongoUri = process.env.BENCH_MONGO_URL || `mongodb://127.0.0.1:${config.appPort + 1}`;
+  const collectors = startCollectors({ appName, mongoUri, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath });
 
   const scriptPath = path.resolve(HERE, '..', scenario.script);
   const scriptArgs = (scenario.args || '').split(/\s+/).filter(Boolean);

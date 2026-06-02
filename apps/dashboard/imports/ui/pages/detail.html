@@ -72,6 +72,124 @@
           </div>
         </div>
       </div>
+
+      {{#if hasDdpMethods}}
+        <div class="row mb-3">
+          <div class="col-md-6">
+            <div class="card">
+              <div class="card-header">
+                DDP Methods <span class="badge bg-secondary float-end">{{ddpMethodsTotal}} calls</span>
+              </div>
+              <div class="card-body p-0">
+                <table class="table table-sm mb-0">
+                  <thead>
+                    <tr><th>Method</th><th class="text-end">count</th><th class="text-end">avg</th><th class="text-end">p95</th><th class="text-end">p99</th><th class="text-end">max</th></tr>
+                  </thead>
+                  <tbody>
+                    {{#each ddpMethodsRows}}
+                      <tr><td><code>{{name}}</code></td><td class="text-end">{{count}}</td><td class="text-end">{{avg}}</td><td class="text-end">{{p95}}</td><td class="text-end">{{p99}}</td><td class="text-end">{{max}}</td></tr>
+                    {{/each}}
+                  </tbody>
+                </table>
+              </div>
+              <div class="card-footer text-muted small">latency in ms · server-side method handler wall time</div>
+            </div>
+          </div>
+
+          {{#if hasDdpSubscriptions}}
+            <div class="col-md-6">
+              <div class="card">
+                <div class="card-header">
+                  DDP Subscriptions <span class="badge bg-secondary float-end">{{ddpSubsTotal}} subs</span>
+                </div>
+                <div class="card-body p-0">
+                  <table class="table table-sm mb-0">
+                    <thead>
+                      <tr><th>Publication</th><th class="text-end">count</th><th class="text-end">avg</th><th class="text-end">p95</th><th class="text-end">p99</th><th class="text-end">max</th></tr>
+                    </thead>
+                    <tbody>
+                      {{#each ddpSubsRows}}
+                        <tr><td><code>{{name}}</code></td><td class="text-end">{{count}}</td><td class="text-end">{{avg}}</td><td class="text-end">{{p95}}</td><td class="text-end">{{p99}}</td><td class="text-end">{{max}}</td></tr>
+                      {{/each}}
+                    </tbody>
+                  </table>
+                </div>
+                <div class="card-footer text-muted small">latency in ms · sub-message arrival → ready dispatch</div>
+              </div>
+            </div>
+          {{/if}}
+        </div>
+      {{/if}}
+
+      {{#if hasLiveUpdatePropagation}}
+        <div class="row mb-3">
+          <div class="col-md-6">
+            <div class="card">
+              <div class="card-header">
+                Live-update propagation <span class="badge bg-secondary float-end">{{lupObservedUpdates}} emits</span>
+              </div>
+              <div class="card-body">
+                <table class="table table-sm mb-0">
+                  <tr><td>avg</td><td class="text-end">{{lupAvg}} ms</td></tr>
+                  <tr><td>p50</td><td class="text-end">{{lupP50}} ms</td></tr>
+                  <tr><td>p95</td><td class="text-end">{{lupP95}} ms</td></tr>
+                  <tr><td>p99</td><td class="text-end">{{lupP99}} ms</td></tr>
+                  <tr><td>max</td><td class="text-end">{{lupMax}} ms</td></tr>
+                </table>
+              </div>
+              <div class="card-footer text-muted small">insertAsync → sendAdded latency · attributable to observer driver choice</div>
+            </div>
+          </div>
+
+          {{#if hasMongoOps}}
+            <div class="col-md-6">
+              <div class="card">
+                <div class="card-header">
+                  Mongo opcounters <span class="badge bg-secondary float-end">{{mongoOpsDuration}}s window</span>
+                </div>
+                <div class="card-body p-0">
+                  <table class="table table-sm mb-0">
+                    <thead>
+                      <tr><th>Op</th><th class="text-end">total</th><th class="text-end">ops/sec</th></tr>
+                    </thead>
+                    <tbody>
+                      {{#each mongoOpsRows}}
+                        <tr><td><code>{{op}}</code></td><td class="text-end">{{total}}</td><td class="text-end">{{perSec}}</td></tr>
+                      {{/each}}
+                    </tbody>
+                  </table>
+                </div>
+                <div class="card-footer text-muted small">serverStatus delta over the run · workload shape</div>
+              </div>
+            </div>
+          {{/if}}
+        </div>
+      {{else}}
+        {{#if hasMongoOps}}
+          <div class="row mb-3">
+            <div class="col-md-6">
+              <div class="card">
+                <div class="card-header">
+                  Mongo opcounters <span class="badge bg-secondary float-end">{{mongoOpsDuration}}s window</span>
+                </div>
+                <div class="card-body p-0">
+                  <table class="table table-sm mb-0">
+                    <thead>
+                      <tr><th>Op</th><th class="text-end">total</th><th class="text-end">ops/sec</th></tr>
+                    </thead>
+                    <tbody>
+                      {{#each mongoOpsRows}}
+                        <tr><td><code>{{op}}</code></td><td class="text-end">{{total}}</td><td class="text-end">{{perSec}}</td></tr>
+                      {{/each}}
+                    </tbody>
+                  </table>
+                </div>
+                <div class="card-footer text-muted small">serverStatus delta over the run · workload shape</div>
+              </div>
+            </div>
+          </div>
+        {{/if}}
+      {{/if}}
     {{else}}
       <div class="alert alert-warning">Run not found.</div>
     {{/with}}

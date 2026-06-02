@@ -45,6 +45,7 @@ const ALLOWED_METRIC_KEYS = new Set([
   'ddp_methods',              // task 01 — DDP method latency
   'ddp_subscriptions',        // task 02 — Subscription ready latency
   'live_update_propagation',  // task 03 — Live-update propagation latency
+  'mongo_ops',                // task 04 — Mongo opcounters (insert/query/update/delete/getmore/command rates)
 ]);
 
 const FIXTURES_DIR = path.join(import.meta.dirname, 'fixtures');
