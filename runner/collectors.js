@@ -20,6 +20,7 @@ const PROCESS_MONITOR = path.resolve(HERE, '..', 'collectors', 'process-monitor.
 const GC_MONITOR = path.resolve(HERE, '..', 'collectors', 'gc-monitor.cjs');
 const MONGO_OPS_MONITOR = path.resolve(HERE, '..', 'collectors', 'mongo-ops-monitor.js');
 const MONGO_SLOW_QUERY_MONITOR = path.resolve(HERE, '..', 'collectors', 'mongo-slow-query-monitor.js');
+const MONGO_INDEX_MONITOR = path.resolve(HERE, '..', 'collectors', 'mongo-index-usage-monitor.js');
 const RESULTS_DIR = path.resolve(HERE, '..', 'results');
 const COLLECTOR_DRAIN_MS = 1000;
 
@@ -178,6 +179,22 @@ function spawnMongoSlowQueryMonitor(mongoUri) {
   return { proc, name: 'MONGO_SLOW_QUERY', getResult: () => stdout };
 }
 
+// Mongo index-usage collector — out-of-process script that snapshots
+// per-index $indexStats (accesses.ops + since) per collection at startup
+// and again on SIGTERM, emits the metrics.mongo_index_usage JSON on
+// stdout. Same { proc, name, getResult } shape as the other spawns, so
+// it rides stopCollectors' generic JSON-from-stdout drain with no special
+// handling.
+function spawnMongoIndexUsageMonitor(mongoUri) {
+  const proc = io.spawn('node', [MONGO_INDEX_MONITOR, mongoUri], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  proc.stderr.on('data', (d) => process.stderr.write(d));
+  let stdout = '';
+  proc.stdout.on('data', (d) => { stdout += d; });
+  return { proc, name: 'MONGO_INDEX', getResult: () => stdout };
+}
+
 export function startCollectors({ appName, mongoUri, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath }) {
   const procs = [];
 
@@ -198,6 +215,7 @@ export function startCollectors({ appName, mongoUri, gcOutputPath, methodTimingP
   if (mongoUri) {
     procs.push(spawnMongoOpsMonitor(mongoUri));
     procs.push(spawnMongoSlowQueryMonitor(mongoUri));
+    procs.push(spawnMongoIndexUsageMonitor(mongoUri));
   }
 
   return { procs, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath };
