@@ -35,6 +35,13 @@ export function prepareMethodTimingOutput(tag) {
   return path.join(RESULTS_DIR, `method-timing-${tag}-${Date.now()}.json`);
 }
 
+// Same pattern as prepareMethodTimingOutput, for the sub-timing collector
+// (SUB_TIMING_OUTPUT env var → metrics.ddp_subscriptions).
+export function prepareSubTimingOutput(tag) {
+  if (!io.existsSync(RESULTS_DIR)) io.mkdirSync(RESULTS_DIR, { recursive: true });
+  return path.join(RESULTS_DIR, `sub-timing-${tag}-${Date.now()}.json`);
+}
+
 // Aggregator: turns the raw samples Map dumped by the in-app collector
 // into the metrics.ddp_methods shape. Exported for unit-testing without
 // the full collectors lifecycle.
@@ -65,6 +72,29 @@ export function aggregateMethodTiming(samplesByMethod) {
   return { metric: 'ddp_methods', methods, total_calls: totalCalls };
 }
 
+// Same shape as aggregateMethodTiming but grouped by publication name.
+// `publications` mirrors `methods`; `total_subs` mirrors `total_calls`.
+// Conventions identical (BARE percentile, absence → null, etc.).
+export function aggregateSubTiming(samplesByPub) {
+  const publications = {};
+  let totalSubs = 0;
+  for (const [name, samples] of Object.entries(samplesByPub || {})) {
+    const stats = summarize(samples);
+    if (!stats) continue;
+    publications[name] = {
+      count: stats.count,
+      avg_ms: stats.avg,
+      p50: stats.p50,
+      p95: stats.p95,
+      p99: stats.p99,
+      max_ms: stats.max,
+    };
+    totalSubs += stats.count;
+  }
+  if (totalSubs === 0) return null;
+  return { metric: 'ddp_subscriptions', publications, total_subs: totalSubs };
+}
+
 function spawnProcessMonitor(pid, name) {
   const proc = io.spawn('node', [PROCESS_MONITOR, pid, name], {
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -75,7 +105,7 @@ function spawnProcessMonitor(pid, name) {
   return { proc, name, getResult: () => stdout };
 }
 
-export function startCollectors({ appName, gcOutputPath, methodTimingPath }) {
+export function startCollectors({ appName, gcOutputPath, methodTimingPath, subTimingPath }) {
   const procs = [];
 
   const appPid = findPid(`${appName}/.meteor/local/build/main.js`);
@@ -92,10 +122,10 @@ export function startCollectors({ appName, gcOutputPath, methodTimingPath }) {
     console.error(`No DB pid found for ${appName}; skipping db_resources collector.`);
   }
 
-  return { procs, gcOutputPath, methodTimingPath };
+  return { procs, gcOutputPath, methodTimingPath, subTimingPath };
 }
 
-export async function stopCollectors({ procs, gcOutputPath, methodTimingPath }) {
+export async function stopCollectors({ procs, gcOutputPath, methodTimingPath, subTimingPath }) {
   const results = [];
 
   for (const { proc, name, getResult } of procs) {
@@ -139,6 +169,21 @@ export async function stopCollectors({ procs, gcOutputPath, methodTimingPath }) 
       io.unlinkSync(methodTimingPath);
     } catch (err) {
       console.error(`Could not read method timing from ${methodTimingPath}: ${err.message}`);
+    }
+  }
+
+  // Sub timing: same pattern, different env var + aggregator + key shape.
+  if (subTimingPath && io.existsSync(subTimingPath)) {
+    try {
+      const dump = JSON.parse(io.readFileSync(subTimingPath, 'utf8'));
+      const aggregated = aggregateSubTiming(dump);
+      if (aggregated) {
+        results.push(aggregated);
+        console.log(`DDP subscriptions: ${aggregated.total_subs} subs across ${Object.keys(aggregated.publications).length} publications`);
+      }
+      io.unlinkSync(subTimingPath);
+    } catch (err) {
+      console.error(`Could not read sub timing from ${subTimingPath}: ${err.message}`);
     }
   }
 

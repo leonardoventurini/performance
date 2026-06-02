@@ -3,5 +3,6 @@
 // Meteor.startup, BEFORE any user code that registers Meteor APIs.
 
 import { initMethodTiming } from './method-timing.server';
+import { initSubTiming } from './sub-timing.server';
 
-export { initMethodTiming };
+export { initMethodTiming, initSubTiming };

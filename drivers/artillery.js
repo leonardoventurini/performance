@@ -13,6 +13,7 @@ import { waitForApp } from '../runner/wait-for-app.js';
 import {
   prepareGcOutput,
   prepareMethodTimingOutput,
+  prepareSubTimingOutput,
   startCollectors,
   stopCollectors,
   drainPostStopGc,
@@ -27,13 +28,15 @@ export async function runArtilleryDriver({ scenario, scenarioName, app, appName,
 
   const { gcMonitorPath, gcOutputPath } = prepareGcOutput(tag);
   const methodTimingPath = prepareMethodTimingOutput(tag);
+  const subTimingPath = prepareSubTimingOutput(tag);
   console.log(`GC monitor: ${gcMonitorPath}`);
   console.log(`GC output: ${gcOutputPath}`);
   console.log(`Method timing output: ${methodTimingPath}`);
+  console.log(`Sub timing output: ${subTimingPath}`);
 
-  console.log('Starting Meteor app (with GC + method timing)...');
+  console.log('Starting Meteor app (with GC + method timing + sub timing)...');
   const { proc: meteorProc, getRuntimeInfo } = startMeteorApp({
-    source, appPath: app.path, port: config.appPort, env, gcMonitorPath, gcOutputPath, methodTimingPath,
+    source, appPath: app.path, port: config.appPort, env, gcMonitorPath, gcOutputPath, methodTimingPath, subTimingPath,
   });
 
   console.log('Waiting for app to start...');
@@ -41,7 +44,7 @@ export async function runArtilleryDriver({ scenario, scenarioName, app, appName,
   await waitForApp(config.appPort);
   console.log(`App started in ${((Date.now() - startTime) / 1000).toFixed(1)}s`);
 
-  const collectors = startCollectors({ appName, gcOutputPath, methodTimingPath });
+  const collectors = startCollectors({ appName, gcOutputPath, methodTimingPath, subTimingPath });
 
   // Override the YAML's hard-coded target so artillery hits whichever
   // port the harness picked via BENCH_PORT (defaults to 3000). Also
