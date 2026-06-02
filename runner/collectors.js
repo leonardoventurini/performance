@@ -23,6 +23,7 @@ const MONGO_OPS_MONITOR = path.resolve(HERE, '..', 'collectors', 'mongo-ops-moni
 const MONGO_SLOW_QUERY_MONITOR = path.resolve(HERE, '..', 'collectors', 'mongo-slow-query-monitor.js');
 const MONGO_INDEX_MONITOR = path.resolve(HERE, '..', 'collectors', 'mongo-index-usage-monitor.js');
 const MONGO_POOL_MONITOR = path.resolve(HERE, '..', 'collectors', 'mongo-pool-monitor.js');
+const MONGO_CHANGESTREAM_MONITOR = path.resolve(HERE, '..', 'collectors', 'mongo-changestream-monitor.js');
 const RESULTS_DIR = path.resolve(HERE, '..', 'results');
 const COLLECTOR_DRAIN_MS = 1000;
 
@@ -220,6 +221,21 @@ function spawnMongoPoolMonitor(mongoUri) {
   return { proc, name: 'MONGO_POOL', getResult: () => stdout };
 }
 
+// Mongo change-stream cursor collector — out-of-process script that
+// polls currentOp every 250ms for in-flight change-stream getMore
+// cursors and emits the aggregated `metrics.mongo_changestream` JSON on
+// stdout on SIGTERM. Same shape as spawnMongoOpsMonitor so it flows
+// through stopCollectors' generic JSON-from-stdout drain.
+function spawnMongoChangestreamMonitor(mongoUri) {
+  const proc = io.spawn('node', [MONGO_CHANGESTREAM_MONITOR, mongoUri], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  proc.stderr.on('data', (d) => process.stderr.write(d));
+  let stdout = '';
+  proc.stdout.on('data', (d) => { stdout += d; });
+  return { proc, name: 'MONGO_CHANGESTREAM', getResult: () => stdout };
+}
+
 export function startCollectors({ appName, mongoUri, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath, frameSizePath }) {
   const procs = [];
 
@@ -242,6 +258,7 @@ export function startCollectors({ appName, mongoUri, gcOutputPath, methodTimingP
     procs.push(spawnMongoSlowQueryMonitor(mongoUri));
     procs.push(spawnMongoIndexUsageMonitor(mongoUri));
     procs.push(spawnMongoPoolMonitor(mongoUri));
+    procs.push(spawnMongoChangestreamMonitor(mongoUri));
   }
 
   return { procs, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath, frameSizePath };

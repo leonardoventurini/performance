@@ -54,6 +54,7 @@ const ALLOWED_METRIC_KEYS = new Set([
   'mongo_slow_queries',       // task 12 — Mongo slow-query profile aggregation
   'mongo_index_usage',        // task 13 — Per-index ops + first-use timestamp via $indexStats
   'mongo_pool',               // task 14 — Mongo connection pool (current/active/total_created, time-series)
+  'mongo_changestream',       // task 24 — Active change-stream cursors (count + per-namespace, time-series at 250ms)
 ]);
 
 const FIXTURES_DIR = path.join(import.meta.dirname, 'fixtures');
