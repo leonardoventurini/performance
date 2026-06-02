@@ -1,22 +1,12 @@
-// Plain-object I/O facade for the runner / cli / drivers modules.
+// Plain-object I/O facade. Workaround for ESM: node:* namespace exports
+// are non-configurable, so `mock.method(childProcess, 'execSync', ...)`
+// throws. A plain object whose values happen to be node:* functions IS
+// configurable, so tests can stub here without DI in prod signatures.
 //
-// Why a plain object instead of `export { X } from 'node:Y'`: ESM
-// namespace exports — both the source node:* namespaces and any
-// re-exports of them — are non-configurable, so mock.method against
-// them throws "Cannot redefine property". A plain object whose values
-// happen to BE the node:* functions is fully configurable, which lets
-// tests stub at this module boundary without polluting global state or
-// adding DI parameters to production signatures.
+// Production: `import { io } from './_io.js'`, then `io.execSync(...)`.
+// Tests:      `mock.method(io, 'execSync', () => 'fake-stdout')`.
 //
-// Production: import { io } from './_io.js';  (or '../runner/_io.js' from cli/, drivers/)
-//   io.execSync(...), io.spawn(...), io.existsSync(...), await io.sleep(1000), await io.fetch(url)
-// Tests:      mock.method(io, 'execSync', () => 'fake-stdout');
-//
-// Per the approved exception in REFACTOR_SPEC.md hard-constraint #4, this is
-// the single io facade for the whole codebase — extend it (don't fork it)
-// when a new subsystem needs a mock seam. SimpleDDP and ws live here for the
-// same reason: cli/push.js's new SimpleDDP(...) needs a mockable factory
-// and a separate facade would just be ceremony.
+// Single facade for the whole codebase — extend, don't fork.
 
 import { execSync as _execSync, execFileSync as _execFileSync, spawn as _spawn } from 'node:child_process';
 import { existsSync as _existsSync, readFileSync as _readFileSync, unlinkSync as _unlinkSync, mkdirSync as _mkdirSync, readdirSync as _readdirSync, writeFileSync as _writeFileSync, statSync as _statSync, rmSync as _rmSync } from 'node:fs';
