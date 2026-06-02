@@ -19,6 +19,7 @@ const HERE = import.meta.dirname;
 const PROCESS_MONITOR = path.resolve(HERE, '..', 'collectors', 'process-monitor.js');
 const GC_MONITOR = path.resolve(HERE, '..', 'collectors', 'gc-monitor.cjs');
 const MONGO_OPS_MONITOR = path.resolve(HERE, '..', 'collectors', 'mongo-ops-monitor.js');
+const MONGO_SLOW_QUERY_MONITOR = path.resolve(HERE, '..', 'collectors', 'mongo-slow-query-monitor.js');
 const RESULTS_DIR = path.resolve(HERE, '..', 'results');
 const COLLECTOR_DRAIN_MS = 1000;
 
@@ -162,6 +163,21 @@ function spawnMongoOpsMonitor(mongoUri) {
   return { proc, name: 'MONGO_OPS', getResult: () => stdout };
 }
 
+// Mongo slow-query collector — out-of-process script that enables the Mongo
+// profiler for the run, then on SIGTERM reads system.profile, aggregates
+// slow ops, restores the profiler config, and emits metrics.mongo_slow_queries
+// on stdout. Aggregation runs inside the script, so (like mongo-ops) it flows
+// through stopCollectors' generic JSON-from-stdout drain — no read block here.
+function spawnMongoSlowQueryMonitor(mongoUri) {
+  const proc = io.spawn('node', [MONGO_SLOW_QUERY_MONITOR, mongoUri], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  proc.stderr.on('data', (d) => process.stderr.write(d));
+  let stdout = '';
+  proc.stdout.on('data', (d) => { stdout += d; });
+  return { proc, name: 'MONGO_SLOW_QUERY', getResult: () => stdout };
+}
+
 export function startCollectors({ appName, mongoUri, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath }) {
   const procs = [];
 
@@ -181,6 +197,7 @@ export function startCollectors({ appName, mongoUri, gcOutputPath, methodTimingP
 
   if (mongoUri) {
     procs.push(spawnMongoOpsMonitor(mongoUri));
+    procs.push(spawnMongoSlowQueryMonitor(mongoUri));
   }
 
   return { procs, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath };
