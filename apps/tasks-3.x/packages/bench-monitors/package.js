@@ -14,7 +14,7 @@ Package.describe({
   name: 'bench-monitors',
   version: '0.0.1',
   summary: 'In-app instrumentation hooks for the benchmark harness',
-  documentation: null,
+  documentation: 'README.md',
 });
 
 Package.onUse(function (api) {
