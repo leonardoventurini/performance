@@ -32,12 +32,13 @@ export function resetMeteorApp(source, appPath) {
 // `[runtime-info]` values (observer_driver, transport) the app printed.
 // `methodTimingPath` / `subTimingPath` / `propagationTimingPath` /
 // `observerPoolPath` / `ddpMessagePath` / `frameSizePath` /
-// `compressionPath` (optional) — when set, the spawned Meteor sees them
-// as METHOD_TIMING_OUTPUT / SUB_TIMING_OUTPUT / PROPAGATION_TIMING_OUTPUT
-// / OBSERVER_POOL_OUTPUT / DDP_MESSAGE_OUTPUT / DDP_FRAME_SIZE_OUTPUT /
-// DDP_COMPRESSION_OUTPUT and the matching in-app bench-monitors collector
-// dumps to that path on SIGTERM. The harness reads them in stopCollectors.
-export function startMeteorApp({ source, appPath, port, env = {}, gcMonitorPath, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath, frameSizePath, compressionPath }) {
+// `compressionPath` / `driverFallbackPath` (optional) — when set, the
+// spawned Meteor sees them as METHOD_TIMING_OUTPUT / SUB_TIMING_OUTPUT
+// / PROPAGATION_TIMING_OUTPUT / OBSERVER_POOL_OUTPUT / DDP_MESSAGE_OUTPUT
+// / DDP_FRAME_SIZE_OUTPUT / DDP_COMPRESSION_OUTPUT / DRIVER_FALLBACK_OUTPUT
+// and the matching in-app bench-monitors collector dumps to that path
+// on SIGTERM. The harness reads them in stopCollectors.
+export function startMeteorApp({ source, appPath, port, env = {}, gcMonitorPath, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath, frameSizePath, compressionPath, driverFallbackPath }) {
   const spawnEnv = { ...process.env, ...env, METEOR_NO_DEPRECATION: 'true' };
   if (gcMonitorPath) {
     spawnEnv.SERVER_NODE_OPTIONS = `--require ${gcMonitorPath}`;
@@ -50,6 +51,7 @@ export function startMeteorApp({ source, appPath, port, env = {}, gcMonitorPath,
   if (ddpMessagePath) spawnEnv.DDP_MESSAGE_OUTPUT = ddpMessagePath;
   if (frameSizePath) spawnEnv.DDP_FRAME_SIZE_OUTPUT = frameSizePath;
   if (compressionPath) spawnEnv.DDP_COMPRESSION_OUTPUT = compressionPath;
+  if (driverFallbackPath) spawnEnv.DRIVER_FALLBACK_OUTPUT = driverFallbackPath;
   const proc = io.spawn(source.meteorCmd, meteorArgv(source, ['run', '--port', String(port)]), {
     cwd: appPath,
     env: spawnEnv,

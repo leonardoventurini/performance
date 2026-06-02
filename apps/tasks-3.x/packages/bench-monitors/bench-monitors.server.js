@@ -9,5 +9,6 @@ import { initObserverPoolSampler } from './observer-pool-sampler.server';
 import { initDdpMessageCounter } from './ddp-message-counter.server';
 import { initFrameSizeCounter } from './frame-size-counter.server';
 import { initCompressionTracker } from './compression-tracker.server';
+import { initDriverFallbackTracker } from './driver-fallback-tracker.server';
 
-export { initMethodTiming, initSubTiming, initPropagationTiming, initObserverPoolSampler, initDdpMessageCounter, initFrameSizeCounter, initCompressionTracker };
+export { initMethodTiming, initSubTiming, initPropagationTiming, initObserverPoolSampler, initDdpMessageCounter, initFrameSizeCounter, initCompressionTracker, initDriverFallbackTracker };

@@ -16,6 +16,7 @@ import { aggregateObserverPool } from '../runner/observer-pool-aggregator.js';
 import { aggregateDdpMessages } from '../runner/message-rate-aggregator.js';
 import { aggregateFrameSize } from '../runner/frame-size-aggregator.js';
 import { aggregateCompression } from '../runner/compression-aggregator.js';
+import { aggregateDriverFallback } from '../runner/driver-fallback-aggregator.js';
 
 const HERE = import.meta.dirname;
 const PROCESS_MONITOR = path.resolve(HERE, '..', 'collectors', 'process-monitor.js');
@@ -90,6 +91,14 @@ export function prepareFrameSizeOutput(tag) {
 export function prepareCompressionOutput(tag) {
   if (!io.existsSync(RESULTS_DIR)) io.mkdirSync(RESULTS_DIR, { recursive: true });
   return path.join(RESULTS_DIR, `compression-${tag}-${Date.now()}.json`);
+}
+
+// Same pattern, for the driver-fallback tracker (DRIVER_FALLBACK_OUTPUT
+// env var → metrics.driver_fallbacks). The in-app tracker already produces
+// the final shape; aggregator just validates + applies absence convention.
+export function prepareDriverFallbackOutput(tag) {
+  if (!io.existsSync(RESULTS_DIR)) io.mkdirSync(RESULTS_DIR, { recursive: true });
+  return path.join(RESULTS_DIR, `driver-fallback-${tag}-${Date.now()}.json`);
 }
 
 // Aggregator: turns the raw samples Map dumped by the in-app collector
@@ -263,7 +272,7 @@ function spawnMongoWiredTigerMonitor(mongoUri) {
   return { proc, name: 'MONGO_WIREDTIGER', getResult: () => stdout };
 }
 
-export function startCollectors({ appName, mongoUri, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath, frameSizePath, compressionPath }) {
+export function startCollectors({ appName, mongoUri, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath, frameSizePath, compressionPath, driverFallbackPath }) {
   const procs = [];
 
   const appPid = findPid(`${appName}/.meteor/local/build/main.js`);
@@ -289,10 +298,10 @@ export function startCollectors({ appName, mongoUri, gcOutputPath, methodTimingP
     procs.push(spawnMongoWiredTigerMonitor(mongoUri));
   }
 
-  return { procs, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath, frameSizePath, compressionPath };
+  return { procs, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath, frameSizePath, compressionPath, driverFallbackPath };
 }
 
-export async function stopCollectors({ procs, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath, frameSizePath, compressionPath }) {
+export async function stopCollectors({ procs, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath, frameSizePath, compressionPath, driverFallbackPath }) {
   const results = [];
 
   for (const { proc, name, getResult } of procs) {
@@ -439,6 +448,23 @@ export async function stopCollectors({ procs, gcOutputPath, methodTimingPath, su
       io.unlinkSync(compressionPath);
     } catch (err) {
       console.error(`Could not read DDP compression from ${compressionPath}: ${err.message}`);
+    }
+  }
+
+  // Driver fallback: in-app tracker dumps pre-aggregated counts; we just
+  // pass through (with absence-convention guard) and emit a console line.
+  if (driverFallbackPath && io.existsSync(driverFallbackPath)) {
+    try {
+      const dump = JSON.parse(io.readFileSync(driverFallbackPath, 'utf8'));
+      const aggregated = aggregateDriverFallback(dump);
+      if (aggregated) {
+        results.push(aggregated);
+        const fallbackCount = aggregated.total_cursors - aggregated.no_fallback;
+        console.log(`Driver fallbacks: ${aggregated.total_cursors} observe(s), ${fallbackCount} fell back from ${aggregated.configured_first}`);
+      }
+      io.unlinkSync(driverFallbackPath);
+    } catch (err) {
+      console.error(`Could not read driver-fallback dump from ${driverFallbackPath}: ${err.message}`);
     }
   }
 
