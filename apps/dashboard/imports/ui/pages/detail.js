@@ -161,4 +161,61 @@ Template.detail.helpers({
       .sort((a, b) => b._sortKey - a._sortKey)
       .map(({ _sortKey, ...row }) => row);
   },
+
+  // ─── Mongo slow queries (task 12) ──────────────────────────────────
+  hasMongoSlowQueries() { return !!this.metrics?.mongo_slow_queries; },
+  mongoSlowTotal() { return fmtInt(this.metrics?.mongo_slow_queries?.total_slow); },
+  mongoSlowThreshold() { return fmtInt(this.metrics?.mongo_slow_queries?.threshold_ms); },
+  mongoSlowByOpRows() {
+    const byOp = this.metrics?.mongo_slow_queries?.by_op ?? {};
+    return Object.entries(byOp)
+      .sort((a, b) => b[1] - a[1])
+      .map(([op, count]) => ({ op, count: fmtInt(count) }));
+  },
+  hasMongoSlowSample() { return !!this.metrics?.mongo_slow_queries?.slowest_sample; },
+  mongoSlowSampleNs() { return this.metrics?.mongo_slow_queries?.slowest_sample?.ns ?? '-'; },
+  mongoSlowSampleOp() { return this.metrics?.mongo_slow_queries?.slowest_sample?.op ?? '-'; },
+  mongoSlowSampleMs() { return fmtInt(this.metrics?.mongo_slow_queries?.slowest_sample?.millis); },
+  mongoSlowSampleFilterKeys() {
+    const keys = this.metrics?.mongo_slow_queries?.slowest_sample?.filter_keys ?? [];
+    return keys.length ? keys.join(', ') : '(none)';
+  },
+  mongoSlowSamplePlan() {
+    return this.metrics?.mongo_slow_queries?.slowest_sample?.planSummary ?? '(none)';
+  },
+
+  // ─── Mongo connection pool (task 14) ───────────────────────────────
+  hasMongoPool() { return !!this.metrics?.mongo_pool; },
+  mongoPoolSamples() { return fmtInt(this.metrics?.mongo_pool?.samples); },
+  mongoPoolInterval() { return fmtInt(this.metrics?.mongo_pool?.interval_ms); },
+  mongoPoolCurrentMin() { return fmtInt(this.metrics?.mongo_pool?.current?.min); },
+  mongoPoolCurrentMax() { return fmtInt(this.metrics?.mongo_pool?.current?.max); },
+  mongoPoolCurrentAvg() {
+    const v = this.metrics?.mongo_pool?.current?.avg;
+    return v != null && Number.isFinite(v) ? v.toFixed(1) : '-';
+  },
+  mongoPoolCurrentEnd() { return fmtInt(this.metrics?.mongo_pool?.current?.end); },
+  mongoPoolActiveMin() { return fmtInt(this.metrics?.mongo_pool?.active?.min); },
+  mongoPoolActiveMax() { return fmtInt(this.metrics?.mongo_pool?.active?.max); },
+  mongoPoolActiveAvg() {
+    const v = this.metrics?.mongo_pool?.active?.avg;
+    return v != null && Number.isFinite(v) ? v.toFixed(1) : '-';
+  },
+  mongoPoolActiveEnd() { return fmtInt(this.metrics?.mongo_pool?.active?.end); },
+  mongoPoolTotalStart() { return fmtInt(this.metrics?.mongo_pool?.total_created?.start); },
+  mongoPoolTotalEnd() { return fmtInt(this.metrics?.mongo_pool?.total_created?.end); },
+  mongoPoolTotalDelta() { return fmtInt(this.metrics?.mongo_pool?.total_created?.delta); },
+
+  // ─── Mongo index usage (task 13) ───────────────────────────────────
+  hasMongoIndexUsage() { return !!this.metrics?.mongo_index_usage; },
+  mongoIndexCollections() {
+    const collections = this.metrics?.mongo_index_usage?.collections ?? {};
+    return Object.entries(collections).map(([collection, indexes]) => ({
+      collection,
+      indexes: (indexes || []).map((idx) => ({
+        ...idx,
+        keyJson: JSON.stringify(idx.key ?? {}),
+      })),
+    }));
+  },
 });

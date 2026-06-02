@@ -280,6 +280,131 @@
           </div>
         {{/if}}
       {{/if}}
+
+      {{#if hasMongoPool}}
+        <div class="row mb-3">
+          <div class="col-md-6">
+            <div class="card">
+              <div class="card-header">
+                Mongo connection pool <span class="badge bg-secondary float-end">{{mongoPoolSamples}} samples @ {{mongoPoolInterval}}ms</span>
+              </div>
+              <div class="card-body p-0">
+                <table class="table table-sm mb-0">
+                  <thead>
+                    <tr><th>Metric</th><th class="text-end">min</th><th class="text-end">max</th><th class="text-end">avg</th><th class="text-end">end</th></tr>
+                  </thead>
+                  <tbody>
+                    <tr><td>Current</td><td class="text-end">{{mongoPoolCurrentMin}}</td><td class="text-end">{{mongoPoolCurrentMax}}</td><td class="text-end">{{mongoPoolCurrentAvg}}</td><td class="text-end">{{mongoPoolCurrentEnd}}</td></tr>
+                    <tr><td>Active</td><td class="text-end">{{mongoPoolActiveMin}}</td><td class="text-end">{{mongoPoolActiveMax}}</td><td class="text-end">{{mongoPoolActiveAvg}}</td><td class="text-end">{{mongoPoolActiveEnd}}</td></tr>
+                  </tbody>
+                </table>
+                <table class="table table-sm mb-0">
+                  <thead>
+                    <tr><th>Total created</th><th class="text-end">start</th><th class="text-end">end</th><th class="text-end">Δ</th></tr>
+                  </thead>
+                  <tbody>
+                    <tr><td>connections</td><td class="text-end">{{mongoPoolTotalStart}}</td><td class="text-end">{{mongoPoolTotalEnd}}</td><td class="text-end">+{{mongoPoolTotalDelta}}</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="card-footer text-muted small">current = open connections · active = ones doing work · saturation when current ≈ active</div>
+            </div>
+          </div>
+
+          {{#if hasMongoSlowQueries}}
+            <div class="col-md-6">
+              <div class="card">
+                <div class="card-header">
+                  Mongo slow queries <span class="badge bg-secondary float-end">{{mongoSlowTotal}} slow · ≥{{mongoSlowThreshold}}ms</span>
+                </div>
+                <div class="card-body p-0">
+                  <table class="table table-sm mb-0">
+                    <thead>
+                      <tr><th>Op type</th><th class="text-end">count</th></tr>
+                    </thead>
+                    <tbody>
+                      {{#each mongoSlowByOpRows}}
+                        <tr><td><code>{{op}}</code></td><td class="text-end">{{count}}</td></tr>
+                      {{/each}}
+                    </tbody>
+                  </table>
+                  {{#if hasMongoSlowSample}}
+                    <table class="table table-sm mb-0">
+                      <tbody>
+                        <tr><td>slowest</td><td class="text-end"><code>{{mongoSlowSampleNs}}</code> · {{mongoSlowSampleOp}} · {{mongoSlowSampleMs}} ms</td></tr>
+                        <tr><td>filter keys</td><td class="text-end"><code>{{mongoSlowSampleFilterKeys}}</code></td></tr>
+                        <tr><td>plan</td><td class="text-end"><code>{{mongoSlowSamplePlan}}</code></td></tr>
+                      </tbody>
+                    </table>
+                  {{/if}}
+                </div>
+                <div class="card-footer text-muted small">profile.system entries · filter values redacted, keys only</div>
+              </div>
+            </div>
+          {{/if}}
+        </div>
+      {{else}}
+        {{#if hasMongoSlowQueries}}
+          <div class="row mb-3">
+            <div class="col-md-6">
+              <div class="card">
+                <div class="card-header">
+                  Mongo slow queries <span class="badge bg-secondary float-end">{{mongoSlowTotal}} slow · ≥{{mongoSlowThreshold}}ms</span>
+                </div>
+                <div class="card-body p-0">
+                  <table class="table table-sm mb-0">
+                    <thead>
+                      <tr><th>Op type</th><th class="text-end">count</th></tr>
+                    </thead>
+                    <tbody>
+                      {{#each mongoSlowByOpRows}}
+                        <tr><td><code>{{op}}</code></td><td class="text-end">{{count}}</td></tr>
+                      {{/each}}
+                    </tbody>
+                  </table>
+                  {{#if hasMongoSlowSample}}
+                    <table class="table table-sm mb-0">
+                      <tbody>
+                        <tr><td>slowest</td><td class="text-end"><code>{{mongoSlowSampleNs}}</code> · {{mongoSlowSampleOp}} · {{mongoSlowSampleMs}} ms</td></tr>
+                        <tr><td>filter keys</td><td class="text-end"><code>{{mongoSlowSampleFilterKeys}}</code></td></tr>
+                        <tr><td>plan</td><td class="text-end"><code>{{mongoSlowSamplePlan}}</code></td></tr>
+                      </tbody>
+                    </table>
+                  {{/if}}
+                </div>
+                <div class="card-footer text-muted small">profile.system entries · filter values redacted, keys only</div>
+              </div>
+            </div>
+          </div>
+        {{/if}}
+      {{/if}}
+
+      {{#if hasMongoIndexUsage}}
+        {{#each mongoIndexCollections}}
+          <div class="row mb-3">
+            <div class="col-md-12">
+              <div class="card">
+                <div class="card-header">
+                  Mongo index usage · <code>{{collection}}</code>
+                </div>
+                <div class="card-body p-0">
+                  <table class="table table-sm mb-0">
+                    <thead>
+                      <tr><th>Index</th><th>Key</th><th class="text-end">ops in window</th><th class="text-end">tracked since</th></tr>
+                    </thead>
+                    <tbody>
+                      {{#each indexes}}
+                        <tr><td><code>{{name}}</code></td><td><code>{{keyJson}}</code></td><td class="text-end">{{ops_in_window}}</td><td class="text-end small">{{since}}</td></tr>
+                      {{/each}}
+                    </tbody>
+                  </table>
+                </div>
+                <div class="card-footer text-muted small">$indexStats delta over the run · ops_in_window=0 means dead-weight index (writes maintain it, no reads use it)</div>
+              </div>
+            </div>
+          </div>
+        {{/each}}
+      {{/if}}
     {{else}}
       <div class="alert alert-warning">Run not found.</div>
     {{/with}}
