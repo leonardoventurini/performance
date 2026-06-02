@@ -31,6 +31,7 @@ backlog, driver fallback) without polluting domain files.
 | [observer-pool-sampler.server.js](observer-pool-sampler.server.js) | `initObserverPoolSampler` | `OBSERVER_POOL_OUTPUT` | `observer_pool` |
 | [ddp-message-counter.server.js](ddp-message-counter.server.js) | `initDdpMessageCounter` | `DDP_MESSAGE_OUTPUT` | `ddp_messages` |
 | [frame-size-counter.server.js](frame-size-counter.server.js) | `initFrameSizeCounter` | `DDP_FRAME_SIZE_OUTPUT` | `ddp_frame_size` |
+| [compression-tracker.server.js](compression-tracker.server.js) | `initCompressionTracker` | `DDP_COMPRESSION_OUTPUT` | `ddp_compression` (combines with frame-size dump) |
 
 Each init is re-exported from
 [bench-monitors.server.js](bench-monitors.server.js) and called from

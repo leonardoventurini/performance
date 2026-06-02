@@ -18,6 +18,7 @@ import {
   prepareObserverPoolOutput,
   prepareDdpMessageOutput,
   prepareFrameSizeOutput,
+  prepareCompressionOutput,
   startCollectors,
   stopCollectors,
   drainPostStopGc,
@@ -37,6 +38,7 @@ export async function runArtilleryDriver({ scenario, scenarioName, app, appName,
   const observerPoolPath = prepareObserverPoolOutput(tag);
   const ddpMessagePath = prepareDdpMessageOutput(tag);
   const frameSizePath = prepareFrameSizeOutput(tag);
+  const compressionPath = prepareCompressionOutput(tag);
   console.log(`GC monitor: ${gcMonitorPath}`);
   console.log(`GC output: ${gcOutputPath}`);
   console.log(`Method timing output: ${methodTimingPath}`);
@@ -48,7 +50,7 @@ export async function runArtilleryDriver({ scenario, scenarioName, app, appName,
 
   console.log('Starting Meteor app (with GC + bench-monitors)...');
   const { proc: meteorProc, getRuntimeInfo } = startMeteorApp({
-    source, appPath: app.path, port: config.appPort, env, gcMonitorPath, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath, frameSizePath,
+    source, appPath: app.path, port: config.appPort, env, gcMonitorPath, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath, frameSizePath, compressionPath,
   });
 
   console.log('Waiting for app to start...');
@@ -59,7 +61,7 @@ export async function runArtilleryDriver({ scenario, scenarioName, app, appName,
   // Meteor's local Mongo lives on appPort + 1. BENCH_MONGO_URL overrides
   // for external Mongo (Galaxy, separate node, etc.).
   const mongoUri = process.env.BENCH_MONGO_URL || `mongodb://127.0.0.1:${config.appPort + 1}`;
-  const collectors = startCollectors({ appName, mongoUri, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath, frameSizePath });
+  const collectors = startCollectors({ appName, mongoUri, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath, frameSizePath, compressionPath });
 
   // Override the YAML's hard-coded target so artillery hits whichever
   // port the harness picked via BENCH_PORT (defaults to 3000). Also

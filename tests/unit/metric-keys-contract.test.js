@@ -56,6 +56,7 @@ const ALLOWED_METRIC_KEYS = new Set([
   'mongo_pool',               // task 14 — Mongo connection pool (current/active/total_created, time-series)
   'mongo_changestream',       // task 24 — Active change-stream cursors (count + per-namespace, time-series at 250ms)
   'mongo_wiredtiger',         // task 15 — WiredTiger cache hit ratio + bytes-in-cache snapshot
+  'ddp_compression',          // task 09 — DDP compression ratio (coarse, post-compression socket bytes vs pre-compression JSON bytes)
 ]);
 
 const FIXTURES_DIR = path.join(import.meta.dirname, 'fixtures');

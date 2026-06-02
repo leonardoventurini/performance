@@ -15,6 +15,7 @@ import { summarize } from '../lib/percentiles.js';
 import { aggregateObserverPool } from '../runner/observer-pool-aggregator.js';
 import { aggregateDdpMessages } from '../runner/message-rate-aggregator.js';
 import { aggregateFrameSize } from '../runner/frame-size-aggregator.js';
+import { aggregateCompression } from '../runner/compression-aggregator.js';
 
 const HERE = import.meta.dirname;
 const PROCESS_MONITOR = path.resolve(HERE, '..', 'collectors', 'process-monitor.js');
@@ -80,6 +81,15 @@ export function prepareDdpMessageOutput(tag) {
 export function prepareFrameSizeOutput(tag) {
   if (!io.existsSync(RESULTS_DIR)) io.mkdirSync(RESULTS_DIR, { recursive: true });
   return path.join(RESULTS_DIR, `frame-size-${tag}-${Date.now()}.json`);
+}
+
+// Same pattern, for the compression tracker (DDP_COMPRESSION_OUTPUT env var
+// → metrics.ddp_compression). The in-app tracker dumps post-compression
+// socket byte totals; combined with the frame-size dump (pre-compression
+// byte sums), the harness aggregator emits the ratio + savings_pct.
+export function prepareCompressionOutput(tag) {
+  if (!io.existsSync(RESULTS_DIR)) io.mkdirSync(RESULTS_DIR, { recursive: true });
+  return path.join(RESULTS_DIR, `compression-${tag}-${Date.now()}.json`);
 }
 
 // Aggregator: turns the raw samples Map dumped by the in-app collector
@@ -253,7 +263,7 @@ function spawnMongoWiredTigerMonitor(mongoUri) {
   return { proc, name: 'MONGO_WIREDTIGER', getResult: () => stdout };
 }
 
-export function startCollectors({ appName, mongoUri, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath, frameSizePath }) {
+export function startCollectors({ appName, mongoUri, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath, frameSizePath, compressionPath }) {
   const procs = [];
 
   const appPid = findPid(`${appName}/.meteor/local/build/main.js`);
@@ -279,10 +289,10 @@ export function startCollectors({ appName, mongoUri, gcOutputPath, methodTimingP
     procs.push(spawnMongoWiredTigerMonitor(mongoUri));
   }
 
-  return { procs, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath, frameSizePath };
+  return { procs, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath, frameSizePath, compressionPath };
 }
 
-export async function stopCollectors({ procs, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath, frameSizePath }) {
+export async function stopCollectors({ procs, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath, frameSizePath, compressionPath }) {
   const results = [];
 
   for (const { proc, name, getResult } of procs) {
@@ -396,11 +406,13 @@ export async function stopCollectors({ procs, gcOutputPath, methodTimingPath, su
   // Frame size: in-app counter dumps raw per-message byte sizes + per-type
   // byte sums; we compute in/out size percentiles here. Omitted entirely
   // when no messages were observed (absence convention → aggregator returns
-  // null).
+  // null). NOTE: we keep the parsed dump in scope so the compression
+  // aggregator below can pair it with the post-compression socket totals.
+  let frameSizeDump = null;
   if (frameSizePath && io.existsSync(frameSizePath)) {
     try {
-      const dump = JSON.parse(io.readFileSync(frameSizePath, 'utf8'));
-      const aggregated = aggregateFrameSize(dump);
+      frameSizeDump = JSON.parse(io.readFileSync(frameSizePath, 'utf8'));
+      const aggregated = aggregateFrameSize(frameSizeDump);
       if (aggregated) {
         results.push(aggregated);
         console.log(`DDP frame size: in avg=${aggregated.in.avg_bytes}B p95=${aggregated.in.p95_bytes}B, out avg=${aggregated.out.avg_bytes}B p95=${aggregated.out.p95_bytes}B`);
@@ -408,6 +420,25 @@ export async function stopCollectors({ procs, gcOutputPath, methodTimingPath, su
       io.unlinkSync(frameSizePath);
     } catch (err) {
       console.error(`Could not read DDP frame sizes from ${frameSizePath}: ${err.message}`);
+    }
+  }
+
+  // Compression: needs BOTH the post-compression socket totals (own dump)
+  // AND the pre-compression byte sums (frameSize dump above). If either is
+  // missing the aggregator returns null and we omit the key.
+  if (compressionPath && io.existsSync(compressionPath)) {
+    try {
+      const compressionDump = JSON.parse(io.readFileSync(compressionPath, 'utf8'));
+      const aggregated = aggregateCompression({ frameSize: frameSizeDump, compression: compressionDump });
+      if (aggregated) {
+        results.push(aggregated);
+        const outRatio = aggregated.out.ratio == null ? 'n/a' : `${aggregated.out.savings_pct}%`;
+        const inRatio = aggregated.in.ratio == null ? 'n/a' : `${aggregated.in.savings_pct}%`;
+        console.log(`DDP compression: out savings=${outRatio} (${aggregated.out.compressed_bytes}/${aggregated.out.uncompressed_bytes}), in savings=${inRatio} (${aggregated.in.compressed_bytes}/${aggregated.in.uncompressed_bytes})`);
+      }
+      io.unlinkSync(compressionPath);
+    } catch (err) {
+      console.error(`Could not read DDP compression from ${compressionPath}: ${err.message}`);
     }
   }
 
