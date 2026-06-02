@@ -28,6 +28,7 @@ import {
 import { waitForApp } from '../runner/wait-for-app.js';
 import {
   prepareGcOutput,
+  prepareMethodTimingOutput,
   startCollectors,
   stopCollectors,
   drainPostStopGc,
@@ -42,17 +43,18 @@ export async function runScriptDriver({ scenario, scenarioName, app, appName, so
   resetMeteorApp(source, app.path);
 
   const { gcMonitorPath, gcOutputPath } = prepareGcOutput(tag);
+  const methodTimingPath = prepareMethodTimingOutput(tag);
 
   console.log('Starting Meteor app...');
   const { proc: meteorProc, getRuntimeInfo } = startMeteorApp({
-    source, appPath: app.path, port: config.appPort, env, gcMonitorPath, gcOutputPath,
+    source, appPath: app.path, port: config.appPort, env, gcMonitorPath, gcOutputPath, methodTimingPath,
   });
 
   console.log('Waiting for app to start...');
   await waitForApp(config.appPort);
   console.log('App started.');
 
-  const collectors = startCollectors({ appName, gcOutputPath });
+  const collectors = startCollectors({ appName, gcOutputPath, methodTimingPath });
 
   const scriptPath = path.resolve(HERE, '..', scenario.script);
   const scriptArgs = (scenario.args || '').split(/\s+/).filter(Boolean);

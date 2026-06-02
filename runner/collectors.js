@@ -11,6 +11,7 @@
 import path from 'node:path';
 import { io } from './_io.js';
 import { findPid } from './meteor-process.js';
+import { summarize } from '../lib/percentiles.js';
 
 const HERE = import.meta.dirname;
 const PROCESS_MONITOR = path.resolve(HERE, '..', 'collectors', 'process-monitor.js');
@@ -26,6 +27,44 @@ export function prepareGcOutput(tag) {
   };
 }
 
+// Path the in-app method-timing collector dumps to on Meteor's SIGTERM.
+// Passed through startMeteorApp's METHOD_TIMING_OUTPUT env var and read
+// here in stopCollectors.
+export function prepareMethodTimingOutput(tag) {
+  if (!io.existsSync(RESULTS_DIR)) io.mkdirSync(RESULTS_DIR, { recursive: true });
+  return path.join(RESULTS_DIR, `method-timing-${tag}-${Date.now()}.json`);
+}
+
+// Aggregator: turns the raw samples Map dumped by the in-app collector
+// into the metrics.ddp_methods shape. Exported for unit-testing without
+// the full collectors lifecycle.
+//
+// Field naming follows CC-4: percentile names are BARE (p50, p95, p99)
+// to match the shipped event_loop_delay contract; non-percentile latency
+// scalars carry _ms suffix.
+//
+// Returns null when no samples were captured at all (per absence
+// convention CC-5: collector ran but emitted nothing → omit the key).
+export function aggregateMethodTiming(samplesByMethod) {
+  const methods = {};
+  let totalCalls = 0;
+  for (const [name, samples] of Object.entries(samplesByMethod || {})) {
+    const stats = summarize(samples);
+    if (!stats) continue;
+    methods[name] = {
+      count: stats.count,
+      avg_ms: stats.avg,
+      p50: stats.p50,
+      p95: stats.p95,
+      p99: stats.p99,
+      max_ms: stats.max,
+    };
+    totalCalls += stats.count;
+  }
+  if (totalCalls === 0) return null;
+  return { metric: 'ddp_methods', methods, total_calls: totalCalls };
+}
+
 function spawnProcessMonitor(pid, name) {
   const proc = io.spawn('node', [PROCESS_MONITOR, pid, name], {
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -36,7 +75,7 @@ function spawnProcessMonitor(pid, name) {
   return { proc, name, getResult: () => stdout };
 }
 
-export function startCollectors({ appName, gcOutputPath }) {
+export function startCollectors({ appName, gcOutputPath, methodTimingPath }) {
   const procs = [];
 
   const appPid = findPid(`${appName}/.meteor/local/build/main.js`);
@@ -53,10 +92,10 @@ export function startCollectors({ appName, gcOutputPath }) {
     console.error(`No DB pid found for ${appName}; skipping db_resources collector.`);
   }
 
-  return { procs, gcOutputPath };
+  return { procs, gcOutputPath, methodTimingPath };
 }
 
-export async function stopCollectors({ procs, gcOutputPath }) {
+export async function stopCollectors({ procs, gcOutputPath, methodTimingPath }) {
   const results = [];
 
   for (const { proc, name, getResult } of procs) {
@@ -82,6 +121,24 @@ export async function stopCollectors({ procs, gcOutputPath }) {
       io.unlinkSync(gcOutputPath);
     } catch (err) {
       console.error(`Could not read GC metrics from ${gcOutputPath}: ${err.message}`);
+    }
+  }
+
+  // Method timing: in-app collector dumps the raw samples Map; we aggregate
+  // into the ddp_methods shape here. If the file doesn't exist (the app
+  // didn't run with METHOD_TIMING_OUTPUT set) we omit the metric entirely
+  // per the absence convention.
+  if (methodTimingPath && io.existsSync(methodTimingPath)) {
+    try {
+      const dump = JSON.parse(io.readFileSync(methodTimingPath, 'utf8'));
+      const aggregated = aggregateMethodTiming(dump);
+      if (aggregated) {
+        results.push(aggregated);
+        console.log(`DDP methods: ${aggregated.total_calls} calls across ${Object.keys(aggregated.methods).length} methods`);
+      }
+      io.unlinkSync(methodTimingPath);
+    } catch (err) {
+      console.error(`Could not read method timing from ${methodTimingPath}: ${err.message}`);
     }
   }
 

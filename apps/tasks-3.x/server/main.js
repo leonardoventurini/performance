@@ -1,6 +1,6 @@
 import { Meteor } from 'meteor/meteor';
 import { Mongo } from 'meteor/mongo';
-import { tryMonitorExtras, initializeTaskCollection, registerTaskApi } from 'meteor/tasks-common';
+import { tryMonitorExtras, initializeTaskCollection, registerTaskApi, initMethodTiming } from 'meteor/tasks-common';
 
 // Emit machine-parseable lines on startup. The benchmark harness greps
 // these from stderr and surfaces them under `runtime.*` in the result
@@ -84,7 +84,10 @@ async function logRuntimeInfo() {
 
 Meteor.startup(async () => {
   await logRuntimeInfo();
+  // initMethodTiming must run BEFORE registerTaskApi: it patches
+  // Meteor.methods and the wrap only applies to subsequent registrations.
+  initMethodTiming();
   tryMonitorExtras();
   initializeTaskCollection();
-  registerTaskApi();
+  await registerTaskApi();
 });
