@@ -24,6 +24,7 @@ const MONGO_SLOW_QUERY_MONITOR = path.resolve(HERE, '..', 'collectors', 'mongo-s
 const MONGO_INDEX_MONITOR = path.resolve(HERE, '..', 'collectors', 'mongo-index-usage-monitor.js');
 const MONGO_POOL_MONITOR = path.resolve(HERE, '..', 'collectors', 'mongo-pool-monitor.js');
 const MONGO_CHANGESTREAM_MONITOR = path.resolve(HERE, '..', 'collectors', 'mongo-changestream-monitor.js');
+const MONGO_WIREDTIGER_MONITOR = path.resolve(HERE, '..', 'collectors', 'mongo-wiredtiger-monitor.js');
 const RESULTS_DIR = path.resolve(HERE, '..', 'results');
 const COLLECTOR_DRAIN_MS = 1000;
 
@@ -236,6 +237,22 @@ function spawnMongoChangestreamMonitor(mongoUri) {
   return { proc, name: 'MONGO_CHANGESTREAM', getResult: () => stdout };
 }
 
+// Mongo WiredTiger cache collector — out-of-process script that reads
+// serverStatus().wiredTiger.cache at startup and again on SIGTERM,
+// computes the cache hit ratio + page-count deltas + end bytes-in-cache,
+// and emits the metrics.mongo_wiredtiger JSON on stdout. Same shape as
+// spawnMongoOpsMonitor so it rides stopCollectors' generic
+// JSON-from-stdout drain with no special handling.
+function spawnMongoWiredTigerMonitor(mongoUri) {
+  const proc = io.spawn('node', [MONGO_WIREDTIGER_MONITOR, mongoUri], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  proc.stderr.on('data', (d) => process.stderr.write(d));
+  let stdout = '';
+  proc.stdout.on('data', (d) => { stdout += d; });
+  return { proc, name: 'MONGO_WIREDTIGER', getResult: () => stdout };
+}
+
 export function startCollectors({ appName, mongoUri, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath, frameSizePath }) {
   const procs = [];
 
@@ -259,6 +276,7 @@ export function startCollectors({ appName, mongoUri, gcOutputPath, methodTimingP
     procs.push(spawnMongoIndexUsageMonitor(mongoUri));
     procs.push(spawnMongoPoolMonitor(mongoUri));
     procs.push(spawnMongoChangestreamMonitor(mongoUri));
+    procs.push(spawnMongoWiredTigerMonitor(mongoUri));
   }
 
   return { procs, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath, frameSizePath };
