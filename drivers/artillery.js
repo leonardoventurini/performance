@@ -17,6 +17,7 @@ import {
   preparePropagationTimingOutput,
   prepareObserverPoolOutput,
   prepareDdpMessageOutput,
+  prepareFrameSizeOutput,
   startCollectors,
   stopCollectors,
   drainPostStopGc,
@@ -35,6 +36,7 @@ export async function runArtilleryDriver({ scenario, scenarioName, app, appName,
   const propagationTimingPath = preparePropagationTimingOutput(tag);
   const observerPoolPath = prepareObserverPoolOutput(tag);
   const ddpMessagePath = prepareDdpMessageOutput(tag);
+  const frameSizePath = prepareFrameSizeOutput(tag);
   console.log(`GC monitor: ${gcMonitorPath}`);
   console.log(`GC output: ${gcOutputPath}`);
   console.log(`Method timing output: ${methodTimingPath}`);
@@ -42,10 +44,11 @@ export async function runArtilleryDriver({ scenario, scenarioName, app, appName,
   console.log(`Propagation timing output: ${propagationTimingPath}`);
   console.log(`Observer pool output: ${observerPoolPath}`);
   console.log(`DDP message output: ${ddpMessagePath}`);
+  console.log(`DDP frame size output: ${frameSizePath}`);
 
   console.log('Starting Meteor app (with GC + bench-monitors)...');
   const { proc: meteorProc, getRuntimeInfo } = startMeteorApp({
-    source, appPath: app.path, port: config.appPort, env, gcMonitorPath, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath,
+    source, appPath: app.path, port: config.appPort, env, gcMonitorPath, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath, frameSizePath,
   });
 
   console.log('Waiting for app to start...');
@@ -56,7 +59,7 @@ export async function runArtilleryDriver({ scenario, scenarioName, app, appName,
   // Meteor's local Mongo lives on appPort + 1. BENCH_MONGO_URL overrides
   // for external Mongo (Galaxy, separate node, etc.).
   const mongoUri = process.env.BENCH_MONGO_URL || `mongodb://127.0.0.1:${config.appPort + 1}`;
-  const collectors = startCollectors({ appName, mongoUri, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath });
+  const collectors = startCollectors({ appName, mongoUri, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath, frameSizePath });
 
   // Override the YAML's hard-coded target so artillery hits whichever
   // port the harness picked via BENCH_PORT (defaults to 3000). Also

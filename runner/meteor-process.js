@@ -31,12 +31,13 @@ export function resetMeteorApp(source, appPath) {
 // shape callers used to get; getRuntimeInfo() returns the latest captured
 // `[runtime-info]` values (observer_driver, transport) the app printed.
 // `methodTimingPath` / `subTimingPath` / `propagationTimingPath` /
-// `observerPoolPath` / `ddpMessagePath` (optional) — when set, the spawned
-// Meteor sees them as METHOD_TIMING_OUTPUT / SUB_TIMING_OUTPUT /
-// PROPAGATION_TIMING_OUTPUT / OBSERVER_POOL_OUTPUT / DDP_MESSAGE_OUTPUT and
-// the matching in-app bench-monitors collector dumps to that path on
-// SIGTERM. The harness reads them in stopCollectors.
-export function startMeteorApp({ source, appPath, port, env = {}, gcMonitorPath, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath }) {
+// `observerPoolPath` / `ddpMessagePath` / `frameSizePath` (optional) — when
+// set, the spawned Meteor sees them as METHOD_TIMING_OUTPUT /
+// SUB_TIMING_OUTPUT / PROPAGATION_TIMING_OUTPUT / OBSERVER_POOL_OUTPUT /
+// DDP_MESSAGE_OUTPUT / DDP_FRAME_SIZE_OUTPUT and the matching in-app
+// bench-monitors collector dumps to that path on SIGTERM. The harness reads
+// them in stopCollectors.
+export function startMeteorApp({ source, appPath, port, env = {}, gcMonitorPath, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath, frameSizePath }) {
   const spawnEnv = { ...process.env, ...env, METEOR_NO_DEPRECATION: 'true' };
   if (gcMonitorPath) {
     spawnEnv.SERVER_NODE_OPTIONS = `--require ${gcMonitorPath}`;
@@ -47,6 +48,7 @@ export function startMeteorApp({ source, appPath, port, env = {}, gcMonitorPath,
   if (propagationTimingPath) spawnEnv.PROPAGATION_TIMING_OUTPUT = propagationTimingPath;
   if (observerPoolPath) spawnEnv.OBSERVER_POOL_OUTPUT = observerPoolPath;
   if (ddpMessagePath) spawnEnv.DDP_MESSAGE_OUTPUT = ddpMessagePath;
+  if (frameSizePath) spawnEnv.DDP_FRAME_SIZE_OUTPUT = frameSizePath;
   const proc = io.spawn(source.meteorCmd, meteorArgv(source, ['run', '--port', String(port)]), {
     cwd: appPath,
     env: spawnEnv,

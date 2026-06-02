@@ -30,6 +30,7 @@ backlog, driver fallback) without polluting domain files.
 | [propagation-timing.server.js](propagation-timing.server.js) | `initPropagationTiming` | `PROPAGATION_TIMING_OUTPUT` | `live_update_propagation` |
 | [observer-pool-sampler.server.js](observer-pool-sampler.server.js) | `initObserverPoolSampler` | `OBSERVER_POOL_OUTPUT` | `observer_pool` |
 | [ddp-message-counter.server.js](ddp-message-counter.server.js) | `initDdpMessageCounter` | `DDP_MESSAGE_OUTPUT` | `ddp_messages` |
+| [frame-size-counter.server.js](frame-size-counter.server.js) | `initFrameSizeCounter` | `DDP_FRAME_SIZE_OUTPUT` | `ddp_frame_size` |
 
 Each init is re-exported from
 [bench-monitors.server.js](bench-monitors.server.js) and called from
@@ -167,5 +168,6 @@ bench-monitors/
 ├── propagation-timing.server.js     live_update_propagation (task 03)
 ├── observer-pool-sampler.server.js  observer_pool (task 05)
 ├── ddp-message-counter.server.js    ddp_messages (task 07)
+├── frame-size-counter.server.js     ddp_frame_size (task 08)
 └── README.md                        this file
 ```

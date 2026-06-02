@@ -7,5 +7,6 @@ import { initSubTiming } from './sub-timing.server';
 import { initPropagationTiming } from './propagation-timing.server';
 import { initObserverPoolSampler } from './observer-pool-sampler.server';
 import { initDdpMessageCounter } from './ddp-message-counter.server';
+import { initFrameSizeCounter } from './frame-size-counter.server';
 
-export { initMethodTiming, initSubTiming, initPropagationTiming, initObserverPoolSampler, initDdpMessageCounter };
+export { initMethodTiming, initSubTiming, initPropagationTiming, initObserverPoolSampler, initDdpMessageCounter, initFrameSizeCounter };

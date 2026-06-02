@@ -50,6 +50,7 @@ const ALLOWED_METRIC_KEYS = new Set([
 
   // Phase B metrics:
   'ddp_messages',             // task 07 — DDP message rate (in/out counts + per-sec, by_type)
+  'ddp_frame_size',           // task 08 — DDP message byte sizes (in/out percentiles + by_type byte sums)
   'mongo_slow_queries',       // task 12 — Mongo slow-query profile aggregation
   'mongo_index_usage',        // task 13 — Per-index ops + first-use timestamp via $indexStats
   'mongo_pool',               // task 14 — Mongo connection pool (current/active/total_created, time-series)

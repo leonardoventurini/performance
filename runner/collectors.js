@@ -14,6 +14,7 @@ import { findPid } from './meteor-process.js';
 import { summarize } from '../lib/percentiles.js';
 import { aggregateObserverPool } from '../runner/observer-pool-aggregator.js';
 import { aggregateDdpMessages } from '../runner/message-rate-aggregator.js';
+import { aggregateFrameSize } from '../runner/frame-size-aggregator.js';
 
 const HERE = import.meta.dirname;
 const PROCESS_MONITOR = path.resolve(HERE, '..', 'collectors', 'process-monitor.js');
@@ -69,6 +70,14 @@ export function prepareObserverPoolOutput(tag) {
 export function prepareDdpMessageOutput(tag) {
   if (!io.existsSync(RESULTS_DIR)) io.mkdirSync(RESULTS_DIR, { recursive: true });
   return path.join(RESULTS_DIR, `ddp-messages-${tag}-${Date.now()}.json`);
+}
+
+// Same pattern, for the frame-size counter (DDP_FRAME_SIZE_OUTPUT env var
+// → metrics.ddp_frame_size). The in-app counter dumps RAW per-message byte
+// sizes + per-type byte sums; we compute size percentiles in stopCollectors.
+export function prepareFrameSizeOutput(tag) {
+  if (!io.existsSync(RESULTS_DIR)) io.mkdirSync(RESULTS_DIR, { recursive: true });
+  return path.join(RESULTS_DIR, `frame-size-${tag}-${Date.now()}.json`);
 }
 
 // Aggregator: turns the raw samples Map dumped by the in-app collector
@@ -211,7 +220,7 @@ function spawnMongoPoolMonitor(mongoUri) {
   return { proc, name: 'MONGO_POOL', getResult: () => stdout };
 }
 
-export function startCollectors({ appName, mongoUri, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath }) {
+export function startCollectors({ appName, mongoUri, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath, frameSizePath }) {
   const procs = [];
 
   const appPid = findPid(`${appName}/.meteor/local/build/main.js`);
@@ -235,10 +244,10 @@ export function startCollectors({ appName, mongoUri, gcOutputPath, methodTimingP
     procs.push(spawnMongoPoolMonitor(mongoUri));
   }
 
-  return { procs, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath };
+  return { procs, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath, frameSizePath };
 }
 
-export async function stopCollectors({ procs, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath }) {
+export async function stopCollectors({ procs, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath, frameSizePath }) {
   const results = [];
 
   for (const { proc, name, getResult } of procs) {
@@ -346,6 +355,24 @@ export async function stopCollectors({ procs, gcOutputPath, methodTimingPath, su
       io.unlinkSync(ddpMessagePath);
     } catch (err) {
       console.error(`Could not read DDP message counts from ${ddpMessagePath}: ${err.message}`);
+    }
+  }
+
+  // Frame size: in-app counter dumps raw per-message byte sizes + per-type
+  // byte sums; we compute in/out size percentiles here. Omitted entirely
+  // when no messages were observed (absence convention → aggregator returns
+  // null).
+  if (frameSizePath && io.existsSync(frameSizePath)) {
+    try {
+      const dump = JSON.parse(io.readFileSync(frameSizePath, 'utf8'));
+      const aggregated = aggregateFrameSize(dump);
+      if (aggregated) {
+        results.push(aggregated);
+        console.log(`DDP frame size: in avg=${aggregated.in.avg_bytes}B p95=${aggregated.in.p95_bytes}B, out avg=${aggregated.out.avg_bytes}B p95=${aggregated.out.p95_bytes}B`);
+      }
+      io.unlinkSync(frameSizePath);
+    } catch (err) {
+      console.error(`Could not read DDP frame sizes from ${frameSizePath}: ${err.message}`);
     }
   }
 

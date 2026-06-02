@@ -1,7 +1,7 @@
 import { Meteor } from 'meteor/meteor';
 import { Mongo } from 'meteor/mongo';
 import { tryMonitorExtras, initializeTaskCollection, registerTaskApi } from 'meteor/tasks-common';
-import { initMethodTiming, initSubTiming, initPropagationTiming, initObserverPoolSampler, initDdpMessageCounter } from 'meteor/bench-monitors';
+import { initMethodTiming, initSubTiming, initPropagationTiming, initObserverPoolSampler, initDdpMessageCounter, initFrameSizeCounter } from 'meteor/bench-monitors';
 
 // Emit machine-parseable lines on startup. The benchmark harness greps
 // these from stderr and surfaces them under `runtime.*` in the result
@@ -95,6 +95,9 @@ Meteor.startup(async () => {
   //     Meteor.onMessage (monkey-patches a prototype + a registration
   //     hook, so order isn't strictly load-bearing — kept here for
   //     consistency with the other Session-prototype monitors).
+  //   - initFrameSizeCounter patches Session.prototype.send + Meteor.onMessage
+  //     too (same hook points as the message counter, measuring byte size
+  //     instead of count — independent wraps, also order-insensitive).
   // The wraps only apply to subsequent registrations / instances.
   // initObserverPoolSampler only READS _observeMultiplexers on an interval
   // (no wrap), so its order is not load-bearing — kept here for consistency.
@@ -102,6 +105,7 @@ Meteor.startup(async () => {
   initSubTiming();
   initPropagationTiming();
   initDdpMessageCounter();
+  initFrameSizeCounter();
   initObserverPoolSampler();
   tryMonitorExtras();
   initializeTaskCollection();
