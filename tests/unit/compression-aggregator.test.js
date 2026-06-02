@@ -45,6 +45,25 @@ describe('aggregateCompression', () => {
     });
   });
 
+  test('suspicious-zero: uncompressed > 0 but compressed = 0 → ratio + savings_pct null (not 100%)', () => {
+    // Real compression never reduces traffic to zero bytes. When we see
+    // uncompressed > 0 but compressed = 0 it means socket-byte capture
+    // failed (compression-tracker couldn't resolve the TCP socket).
+    // Emit nulls instead of a misleading "100% savings".
+    const r = aggregateCompression({
+      frameSize: { in_sizes: [100, 200], out_sizes: [500] },
+      compression: { compressed_bytes_in: 0, compressed_bytes_out: 0 },
+    });
+    assert.equal(r.in.uncompressed_bytes, 300);
+    assert.equal(r.in.compressed_bytes, 0);
+    assert.equal(r.in.ratio, null);
+    assert.equal(r.in.savings_pct, null);
+    assert.equal(r.out.uncompressed_bytes, 500);
+    assert.equal(r.out.compressed_bytes, 0);
+    assert.equal(r.out.ratio, null);
+    assert.equal(r.out.savings_pct, null);
+  });
+
   test('zero uncompressed in a direction → ratio + savings_pct null', () => {
     const r = aggregateCompression({
       frameSize: { in_sizes: [], out_sizes: [100] },

@@ -405,6 +405,135 @@
           </div>
         {{/each}}
       {{/if}}
+
+      {{#if hasDdpFrameSize}}
+        <div class="row mb-3">
+          <div class="col-md-6">
+            <div class="card">
+              <div class="card-header">DDP frame size</div>
+              <div class="card-body p-0">
+                <table class="table table-sm mb-0">
+                  <thead>
+                    <tr><th>Direction</th><th class="text-end">count</th><th class="text-end">avg</th><th class="text-end">p50</th><th class="text-end">p95</th><th class="text-end">p99</th><th class="text-end">max</th></tr>
+                  </thead>
+                  <tbody>
+                    <tr><td>in</td><td class="text-end">{{frameInCount}}</td><td class="text-end">{{frameInAvg}}</td><td class="text-end">{{frameInP50}}</td><td class="text-end">{{frameInP95}}</td><td class="text-end">{{frameInP99}}</td><td class="text-end">{{frameInMax}}</td></tr>
+                    <tr><td>out</td><td class="text-end">{{frameOutCount}}</td><td class="text-end">{{frameOutAvg}}</td><td class="text-end">{{frameOutP50}}</td><td class="text-end">{{frameOutP95}}</td><td class="text-end">{{frameOutP99}}</td><td class="text-end">{{frameOutMax}}</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="card-footer text-muted small">bytes per DDP frame · JSON.stringify length · pre-compression</div>
+            </div>
+          </div>
+
+          {{#if hasDdpCompression}}
+            <div class="col-md-6">
+              <div class="card">
+                <div class="card-header">DDP compression (coarse)</div>
+                <div class="card-body p-0">
+                  <table class="table table-sm mb-0">
+                    <thead>
+                      <tr><th>Direction</th><th class="text-end">uncompressed</th><th class="text-end">compressed</th><th class="text-end">ratio</th><th class="text-end">savings</th></tr>
+                    </thead>
+                    <tbody>
+                      <tr><td>in</td><td class="text-end">{{compIn.uncompressed}}</td><td class="text-end">{{compIn.compressed}}</td><td class="text-end">{{compIn.ratio}}</td><td class="text-end">{{compIn.savings}}</td></tr>
+                      <tr><td>out</td><td class="text-end">{{compOut.uncompressed}}</td><td class="text-end">{{compOut.compressed}}</td><td class="text-end">{{compOut.ratio}}</td><td class="text-end">{{compOut.savings}}</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+                <div class="card-footer text-muted small">socket.bytesRead/Written vs pre-compression JSON · includes WS framing overhead (coarse)</div>
+              </div>
+            </div>
+          {{/if}}
+        </div>
+      {{/if}}
+
+      {{#if hasMongoChangestream}}
+        <div class="row mb-3">
+          <div class="col-md-6">
+            <div class="card">
+              <div class="card-header">
+                Mongo change-stream cursors <span class="badge bg-secondary float-end">{{changestreamSamples}} samples @ {{changestreamInterval}}ms</span>
+              </div>
+              <div class="card-body p-0">
+                <table class="table table-sm mb-0">
+                  <thead>
+                    <tr><th></th><th class="text-end">min</th><th class="text-end">max</th><th class="text-end">avg</th><th class="text-end">end</th></tr>
+                  </thead>
+                  <tbody>
+                    <tr><td>total cursors</td><td class="text-end">{{changestreamCursorMin}}</td><td class="text-end">{{changestreamCursorMax}}</td><td class="text-end">{{changestreamCursorAvg}}</td><td class="text-end">{{changestreamCursorEnd}}</td></tr>
+                  </tbody>
+                </table>
+                {{#if hasChangestreamNamespaces}}
+                  <table class="table table-sm mb-0">
+                    <thead>
+                      <tr><th>Namespace</th><th class="text-end">max</th><th class="text-end">avg</th></tr>
+                    </thead>
+                    <tbody>
+                      {{#each changestreamNamespaces}}
+                        <tr><td><code>{{ns}}</code></td><td class="text-end">{{max}}</td><td class="text-end">{{avg}}</td></tr>
+                      {{/each}}
+                    </tbody>
+                  </table>
+                {{/if}}
+              </div>
+              <div class="card-footer text-muted small">active currentOp getmores for $changeStream pipelines · 250ms sampling</div>
+            </div>
+          </div>
+
+          {{#if hasMongoWiredtiger}}
+            <div class="col-md-6">
+              <div class="card">
+                <div class="card-header">
+                  Mongo WiredTiger cache <span class="badge bg-secondary float-end">hit ratio {{wtRatioPct}}</span>
+                </div>
+                <div class="card-body">
+                  <table class="table table-sm mb-0">
+                    <tr><td>cache hit ratio</td><td class="text-end">{{wtRatio}}</td></tr>
+                    <tr><td>pages requested</td><td class="text-end">{{wtRequested}}</td></tr>
+                    <tr><td>pages read into cache</td><td class="text-end">{{wtReadIn}}</td></tr>
+                    <tr><td>pages written from cache</td><td class="text-end">{{wtWritten}}</td></tr>
+                    <tr><td>bytes in cache (end)</td><td class="text-end">{{wtBytesInCache}}</td></tr>
+                  </table>
+                </div>
+                <div class="card-footer text-muted small">WT cache traffic over the run · hit ratio above 0.95 is healthy on Meteor workloads</div>
+              </div>
+            </div>
+          {{/if}}
+        </div>
+      {{/if}}
+
+      {{#if hasDriverFallbacks}}
+        <div class="row mb-3">
+          <div class="col-md-6">
+            <div class="card">
+              <div class="card-header">
+                Driver fallbacks <span class="badge bg-secondary float-end">{{driverConfiguredFirst}} configured</span>
+              </div>
+              <div class="card-body p-0">
+                <table class="table table-sm mb-0">
+                  <tr><td>total observe() calls</td><td class="text-end">{{driverTotal}}</td></tr>
+                  <tr><td>no fallback</td><td class="text-end">{{driverNoFallback}}</td></tr>
+                  <tr><td>fell back</td><td class="text-end">{{driverFallbackCount}}</td></tr>
+                </table>
+                {{#if hasDriverFallbackTransitions}}
+                  <table class="table table-sm mb-0">
+                    <thead>
+                      <tr><th>Transition</th><th class="text-end">cursors</th></tr>
+                    </thead>
+                    <tbody>
+                      {{#each driverFallbackRows}}
+                        <tr><td><code>{{transition}}</code></td><td class="text-end">{{count}}</td></tr>
+                      {{/each}}
+                    </tbody>
+                  </table>
+                {{/if}}
+              </div>
+              <div class="card-footer text-muted small">per-cursor driver actually selected vs first preference · silent fallback exposes mixed-workload runs</div>
+            </div>
+          </div>
+        </div>
+      {{/if}}
     {{else}}
       <div class="alert alert-warning">Run not found.</div>
     {{/with}}

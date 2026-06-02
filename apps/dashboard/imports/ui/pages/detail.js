@@ -218,4 +218,108 @@ Template.detail.helpers({
       })),
     }));
   },
+
+  // ─── DDP frame size (task 08) ──────────────────────────────────────
+  hasDdpFrameSize() { return !!this.metrics?.ddp_frame_size; },
+  frameInCount() { return fmtInt(this.metrics?.ddp_frame_size?.in?.count); },
+  frameInAvg() { return fmtInt(this.metrics?.ddp_frame_size?.in?.avg_bytes); },
+  frameInP50() { return fmtInt(this.metrics?.ddp_frame_size?.in?.p50_bytes); },
+  frameInP95() { return fmtInt(this.metrics?.ddp_frame_size?.in?.p95_bytes); },
+  frameInP99() { return fmtInt(this.metrics?.ddp_frame_size?.in?.p99_bytes); },
+  frameInMax() { return fmtInt(this.metrics?.ddp_frame_size?.in?.max_bytes); },
+  frameOutCount() { return fmtInt(this.metrics?.ddp_frame_size?.out?.count); },
+  frameOutAvg() { return fmtInt(this.metrics?.ddp_frame_size?.out?.avg_bytes); },
+  frameOutP50() { return fmtInt(this.metrics?.ddp_frame_size?.out?.p50_bytes); },
+  frameOutP95() { return fmtInt(this.metrics?.ddp_frame_size?.out?.p95_bytes); },
+  frameOutP99() { return fmtInt(this.metrics?.ddp_frame_size?.out?.p99_bytes); },
+  frameOutMax() { return fmtInt(this.metrics?.ddp_frame_size?.out?.max_bytes); },
+
+  // ─── DDP compression (task 09) ─────────────────────────────────────
+  hasDdpCompression() { return !!this.metrics?.ddp_compression; },
+  compIn() {
+    const d = this.metrics?.ddp_compression?.in ?? {};
+    return {
+      uncompressed: fmtInt(d.uncompressed_bytes),
+      compressed: fmtInt(d.compressed_bytes),
+      ratio: d.ratio == null ? '-' : d.ratio.toFixed(4),
+      savings: d.savings_pct == null ? '-' : `${d.savings_pct}%`,
+    };
+  },
+  compOut() {
+    const d = this.metrics?.ddp_compression?.out ?? {};
+    return {
+      uncompressed: fmtInt(d.uncompressed_bytes),
+      compressed: fmtInt(d.compressed_bytes),
+      ratio: d.ratio == null ? '-' : d.ratio.toFixed(4),
+      savings: d.savings_pct == null ? '-' : `${d.savings_pct}%`,
+    };
+  },
+
+  // ─── Mongo change-stream cursors (task 24) ─────────────────────────
+  hasMongoChangestream() { return !!this.metrics?.mongo_changestream; },
+  changestreamSamples() { return fmtInt(this.metrics?.mongo_changestream?.samples); },
+  changestreamInterval() { return fmtInt(this.metrics?.mongo_changestream?.interval_ms); },
+  changestreamCursorMin() { return fmtInt(this.metrics?.mongo_changestream?.cursor_count?.min); },
+  changestreamCursorMax() { return fmtInt(this.metrics?.mongo_changestream?.cursor_count?.max); },
+  changestreamCursorAvg() {
+    const v = this.metrics?.mongo_changestream?.cursor_count?.avg;
+    return v != null && Number.isFinite(v) ? v.toFixed(1) : '-';
+  },
+  changestreamCursorEnd() { return fmtInt(this.metrics?.mongo_changestream?.cursor_count?.end); },
+  hasChangestreamNamespaces() {
+    const byNs = this.metrics?.mongo_changestream?.by_namespace;
+    return byNs && Object.keys(byNs).length > 0;
+  },
+  changestreamNamespaces() {
+    const byNs = this.metrics?.mongo_changestream?.by_namespace ?? {};
+    return Object.entries(byNs)
+      .sort((a, b) => (b[1].max ?? 0) - (a[1].max ?? 0))
+      .map(([ns, v]) => ({
+        ns,
+        max: fmtInt(v.max),
+        avg: v.avg != null && Number.isFinite(v.avg) ? v.avg.toFixed(1) : '-',
+      }));
+  },
+
+  // ─── Mongo WiredTiger cache (task 15) ──────────────────────────────
+  hasMongoWiredtiger() { return !!this.metrics?.mongo_wiredtiger; },
+  wtRatio() {
+    const v = this.metrics?.mongo_wiredtiger?.cache_hit_ratio;
+    return v == null ? '-' : v.toFixed(4);
+  },
+  wtRatioPct() {
+    const v = this.metrics?.mongo_wiredtiger?.cache_hit_ratio;
+    return v == null ? 'n/a' : `${(v * 100).toFixed(1)}%`;
+  },
+  wtRequested() { return fmtInt(this.metrics?.mongo_wiredtiger?.pages_requested_in_window); },
+  wtReadIn() { return fmtInt(this.metrics?.mongo_wiredtiger?.pages_read_into_cache); },
+  wtWritten() { return fmtInt(this.metrics?.mongo_wiredtiger?.pages_written_from_cache); },
+  wtBytesInCache() {
+    const b = this.metrics?.mongo_wiredtiger?.bytes_in_cache_end;
+    if (b == null || !Number.isFinite(b)) return '-';
+    return `${(b / 1024 / 1024).toFixed(1)} MB`;
+  },
+
+  // ─── Driver fallbacks (task 10) ────────────────────────────────────
+  hasDriverFallbacks() { return !!this.metrics?.driver_fallbacks; },
+  driverTotal() { return fmtInt(this.metrics?.driver_fallbacks?.total_cursors); },
+  driverNoFallback() { return fmtInt(this.metrics?.driver_fallbacks?.no_fallback); },
+  driverFallbackCount() {
+    const t = this.metrics?.driver_fallbacks?.total_cursors ?? 0;
+    const nf = this.metrics?.driver_fallbacks?.no_fallback ?? 0;
+    return fmtInt(t - nf);
+  },
+  driverConfiguredFirst() {
+    return this.metrics?.driver_fallbacks?.configured_first ?? '-';
+  },
+  hasDriverFallbackTransitions() {
+    const f = this.metrics?.driver_fallbacks?.fallbacks;
+    return f && Object.keys(f).length > 0;
+  },
+  driverFallbackRows() {
+    const f = this.metrics?.driver_fallbacks?.fallbacks ?? {};
+    return Object.entries(f)
+      .sort((a, b) => b[1] - a[1])
+      .map(([transition, count]) => ({ transition, count: fmtInt(count) }));
+  },
 });

@@ -37,6 +37,20 @@ function directionStats(uncompressed, compressed) {
       savings_pct: null,
     };
   }
+  // Suspicious-zero guard: if we saw real uncompressed traffic but ZERO
+  // compressed bytes, the socket-byte capture failed (compression-tracker
+  // couldn't resolve the underlying TCP socket — known fragility on some
+  // Meteor + transport combinations). Don't emit a nonsense "100% savings"
+  // — flag as unmeasured via null ratio/savings_pct. Real compression
+  // never reduces a byte stream to zero, so this is unambiguous.
+  if (c <= 0) {
+    return {
+      uncompressed_bytes: u,
+      compressed_bytes: c,
+      ratio: null,
+      savings_pct: null,
+    };
+  }
   const ratio = +(c / u).toFixed(4);
   const savingsPct = +((1 - c / u) * 100).toFixed(1);
   return {
