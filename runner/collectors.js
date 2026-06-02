@@ -21,6 +21,7 @@ const GC_MONITOR = path.resolve(HERE, '..', 'collectors', 'gc-monitor.cjs');
 const MONGO_OPS_MONITOR = path.resolve(HERE, '..', 'collectors', 'mongo-ops-monitor.js');
 const MONGO_SLOW_QUERY_MONITOR = path.resolve(HERE, '..', 'collectors', 'mongo-slow-query-monitor.js');
 const MONGO_INDEX_MONITOR = path.resolve(HERE, '..', 'collectors', 'mongo-index-usage-monitor.js');
+const MONGO_POOL_MONITOR = path.resolve(HERE, '..', 'collectors', 'mongo-pool-monitor.js');
 const RESULTS_DIR = path.resolve(HERE, '..', 'results');
 const COLLECTOR_DRAIN_MS = 1000;
 
@@ -195,6 +196,21 @@ function spawnMongoIndexUsageMonitor(mongoUri) {
   return { proc, name: 'MONGO_INDEX', getResult: () => stdout };
 }
 
+// Mongo connection-pool collector — out-of-process script that polls
+// serverStatus().connections every second and emits the aggregated
+// `metrics.mongo_pool` JSON on stdout on SIGTERM. Same shape as
+// spawnMongoOpsMonitor so it flows through stopCollectors' generic
+// JSON-from-stdout drain.
+function spawnMongoPoolMonitor(mongoUri) {
+  const proc = io.spawn('node', [MONGO_POOL_MONITOR, mongoUri], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  proc.stderr.on('data', (d) => process.stderr.write(d));
+  let stdout = '';
+  proc.stdout.on('data', (d) => { stdout += d; });
+  return { proc, name: 'MONGO_POOL', getResult: () => stdout };
+}
+
 export function startCollectors({ appName, mongoUri, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath }) {
   const procs = [];
 
@@ -216,6 +232,7 @@ export function startCollectors({ appName, mongoUri, gcOutputPath, methodTimingP
     procs.push(spawnMongoOpsMonitor(mongoUri));
     procs.push(spawnMongoSlowQueryMonitor(mongoUri));
     procs.push(spawnMongoIndexUsageMonitor(mongoUri));
+    procs.push(spawnMongoPoolMonitor(mongoUri));
   }
 
   return { procs, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath };
