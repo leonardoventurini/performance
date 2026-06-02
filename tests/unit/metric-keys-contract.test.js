@@ -42,8 +42,9 @@ const ALLOWED_METRIC_KEYS = new Set([
   'fanout',            // script driver (fanout-bench)
 
   // Phase A metrics:
-  'ddp_methods',         // task 01 — DDP method latency
-  'ddp_subscriptions',   // task 02 — Subscription ready latency
+  'ddp_methods',              // task 01 — DDP method latency
+  'ddp_subscriptions',        // task 02 — Subscription ready latency
+  'live_update_propagation',  // task 03 — Live-update propagation latency
 ]);
 
 const FIXTURES_DIR = path.join(import.meta.dirname, 'fixtures');

@@ -42,6 +42,13 @@ export function prepareSubTimingOutput(tag) {
   return path.join(RESULTS_DIR, `sub-timing-${tag}-${Date.now()}.json`);
 }
 
+// Same pattern, for propagation-timing (PROPAGATION_TIMING_OUTPUT env var
+// → metrics.live_update_propagation).
+export function preparePropagationTimingOutput(tag) {
+  if (!io.existsSync(RESULTS_DIR)) io.mkdirSync(RESULTS_DIR, { recursive: true });
+  return path.join(RESULTS_DIR, `propagation-timing-${tag}-${Date.now()}.json`);
+}
+
 // Aggregator: turns the raw samples Map dumped by the in-app collector
 // into the metrics.ddp_methods shape. Exported for unit-testing without
 // the full collectors lifecycle.
@@ -95,6 +102,23 @@ export function aggregateSubTiming(samplesByPub) {
   return { metric: 'ddp_subscriptions', publications, total_subs: totalSubs };
 }
 
+// Flat-aggregate variant (no grouping by name) — propagation samples are
+// per-emit (every sub × every doc), aggregated into one set. Returns null
+// when no samples (absence convention).
+export function aggregatePropagationTiming(samplesArr) {
+  const stats = summarize(samplesArr || []);
+  if (!stats) return null;
+  return {
+    metric: 'live_update_propagation',
+    observed_updates: stats.count,
+    avg_ms: stats.avg,
+    p50: stats.p50,
+    p95: stats.p95,
+    p99: stats.p99,
+    max_ms: stats.max,
+  };
+}
+
 function spawnProcessMonitor(pid, name) {
   const proc = io.spawn('node', [PROCESS_MONITOR, pid, name], {
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -105,7 +129,7 @@ function spawnProcessMonitor(pid, name) {
   return { proc, name, getResult: () => stdout };
 }
 
-export function startCollectors({ appName, gcOutputPath, methodTimingPath, subTimingPath }) {
+export function startCollectors({ appName, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath }) {
   const procs = [];
 
   const appPid = findPid(`${appName}/.meteor/local/build/main.js`);
@@ -122,10 +146,10 @@ export function startCollectors({ appName, gcOutputPath, methodTimingPath, subTi
     console.error(`No DB pid found for ${appName}; skipping db_resources collector.`);
   }
 
-  return { procs, gcOutputPath, methodTimingPath, subTimingPath };
+  return { procs, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath };
 }
 
-export async function stopCollectors({ procs, gcOutputPath, methodTimingPath, subTimingPath }) {
+export async function stopCollectors({ procs, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath }) {
   const results = [];
 
   for (const { proc, name, getResult } of procs) {
@@ -184,6 +208,21 @@ export async function stopCollectors({ procs, gcOutputPath, methodTimingPath, su
       io.unlinkSync(subTimingPath);
     } catch (err) {
       console.error(`Could not read sub timing from ${subTimingPath}: ${err.message}`);
+    }
+  }
+
+  // Propagation timing: flat array of write-to-emit latencies.
+  if (propagationTimingPath && io.existsSync(propagationTimingPath)) {
+    try {
+      const dump = JSON.parse(io.readFileSync(propagationTimingPath, 'utf8'));
+      const aggregated = aggregatePropagationTiming(dump);
+      if (aggregated) {
+        results.push(aggregated);
+        console.log(`Live-update propagation: ${aggregated.observed_updates} observed updates, p50=${aggregated.p50}ms p95=${aggregated.p95}ms`);
+      }
+      io.unlinkSync(propagationTimingPath);
+    } catch (err) {
+      console.error(`Could not read propagation timing from ${propagationTimingPath}: ${err.message}`);
     }
   }
 

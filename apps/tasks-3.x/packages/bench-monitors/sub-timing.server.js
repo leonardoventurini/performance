@@ -16,10 +16,12 @@
 // every new Subscription, then lazy-grab the Subscription prototype off
 // the first incoming sub to patch `.ready()` once. The prototype isn't
 // exported by Meteor; the off-prototype grab is the only path.
+//
+// Gated entirely on SUB_TIMING_OUTPUT — no env, no wrap, zero overhead.
 
 import { Meteor } from 'meteor/meteor';
 import { performance } from 'node:perf_hooks';
-import fs from 'node:fs';
+import { installDumpOnShutdown } from './_dump-on-shutdown';
 
 const MAX_SAMPLES_PER_PUB = 100_000;
 const samples = new Map(); // pubName -> number[]
@@ -37,13 +39,14 @@ function recordSample(name, ms) {
 
 let patched = false;
 let prototypePatched = false;
-let origPublish = null;
 
 export function initSubTiming() {
   if (patched) return;
+  const outputPath = process.env.SUB_TIMING_OUTPUT;
+  if (!outputPath) return;
   patched = true;
-  origPublish = Meteor.publish.bind(Meteor);
 
+  const origPublish = Meteor.publish.bind(Meteor);
   Meteor.publish = function (name, handler) {
     return origPublish(name, function (...args) {
       const sub = this;
@@ -66,27 +69,9 @@ export function initSubTiming() {
     });
   };
 
-  const outputPath = process.env.SUB_TIMING_OUTPUT;
-  if (!outputPath) return;
-
-  // Synchronous write on shutdown — SIGTERM grace is short and we
-  // can't risk losing data to an unflushed async write.
-  const dumpOnce = (() => {
-    let dumped = false;
-    return () => {
-      if (dumped) return;
-      dumped = true;
-      try {
-        const dump = {};
-        for (const [name, arr] of samples) dump[name] = arr;
-        fs.writeFileSync(outputPath, JSON.stringify(dump));
-      } catch (err) {
-        process.stderr.write(`[sub-timing] dump failed: ${err.message}\n`);
-      }
-    };
-  })();
-
-  process.on('SIGTERM', dumpOnce);
-  process.on('SIGINT', dumpOnce);
-  process.on('beforeExit', dumpOnce);
+  installDumpOnShutdown(outputPath, () => {
+    const dump = {};
+    for (const [name, arr] of samples) dump[name] = arr;
+    return dump;
+  }, 'sub-timing');
 }

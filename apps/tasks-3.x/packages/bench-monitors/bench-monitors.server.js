@@ -4,5 +4,6 @@
 
 import { initMethodTiming } from './method-timing.server';
 import { initSubTiming } from './sub-timing.server';
+import { initPropagationTiming } from './propagation-timing.server';
 
-export { initMethodTiming, initSubTiming };
+export { initMethodTiming, initSubTiming, initPropagationTiming };

@@ -10,13 +10,17 @@
 // catches registrations regardless of when they happen during
 // startup.
 //
+// Gated entirely on METHOD_TIMING_OUTPUT — without the env var, the
+// init is a no-op (no wrap installed, zero per-call overhead). The
+// harness sets the env in benchmark runs only.
+//
 // Sample storage caps at MAX_SAMPLES_PER_METHOD to bound memory
 // (3000 calls * 8 bytes = 24KB nominal; cap protects pathological
 // workloads from runaway growth).
 
 import { Meteor } from 'meteor/meteor';
 import { performance } from 'node:perf_hooks';
-import fs from 'node:fs';
+import { installDumpOnShutdown } from './_dump-on-shutdown';
 
 const MAX_SAMPLES_PER_METHOD = 100_000;
 const samples = new Map(); // methodName -> number[]
@@ -33,13 +37,14 @@ function recordSample(name, ms) {
 }
 
 let patched = false;
-let origMethods = null;
 
 export function initMethodTiming() {
   if (patched) return;
+  const outputPath = process.env.METHOD_TIMING_OUTPUT;
+  if (!outputPath) return;
   patched = true;
-  origMethods = Meteor.methods.bind(Meteor);
 
+  const origMethods = Meteor.methods.bind(Meteor);
   Meteor.methods = function (handlers) {
     const wrapped = {};
     for (const [name, fn] of Object.entries(handlers)) {
@@ -55,27 +60,9 @@ export function initMethodTiming() {
     return origMethods(wrapped);
   };
 
-  const outputPath = process.env.METHOD_TIMING_OUTPUT;
-  if (!outputPath) return;
-
-  // Synchronous write on shutdown — SIGTERM grace is short and we
-  // can't risk losing data to an unflushed async write.
-  const dumpOnce = (() => {
-    let dumped = false;
-    return () => {
-      if (dumped) return;
-      dumped = true;
-      try {
-        const dump = {};
-        for (const [name, arr] of samples) dump[name] = arr;
-        fs.writeFileSync(outputPath, JSON.stringify(dump));
-      } catch (err) {
-        process.stderr.write(`[method-timing] dump failed: ${err.message}\n`);
-      }
-    };
-  })();
-
-  process.on('SIGTERM', dumpOnce);
-  process.on('SIGINT', dumpOnce);
-  process.on('beforeExit', dumpOnce);
+  installDumpOnShutdown(outputPath, () => {
+    const dump = {};
+    for (const [name, arr] of samples) dump[name] = arr;
+    return dump;
+  }, 'method-timing');
 }

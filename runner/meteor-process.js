@@ -30,11 +30,12 @@ export function resetMeteorApp(source, appPath) {
 // Returns `{ proc, getRuntimeInfo }`. The returned ChildProcess is the same
 // shape callers used to get; getRuntimeInfo() returns the latest captured
 // `[runtime-info]` values (observer_driver, transport) the app printed.
-// `methodTimingPath` / `subTimingPath` (optional) — when set, the spawned
-// Meteor sees them as METHOD_TIMING_OUTPUT / SUB_TIMING_OUTPUT and the
-// matching in-app bench-monitors collector dumps to that path on SIGTERM.
-// The harness reads them in stopCollectors.
-export function startMeteorApp({ source, appPath, port, env = {}, gcMonitorPath, gcOutputPath, methodTimingPath, subTimingPath }) {
+// `methodTimingPath` / `subTimingPath` / `propagationTimingPath` (optional)
+// — when set, the spawned Meteor sees them as METHOD_TIMING_OUTPUT /
+// SUB_TIMING_OUTPUT / PROPAGATION_TIMING_OUTPUT and the matching in-app
+// bench-monitors collector dumps to that path on SIGTERM. The harness
+// reads them in stopCollectors.
+export function startMeteorApp({ source, appPath, port, env = {}, gcMonitorPath, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath }) {
   const spawnEnv = { ...process.env, ...env, METEOR_NO_DEPRECATION: 'true' };
   if (gcMonitorPath) {
     spawnEnv.SERVER_NODE_OPTIONS = `--require ${gcMonitorPath}`;
@@ -42,6 +43,7 @@ export function startMeteorApp({ source, appPath, port, env = {}, gcMonitorPath,
   }
   if (methodTimingPath) spawnEnv.METHOD_TIMING_OUTPUT = methodTimingPath;
   if (subTimingPath) spawnEnv.SUB_TIMING_OUTPUT = subTimingPath;
+  if (propagationTimingPath) spawnEnv.PROPAGATION_TIMING_OUTPUT = propagationTimingPath;
   const proc = io.spawn(source.meteorCmd, meteorArgv(source, ['run', '--port', String(port)]), {
     cwd: appPath,
     env: spawnEnv,

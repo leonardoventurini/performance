@@ -27,40 +27,62 @@ backlog, driver fallback) without polluting domain files.
 |---|---|---|---|
 | [method-timing.server.js](method-timing.server.js) | `initMethodTiming` | `METHOD_TIMING_OUTPUT` | `ddp_methods` |
 | [sub-timing.server.js](sub-timing.server.js) | `initSubTiming` | `SUB_TIMING_OUTPUT` | `ddp_subscriptions` |
+| [propagation-timing.server.js](propagation-timing.server.js) | `initPropagationTiming` | `PROPAGATION_TIMING_OUTPUT` | `live_update_propagation` |
 
 Each init is re-exported from
 [bench-monitors.server.js](bench-monitors.server.js) and called from
 [apps/tasks-3.x/server/main.js](../../server/main.js) inside
-`Meteor.startup` **before** any user code that registers Meteor APIs.
-The wrap only applies to subsequent registrations, so order matters:
+`Meteor.startup` **before** any user code that registers Meteor APIs
+or writes to collections. The wrap only applies to subsequent
+registrations / instances, so order matters:
 
 ```js
 Meteor.startup(async () => {
-  initMethodTiming();    // patches Meteor.methods
-  initSubTiming();       // patches Meteor.publish
+  initMethodTiming();         // patches Meteor.methods
+  initSubTiming();            // patches Meteor.publish
+  initPropagationTiming();    // patches Mongo.Collection.prototype.insertAsync
   // ...
-  await registerTaskApi(); // registers methods + pubs — wrapped by the above
+  await registerTaskApi();    // wrapped by the above
 });
 ```
 
+### Propagation monitor: known limitations
+
+- Only INSERT → emit latency is measured. `updateAsync` isn't wrapped
+  yet, so `sendChanged` events for non-tracked docs are silent no-ops.
+- A 10 s attribution TTL bounds the timestamps map. Re-deliveries past
+  the window are silently dropped, which protects the metric from
+  initial-batch contamination (new subs receiving stale existing docs)
+  at the cost of underreporting in benchmarks where subs join >10 s
+  after a write.
+- Polling driver propagation is dominated by poll interval (10 s
+  default in Meteor), so expect very different numbers across drivers.
+
 ## How a monitor works (pattern)
 
-1. Patch a Meteor registration API (e.g. `Meteor.methods`,
-   `Meteor.publish`) to install a wrapper around every handler the user
-   subsequently registers.
-2. Wrapper records `performance.now()` at entry and pushes a sample to
-   an in-memory `Map<name, number[]>` at exit (or on the relevant DDP
-   lifecycle event — `ready`, `sendAdded`, etc.).
-3. Cap samples at `MAX_SAMPLES_PER_*` (currently 100k) so a pathological
-   workload can't OOM the app.
-4. Gate file output on `process.env.<COLLECTOR>_OUTPUT`. If unset,
-   skip the SIGTERM handler entirely — no shutdown overhead, no file.
-5. When set, install `SIGTERM` / `SIGINT` / `beforeExit` handlers that
-   synchronously `fs.writeFileSync` the samples Map (one-shot — `dumped`
-   flag prevents double-write).
+1. Gate the WHOLE init on `process.env.<COLLECTOR>_OUTPUT`. Without the
+   env var, the monitor is a complete no-op — no wrap installed, zero
+   per-call overhead. The harness sets the env in benchmark runs only.
+2. When the env IS set, patch a Meteor API (registration like
+   `Meteor.methods`/`Meteor.publish`, or prototype like
+   `Mongo.Collection.prototype.insertAsync` / `Session.prototype.sendAdded`)
+   to install a wrapper around every handler/method.
+3. Wrapper records `performance.now()` / `Date.now()` at entry and
+   pushes a sample to an in-memory store (`Map<name, number[]>` for
+   grouped metrics, flat `number[]` for aggregate metrics) on the
+   relevant DDP lifecycle event.
+4. Cap samples (currently 100k) so a pathological workload can't OOM
+   the app.
+5. Call [installDumpOnShutdown](_dump-on-shutdown.js) with the output
+   path + a closure returning the dump shape + a label. The helper
+   installs `SIGTERM` / `SIGINT` / `beforeExit` handlers that
+   synchronously `fs.writeFileSync` the dump exactly once.
 
 [method-timing.server.js](method-timing.server.js) is the canonical
-reference.
+reference for the grouped-by-name shape.
+[propagation-timing.server.js](propagation-timing.server.js) is the
+canonical reference for the flat-aggregate shape (and prototype-level
+patching across Meteor classes that aren't exported).
 
 ## How to add a new monitor
 
@@ -132,7 +154,9 @@ All bench-monitors output follows the cross-cutting rules in
 bench-monitors/
 ├── package.js                       Meteor package manifest
 ├── bench-monitors.server.js         server main: re-exports each init fn
+├── _dump-on-shutdown.js             shared SIGTERM dump helper
 ├── method-timing.server.js          ddp_methods (task 01)
 ├── sub-timing.server.js             ddp_subscriptions (task 02)
+├── propagation-timing.server.js     live_update_propagation (task 03)
 └── README.md                        this file
 ```
