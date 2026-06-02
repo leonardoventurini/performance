@@ -7,3 +7,4 @@ export { runList } from './list.js';
 export { runBenchmark } from './run.js';
 export { runCompare } from './compare.js';
 export { runPush, runBaseline } from './push.js';
+export { runBundleDelta } from './bundle-delta.js';

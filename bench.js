@@ -24,7 +24,7 @@ import config from './bench.config.js';
 import { resolveMeteorSource } from './meteor-source.js';
 import * as cli from './cli/index.js';
 
-const { runList, runBenchmark, runCompare, runPush, runBaseline } = cli;
+const { runList, runBenchmark, runCompare, runPush, runBaseline, runBundleDelta } = cli;
 
 // One shared schema for every subcommand — parseArgs is the single source of
 // truth for which flags exist. `multiple: true` for --env lets it be passed
@@ -49,6 +49,10 @@ const OPTIONS = {
   // runId is a kebab-vs-camel alias that some workflows passed pre-refactor;
   // kept for backwards-compat with already-deployed dispatchers.
   runId: { type: 'string' },
+  // bundle-delta flags. Strings here (parseArgs has no number type); the
+  // handler coerces. limit = how many recent runs, warn-kb = ⚠️ threshold.
+  limit: { type: 'string' },
+  'warn-kb': { type: 'string' },
 };
 
 const { values, positionals } = parseArgs({
@@ -70,6 +74,8 @@ Usage:
   node bench.js compare --baseline A --target B          Compare two results
   node bench.js push --result <file.json> [--url <ws>]   Push results to dashboard
   node bench.js baseline --scenario X --run-id Y         Set baseline for a scenario
+  node bench.js bundle-delta [--limit N] [--format markdown|json] [--warn-kb N]
+                                                         Bundle-size trend across saved runs
 
 Dashboard:
   Default URL: ${config.dashboardUrl || 'ws://localhost:4000/websocket'}
@@ -104,6 +110,9 @@ switch (command) {
     break;
   case 'baseline':
     runBaseline({ values, config }).catch((err) => { console.error(err); process.exit(1); });
+    break;
+  case 'bundle-delta':
+    runBundleDelta({ values, config });
     break;
   default:
     printHelp();
