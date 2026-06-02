@@ -75,8 +75,13 @@ Meteor.startup(async () => {
    the app.
 5. Call [installDumpOnShutdown](_dump-on-shutdown.js) with the output
    path + a closure returning the dump shape + a label. The helper
-   installs `SIGTERM` / `SIGINT` / `beforeExit` handlers that
-   synchronously `fs.writeFileSync` the dump exactly once.
+   writes the file two ways:
+   - **Periodic snapshot every 5 s** (load-bearing — the meteor parent
+     doesn't reliably forward SIGTERM to its node child, so signal
+     handlers alone lose data; the last snapshot before kill survives).
+   - **SIGTERM / SIGINT / beforeExit handlers** (best-effort — captures
+     samples between the last snapshot and the kill if the signal does
+     land).
 
 [method-timing.server.js](method-timing.server.js) is the canonical
 reference for the grouped-by-name shape.

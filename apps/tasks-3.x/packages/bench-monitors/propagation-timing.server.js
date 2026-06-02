@@ -23,8 +23,12 @@
 //     post-await. One prototype patch covers every Collection instance,
 //     current and future. No app code change required.
 //   - Session.prototype.sendAdded + sendChanged → if docId in map,
-//     record (now - mapValue) as a propagation sample. Grabbed
-//     lazily off the first incoming connection (class isn't exported).
+//     record (now - mapValue) as a propagation sample. Grabbed lazily
+//     off `Meteor.server.sessions` (any session — they all share the
+//     prototype). Lazy because Meteor.onConnection fires BEFORE the
+//     session is created on the server (conn._session is undefined at
+//     that point — early review citation was wrong on this). We
+//     re-attempt the patch on every insert until a session exists.
 //
 // Gated on PROPAGATION_TIMING_OUTPUT — without the env var, init is a
 // no-op and Mongo writes are never wrapped (no per-insert overhead).
@@ -70,8 +74,47 @@ function recordPropagation(id) {
 }
 
 let patched = false;
-let prototypePatched = false;
+let sessionProtoPatched = false;
 let cleanupTimer = null;
+
+// Grab Session.prototype off the first live session in Meteor.server.sessions
+// and patch sendAdded / sendChanged. Returns true once patched; idempotent
+// after that. Called lazily because Meteor doesn't expose the Session class
+// and sessions don't exist until a DDP `connect` message arrives.
+function tryPatchSessionProto() {
+  if (sessionProtoPatched) return true;
+  const sessions = Meteor.server?.sessions;
+  if (!sessions) return false;
+  // Meteor 3.x stores sessions in a Map; older versions used a plain object.
+  // Iterate accordingly to grab any one — the prototype is shared.
+  let firstSession = null;
+  if (sessions instanceof Map) {
+    firstSession = sessions.values().next().value;
+  } else if (typeof sessions === 'object') {
+    for (const k of Object.keys(sessions)) {
+      firstSession = sessions[k];
+      if (firstSession) break;
+    }
+  }
+  if (!firstSession) return false;
+
+  const proto = Object.getPrototypeOf(firstSession);
+  if (typeof proto?.sendAdded !== 'function' || typeof proto?.sendChanged !== 'function') {
+    return false;
+  }
+  const origSendAdded = proto.sendAdded;
+  proto.sendAdded = function (collection, id, fields) {
+    recordPropagation(id);
+    return origSendAdded.call(this, collection, id, fields);
+  };
+  const origSendChanged = proto.sendChanged;
+  proto.sendChanged = function (collection, id, fields) {
+    recordPropagation(id);
+    return origSendChanged.call(this, collection, id, fields);
+  };
+  sessionProtoPatched = true;
+  return true;
+}
 
 export function initPropagationTiming() {
   if (patched) return;
@@ -80,32 +123,23 @@ export function initPropagationTiming() {
   patched = true;
 
   // Wrap Mongo.Collection.prototype.insertAsync — captures every
-  // insert into any Collection instance.
+  // insert into any Collection instance. Lazy-tries to grab Session
+  // prototype on every insert, in case it wasn't grabbed at connect.
   const protoInsert = Mongo.Collection.prototype.insertAsync;
   Mongo.Collection.prototype.insertAsync = async function (...args) {
     const id = await protoInsert.apply(this, args);
+    if (!sessionProtoPatched) tryPatchSessionProto();
     recordInsert(id);
     return id;
   };
 
-  // Patch Session.prototype.sendAdded / sendChanged once, off the first
-  // incoming connection's session. Session class isn't exported.
-  Meteor.onConnection((conn) => {
-    if (prototypePatched) return;
-    const session = conn._session;
-    if (!session) return;
-    const proto = Object.getPrototypeOf(session);
-    const origSendAdded = proto.sendAdded;
-    proto.sendAdded = function (collection, id, fields) {
-      recordPropagation(id);
-      return origSendAdded.call(this, collection, id, fields);
-    };
-    const origSendChanged = proto.sendChanged;
-    proto.sendChanged = function (collection, id, fields) {
-      recordPropagation(id);
-      return origSendChanged.call(this, collection, id, fields);
-    };
-    prototypePatched = true;
+  // Defer one event-loop tick so Meteor has a chance to create the
+  // Session object before we look it up. Without this defer the
+  // session map is still empty (the `connect` message hasn't been
+  // processed yet). setImmediate is enough in practice.
+  Meteor.onConnection(() => {
+    if (sessionProtoPatched) return;
+    setImmediate(() => tryPatchSessionProto());
   });
 
   // Periodic prune so long benchmarks don't grow the timestamps map
