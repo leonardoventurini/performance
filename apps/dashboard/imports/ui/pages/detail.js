@@ -117,4 +117,48 @@ Template.detail.helpers({
       perSec: fmtRate(rates[op]),
     }));
   },
+
+  // ─── Observer pool (task 05) ───────────────────────────────────────
+  hasObserverPool() { return !!this.metrics?.observer_pool; },
+  observerPoolSamples() { return fmtInt(this.metrics?.observer_pool?.samples); },
+  observerPoolInterval() { return fmtInt(this.metrics?.observer_pool?.interval_ms); },
+  observerMuxMin() { return fmtInt(this.metrics?.observer_pool?.multiplexer_count?.min); },
+  observerMuxMax() { return fmtInt(this.metrics?.observer_pool?.multiplexer_count?.max); },
+  observerMuxAvg() {
+    const v = this.metrics?.observer_pool?.multiplexer_count?.avg;
+    return v != null && Number.isFinite(v) ? v.toFixed(1) : '-';
+  },
+  observerMuxEnd() { return fmtInt(this.metrics?.observer_pool?.multiplexer_count?.end); },
+  observerHandleMin() { return fmtInt(this.metrics?.observer_pool?.handle_count?.min); },
+  observerHandleMax() { return fmtInt(this.metrics?.observer_pool?.handle_count?.max); },
+  observerHandleAvg() {
+    const v = this.metrics?.observer_pool?.handle_count?.avg;
+    return v != null && Number.isFinite(v) ? v.toFixed(1) : '-';
+  },
+  observerHandleEnd() { return fmtInt(this.metrics?.observer_pool?.handle_count?.end); },
+
+  // ─── DDP messages (task 07) ────────────────────────────────────────
+  hasDdpMessages() { return !!this.metrics?.ddp_messages; },
+  ddpMsgsDuration() {
+    const d = this.metrics?.ddp_messages?.duration_s;
+    return d != null && Number.isFinite(d) ? d.toFixed(1) : '-';
+  },
+  ddpMsgsTotalIn() { return fmtInt(this.metrics?.ddp_messages?.total_in); },
+  ddpMsgsTotalOut() { return fmtInt(this.metrics?.ddp_messages?.total_out); },
+  ddpMsgsInPerSec() { return fmtRate(this.metrics?.ddp_messages?.in_per_sec); },
+  ddpMsgsOutPerSec() { return fmtRate(this.metrics?.ddp_messages?.out_per_sec); },
+  ddpMsgsByTypeRows() {
+    const inMap = this.metrics?.ddp_messages?.by_type?.in ?? {};
+    const outMap = this.metrics?.ddp_messages?.by_type?.out ?? {};
+    const allTypes = new Set([...Object.keys(inMap), ...Object.keys(outMap)]);
+    return Array.from(allTypes)
+      .map((type) => ({
+        type,
+        in: inMap[type] != null ? fmtInt(inMap[type]) : '-',
+        out: outMap[type] != null ? fmtInt(outMap[type]) : '-',
+        _sortKey: (inMap[type] ?? 0) + (outMap[type] ?? 0),
+      }))
+      .sort((a, b) => b._sortKey - a._sortKey)
+      .map(({ _sortKey, ...row }) => row);
+  },
 });

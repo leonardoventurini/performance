@@ -5,5 +5,7 @@
 import { initMethodTiming } from './method-timing.server';
 import { initSubTiming } from './sub-timing.server';
 import { initPropagationTiming } from './propagation-timing.server';
+import { initObserverPoolSampler } from './observer-pool-sampler.server';
+import { initDdpMessageCounter } from './ddp-message-counter.server';
 
-export { initMethodTiming, initSubTiming, initPropagationTiming };
+export { initMethodTiming, initSubTiming, initPropagationTiming, initObserverPoolSampler, initDdpMessageCounter };

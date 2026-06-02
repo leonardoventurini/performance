@@ -28,6 +28,8 @@ backlog, driver fallback) without polluting domain files.
 | [method-timing.server.js](method-timing.server.js) | `initMethodTiming` | `METHOD_TIMING_OUTPUT` | `ddp_methods` |
 | [sub-timing.server.js](sub-timing.server.js) | `initSubTiming` | `SUB_TIMING_OUTPUT` | `ddp_subscriptions` |
 | [propagation-timing.server.js](propagation-timing.server.js) | `initPropagationTiming` | `PROPAGATION_TIMING_OUTPUT` | `live_update_propagation` |
+| [observer-pool-sampler.server.js](observer-pool-sampler.server.js) | `initObserverPoolSampler` | `OBSERVER_POOL_OUTPUT` | `observer_pool` |
+| [ddp-message-counter.server.js](ddp-message-counter.server.js) | `initDdpMessageCounter` | `DDP_MESSAGE_OUTPUT` | `ddp_messages` |
 
 Each init is re-exported from
 [bench-monitors.server.js](bench-monitors.server.js) and called from
@@ -163,5 +165,7 @@ bench-monitors/
 ├── method-timing.server.js          ddp_methods (task 01)
 ├── sub-timing.server.js             ddp_subscriptions (task 02)
 ├── propagation-timing.server.js     live_update_propagation (task 03)
+├── observer-pool-sampler.server.js  observer_pool (task 05)
+├── ddp-message-counter.server.js    ddp_messages (task 07)
 └── README.md                        this file
 ```

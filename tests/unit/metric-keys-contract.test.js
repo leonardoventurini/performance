@@ -46,6 +46,10 @@ const ALLOWED_METRIC_KEYS = new Set([
   'ddp_subscriptions',        // task 02 — Subscription ready latency
   'live_update_propagation',  // task 03 — Live-update propagation latency
   'mongo_ops',                // task 04 — Mongo opcounters (insert/query/update/delete/getmore/command rates)
+  'observer_pool',            // task 05 — Active observer multiplexer + handle count (min/max/avg/end)
+
+  // Phase B metrics:
+  'ddp_messages',             // task 07 — DDP message rate (in/out counts + per-sec, by_type)
 ]);
 
 const FIXTURES_DIR = path.join(import.meta.dirname, 'fixtures');

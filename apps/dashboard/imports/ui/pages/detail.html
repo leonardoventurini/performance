@@ -190,6 +190,96 @@
           </div>
         {{/if}}
       {{/if}}
+
+      {{#if hasObserverPool}}
+        <div class="row mb-3">
+          <div class="col-md-6">
+            <div class="card">
+              <div class="card-header">
+                Observer pool <span class="badge bg-secondary float-end">{{observerPoolSamples}} samples @ {{observerPoolInterval}}ms</span>
+              </div>
+              <div class="card-body p-0">
+                <table class="table table-sm mb-0">
+                  <thead>
+                    <tr><th>Metric</th><th class="text-end">min</th><th class="text-end">max</th><th class="text-end">avg</th><th class="text-end">end</th></tr>
+                  </thead>
+                  <tbody>
+                    <tr><td>Multiplexers</td><td class="text-end">{{observerMuxMin}}</td><td class="text-end">{{observerMuxMax}}</td><td class="text-end">{{observerMuxAvg}}</td><td class="text-end">{{observerMuxEnd}}</td></tr>
+                    <tr><td>Handles</td><td class="text-end">{{observerHandleMin}}</td><td class="text-end">{{observerHandleMax}}</td><td class="text-end">{{observerHandleAvg}}</td><td class="text-end">{{observerHandleEnd}}</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="card-footer text-muted small">multiplexer = unique cursor description · handle = a subscription on that cursor · end ≈ 0 means clean teardown</div>
+            </div>
+          </div>
+
+          {{#if hasDdpMessages}}
+            <div class="col-md-6">
+              <div class="card">
+                <div class="card-header">
+                  DDP messages <span class="badge bg-secondary float-end">{{ddpMsgsDuration}}s · {{ddpMsgsTotalIn}} in / {{ddpMsgsTotalOut}} out</span>
+                </div>
+                <div class="card-body p-0">
+                  <table class="table table-sm mb-0">
+                    <thead>
+                      <tr><th></th><th class="text-end">total</th><th class="text-end">per sec</th></tr>
+                    </thead>
+                    <tbody>
+                      <tr><td>incoming (client → server)</td><td class="text-end">{{ddpMsgsTotalIn}}</td><td class="text-end">{{ddpMsgsInPerSec}}</td></tr>
+                      <tr><td>outgoing (server → client)</td><td class="text-end">{{ddpMsgsTotalOut}}</td><td class="text-end">{{ddpMsgsOutPerSec}}</td></tr>
+                    </tbody>
+                  </table>
+                  <table class="table table-sm mb-0">
+                    <thead>
+                      <tr><th>Type</th><th class="text-end">in</th><th class="text-end">out</th></tr>
+                    </thead>
+                    <tbody>
+                      {{#each ddpMsgsByTypeRows}}
+                        <tr><td><code>{{type}}</code></td><td class="text-end">{{in}}</td><td class="text-end">{{out}}</td></tr>
+                      {{/each}}
+                    </tbody>
+                  </table>
+                </div>
+                <div class="card-footer text-muted small">message counts pre-compression · workload chattiness</div>
+              </div>
+            </div>
+          {{/if}}
+        </div>
+      {{else}}
+        {{#if hasDdpMessages}}
+          <div class="row mb-3">
+            <div class="col-md-6">
+              <div class="card">
+                <div class="card-header">
+                  DDP messages <span class="badge bg-secondary float-end">{{ddpMsgsDuration}}s · {{ddpMsgsTotalIn}} in / {{ddpMsgsTotalOut}} out</span>
+                </div>
+                <div class="card-body p-0">
+                  <table class="table table-sm mb-0">
+                    <thead>
+                      <tr><th></th><th class="text-end">total</th><th class="text-end">per sec</th></tr>
+                    </thead>
+                    <tbody>
+                      <tr><td>incoming (client → server)</td><td class="text-end">{{ddpMsgsTotalIn}}</td><td class="text-end">{{ddpMsgsInPerSec}}</td></tr>
+                      <tr><td>outgoing (server → client)</td><td class="text-end">{{ddpMsgsTotalOut}}</td><td class="text-end">{{ddpMsgsOutPerSec}}</td></tr>
+                    </tbody>
+                  </table>
+                  <table class="table table-sm mb-0">
+                    <thead>
+                      <tr><th>Type</th><th class="text-end">in</th><th class="text-end">out</th></tr>
+                    </thead>
+                    <tbody>
+                      {{#each ddpMsgsByTypeRows}}
+                        <tr><td><code>{{type}}</code></td><td class="text-end">{{in}}</td><td class="text-end">{{out}}</td></tr>
+                      {{/each}}
+                    </tbody>
+                  </table>
+                </div>
+                <div class="card-footer text-muted small">message counts pre-compression · workload chattiness</div>
+              </div>
+            </div>
+          </div>
+        {{/if}}
+      {{/if}}
     {{else}}
       <div class="alert alert-warning">Run not found.</div>
     {{/with}}

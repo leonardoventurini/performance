@@ -31,6 +31,8 @@ import {
   prepareMethodTimingOutput,
   prepareSubTimingOutput,
   preparePropagationTimingOutput,
+  prepareObserverPoolOutput,
+  prepareDdpMessageOutput,
   startCollectors,
   stopCollectors,
   drainPostStopGc,
@@ -48,10 +50,12 @@ export async function runScriptDriver({ scenario, scenarioName, app, appName, so
   const methodTimingPath = prepareMethodTimingOutput(tag);
   const subTimingPath = prepareSubTimingOutput(tag);
   const propagationTimingPath = preparePropagationTimingOutput(tag);
+  const observerPoolPath = prepareObserverPoolOutput(tag);
+  const ddpMessagePath = prepareDdpMessageOutput(tag);
 
   console.log('Starting Meteor app...');
   const { proc: meteorProc, getRuntimeInfo } = startMeteorApp({
-    source, appPath: app.path, port: config.appPort, env, gcMonitorPath, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath,
+    source, appPath: app.path, port: config.appPort, env, gcMonitorPath, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath,
   });
 
   console.log('Waiting for app to start...');
@@ -59,7 +63,7 @@ export async function runScriptDriver({ scenario, scenarioName, app, appName, so
   console.log('App started.');
 
   const mongoUri = process.env.BENCH_MONGO_URL || `mongodb://127.0.0.1:${config.appPort + 1}`;
-  const collectors = startCollectors({ appName, mongoUri, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath });
+  const collectors = startCollectors({ appName, mongoUri, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath });
 
   const scriptPath = path.resolve(HERE, '..', scenario.script);
   const scriptArgs = (scenario.args || '').split(/\s+/).filter(Boolean);

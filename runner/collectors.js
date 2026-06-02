@@ -12,6 +12,8 @@ import path from 'node:path';
 import { io } from './_io.js';
 import { findPid } from './meteor-process.js';
 import { summarize } from '../lib/percentiles.js';
+import { aggregateObserverPool } from '../runner/observer-pool-aggregator.js';
+import { aggregateDdpMessages } from '../runner/message-rate-aggregator.js';
 
 const HERE = import.meta.dirname;
 const PROCESS_MONITOR = path.resolve(HERE, '..', 'collectors', 'process-monitor.js');
@@ -48,6 +50,22 @@ export function prepareSubTimingOutput(tag) {
 export function preparePropagationTimingOutput(tag) {
   if (!io.existsSync(RESULTS_DIR)) io.mkdirSync(RESULTS_DIR, { recursive: true });
   return path.join(RESULTS_DIR, `propagation-timing-${tag}-${Date.now()}.json`);
+}
+
+// Same pattern, for the observer-pool sampler (OBSERVER_POOL_OUTPUT env var
+// → metrics.observer_pool). The in-app sampler dumps RAW samples; we
+// aggregate to min/max/avg/end in stopCollectors.
+export function prepareObserverPoolOutput(tag) {
+  if (!io.existsSync(RESULTS_DIR)) io.mkdirSync(RESULTS_DIR, { recursive: true });
+  return path.join(RESULTS_DIR, `observer-pool-${tag}-${Date.now()}.json`);
+}
+
+// Same pattern, for the ddp-message counter (DDP_MESSAGE_OUTPUT env var
+// → metrics.ddp_messages). The in-app counter dumps RAW in/out counts
+// per message type; we compute per-second rates in stopCollectors.
+export function prepareDdpMessageOutput(tag) {
+  if (!io.existsSync(RESULTS_DIR)) io.mkdirSync(RESULTS_DIR, { recursive: true });
+  return path.join(RESULTS_DIR, `ddp-messages-${tag}-${Date.now()}.json`);
 }
 
 // Aggregator: turns the raw samples Map dumped by the in-app collector
@@ -144,7 +162,7 @@ function spawnMongoOpsMonitor(mongoUri) {
   return { proc, name: 'MONGO_OPS', getResult: () => stdout };
 }
 
-export function startCollectors({ appName, mongoUri, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath }) {
+export function startCollectors({ appName, mongoUri, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath }) {
   const procs = [];
 
   const appPid = findPid(`${appName}/.meteor/local/build/main.js`);
@@ -165,10 +183,10 @@ export function startCollectors({ appName, mongoUri, gcOutputPath, methodTimingP
     procs.push(spawnMongoOpsMonitor(mongoUri));
   }
 
-  return { procs, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath };
+  return { procs, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath };
 }
 
-export async function stopCollectors({ procs, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath }) {
+export async function stopCollectors({ procs, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath }) {
   const results = [];
 
   for (const { proc, name, getResult } of procs) {
@@ -242,6 +260,40 @@ export async function stopCollectors({ procs, gcOutputPath, methodTimingPath, su
       io.unlinkSync(propagationTimingPath);
     } catch (err) {
       console.error(`Could not read propagation timing from ${propagationTimingPath}: ${err.message}`);
+    }
+  }
+
+  // Observer pool: in-app sampler dumps { interval_ms, samples } (raw
+  // per-tick mux/handle counts); we aggregate to min/max/avg/end here.
+  if (observerPoolPath && io.existsSync(observerPoolPath)) {
+    try {
+      const dump = JSON.parse(io.readFileSync(observerPoolPath, 'utf8'));
+      const aggregated = aggregateObserverPool(dump);
+      if (aggregated) {
+        results.push(aggregated);
+        console.log(`Observer pool: ${aggregated.samples} samples, multiplexers max=${aggregated.multiplexer_count.max} end=${aggregated.multiplexer_count.end}, handles max=${aggregated.handle_count.max} end=${aggregated.handle_count.end}`);
+      }
+      io.unlinkSync(observerPoolPath);
+    } catch (err) {
+      console.error(`Could not read observer pool samples from ${observerPoolPath}: ${err.message}`);
+    }
+  }
+
+  // DDP messages: in-app counter dumps RAW in/out counts per type +
+  // the start/end window; we compute per-second rates here. Omitted
+  // when no messages were observed (absence convention → aggregator
+  // returns null).
+  if (ddpMessagePath && io.existsSync(ddpMessagePath)) {
+    try {
+      const dump = JSON.parse(io.readFileSync(ddpMessagePath, 'utf8'));
+      const aggregated = aggregateDdpMessages(dump);
+      if (aggregated) {
+        results.push(aggregated);
+        console.log(`DDP messages: ${aggregated.total_in} in (${aggregated.in_per_sec}/s), ${aggregated.total_out} out (${aggregated.out_per_sec}/s)`);
+      }
+      io.unlinkSync(ddpMessagePath);
+    } catch (err) {
+      console.error(`Could not read DDP message counts from ${ddpMessagePath}: ${err.message}`);
     }
   }
 
