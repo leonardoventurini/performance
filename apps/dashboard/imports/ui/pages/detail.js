@@ -322,4 +322,38 @@ Template.detail.helpers({
       .sort((a, b) => b[1] - a[1])
       .map(([transition, count]) => ({ transition, count: fmtInt(count) }));
   },
+
+  // ─── Build profile (task 20) ───────────────────────────────────────
+  hasBuildProfile() { return !!this.metrics?.build_profile; },
+  buildTotalMs() { return fmtInt(this.metrics?.build_profile?.total_ms); },
+  buildTopNCount() { return fmtInt(this.metrics?.build_profile?.top_n_count); },
+  buildTopNTotalMs() { return fmtInt(this.metrics?.build_profile?.top_n_total_ms); },
+  buildLongTailMs() { return fmtInt(this.metrics?.build_profile?.long_tail_ms); },
+  buildTopNodes() {
+    const nodes = this.metrics?.build_profile?.top_nodes ?? [];
+    return nodes.map((n) => ({
+      name: n.name,
+      self_ms: fmtInt(n.self_ms),
+      children_ms: fmtInt(n.children_ms),
+      count: fmtInt(n.count),
+    }));
+  },
+
+  // ─── Per-compiler-plugin time (task 21) ────────────────────────────
+  hasPluginCompile() { return !!this.metrics?.plugin_compile; },
+  pluginTotalMs() { return fmtInt(this.metrics?.plugin_compile?.total_plugin_ms); },
+  pluginCount() {
+    const p = this.metrics?.plugin_compile?.plugins;
+    return fmtInt(p ? Object.keys(p).length : 0);
+  },
+  pluginRows() {
+    const plugins = this.metrics?.plugin_compile?.plugins ?? {};
+    return Object.entries(plugins)
+      .sort((a, b) => (b[1].self_ms ?? 0) - (a[1].self_ms ?? 0))
+      .map(([plugin, v]) => ({
+        plugin,
+        self_ms: fmtInt(v.self_ms),
+        count: fmtInt(v.count),
+      }));
+  },
 });

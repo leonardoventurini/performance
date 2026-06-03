@@ -534,6 +534,56 @@
           </div>
         </div>
       {{/if}}
+
+      {{#if hasBuildProfile}}
+        <div class="row mb-3">
+          <div class="col-md-12">
+            <div class="card">
+              <div class="card-header">
+                Build profile (top hot nodes) <span class="badge bg-secondary float-end">total {{buildTotalMs}} ms</span>
+              </div>
+              <div class="card-body p-0">
+                <table class="table table-sm mb-0">
+                  <thead>
+                    <tr><th>Node</th><th class="text-end">self ms</th><th class="text-end">children ms</th><th class="text-end">count</th></tr>
+                  </thead>
+                  <tbody>
+                    {{#each buildTopNodes}}
+                      <tr><td><code>{{name}}</code></td><td class="text-end">{{self_ms}}</td><td class="text-end">{{children_ms}}</td><td class="text-end">{{count}}</td></tr>
+                    {{/each}}
+                  </tbody>
+                </table>
+              </div>
+              <div class="card-footer text-muted small">METEOR_PROFILE=1 hot nodes by self_ms · top {{buildTopNCount}} = {{buildTopNTotalMs}} ms · long tail = {{buildLongTailMs}} ms</div>
+            </div>
+          </div>
+        </div>
+      {{/if}}
+
+      {{#if hasPluginCompile}}
+        <div class="row mb-3">
+          <div class="col-md-12">
+            <div class="card">
+              <div class="card-header">
+                Per-compiler-plugin time <span class="badge bg-secondary float-end">{{pluginTotalMs}} ms across {{pluginCount}} plugins</span>
+              </div>
+              <div class="card-body p-0">
+                <table class="table table-sm mb-0">
+                  <thead>
+                    <tr><th>Plugin</th><th class="text-end">self ms</th><th class="text-end">count</th></tr>
+                  </thead>
+                  <tbody>
+                    {{#each pluginRows}}
+                      <tr><td><code>{{plugin}}</code></td><td class="text-end">{{self_ms}}</td><td class="text-end">{{count}}</td></tr>
+                    {{/each}}
+                  </tbody>
+                </table>
+              </div>
+              <div class="card-footer text-muted small">extracted from METEOR_PROFILE=1 same as build_profile · sorted by self_ms desc</div>
+            </div>
+          </div>
+        </div>
+      {{/if}}
     {{else}}
       <div class="alert alert-warning">Run not found.</div>
     {{/with}}
