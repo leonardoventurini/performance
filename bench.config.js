@@ -83,6 +83,10 @@ export default {
       driver: 'cli',
       description: 'Client + server bundle output size',
     },
+    'build-profile': {
+      driver: 'build-profile',
+      description: 'METEOR_PROFILE=1 build: top-N hot nodes + per-plugin compile time',
+    },
   },
 
   // Regression detection thresholds (% increase from baseline)

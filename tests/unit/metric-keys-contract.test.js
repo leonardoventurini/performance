@@ -58,6 +58,10 @@ const ALLOWED_METRIC_KEYS = new Set([
   'mongo_wiredtiger',         // task 15 — WiredTiger cache hit ratio + bytes-in-cache snapshot
   'ddp_compression',          // task 09 — DDP compression ratio (coarse, post-compression socket bytes vs pre-compression JSON bytes)
   'driver_fallbacks',         // task 10 — Observer driver per-cursor fallback events (configured vs actual)
+
+  // Phase D build metrics:
+  'build_profile',            // task 20 — METEOR_PROFILE=1 top-N hot build nodes by self_ms + long tail
+  'plugin_compile',           // task 21 — Per-compiler-plugin time from the same METEOR_PROFILE tree
 ]);
 
 const FIXTURES_DIR = path.join(import.meta.dirname, 'fixtures');

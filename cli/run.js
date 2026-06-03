@@ -54,6 +54,7 @@ function pickDriver(scenarioName, scenario) {
   if (scenario.driver === 'artillery' || scenario.driver === 'artillery-playwright') {
     return drivers.runArtilleryDriver;
   }
+  if (scenario.driver === 'build-profile') return drivers.runBuildProfileDriver;
   if (scenario.driver === 'cli') {
     if (scenarioName === 'cold-start') return drivers.runColdStartDriver;
     if (scenarioName === 'bundle-size') return drivers.runBundleSizeDriver;
