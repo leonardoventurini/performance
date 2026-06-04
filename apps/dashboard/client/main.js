@@ -1,3 +1,4 @@
+import { Meteor } from 'meteor/meteor';
 import { FlowRouter } from 'meteor/ostrio:flow-router-extra';
 
 // Layouts
@@ -9,6 +10,12 @@ import '../imports/ui/pages/compare.js';
 import '../imports/ui/pages/trends.js';
 import '../imports/ui/pages/detail.js';
 import '../imports/ui/pages/scenario.js';
+
+// Apply persisted theme before Blaze paints. Dark is the default.
+Meteor.startup(() => {
+  const saved = localStorage.getItem('meteor-bench-theme') || 'dark';
+  document.documentElement.classList.toggle('dark', saved === 'dark');
+});
 
 // Routes
 FlowRouter.route('/', {

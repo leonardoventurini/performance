@@ -5,7 +5,9 @@
     "start": "meteor run",
     "test": "meteor test --once --driver-package meteortesting:mocha",
     "test-app": "TEST_WATCH=1 meteor test --full-app --driver-package meteortesting:mocha",
-    "visualize": "meteor --production --extra-packages bundle-visualizer"
+    "visualize": "meteor --production --extra-packages bundle-visualizer",
+    "tw": "tailwindcss -i _tw/main.tailwind.css -o client/main.css --minify",
+    "tw:watch": "tailwindcss -i _tw/main.tailwind.css -o client/main.css --watch"
   },
   "dependencies": {
     "@babel/runtime": "^7.23.5",
@@ -20,7 +22,9 @@
     "@rsdoctor/rspack-plugin": "^1.2.3",
     "@rspack/cli": "^1.7.1",
     "@rspack/core": "^1.7.1",
-    "@rspack/plugin-react-refresh": "^1.4.3"
+    "@rspack/plugin-react-refresh": "^1.4.3",
+    "@tailwindcss/cli": "^4.3.0",
+    "tailwindcss": "^4.3.0"
   },
   "meteor": {
     "mainModule": {
