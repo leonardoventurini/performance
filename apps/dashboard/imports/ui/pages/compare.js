@@ -15,7 +15,7 @@ import './compare.html';
 // and decide whether the metric is "lower is better".
 
 const M = [
-  { key: 'wall_clock', label: 'wall_clock', unit: 'ms',
+  { key: 'wall_clock', label: 'duration', unit: 'ms',
     get: (r) => r.wall_clock_ms },
   { key: 'app_cpu.avg', unit: 'pct',
     get: (r) => r.metrics?.app_resources?.cpu?.avg },

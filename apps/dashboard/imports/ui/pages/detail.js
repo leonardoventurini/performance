@@ -107,7 +107,7 @@ Template.detail.helpers({
       : dp > 0 ? 'text-orange-500' : 'text-green-500';
     return {
       arrow: sign,
-      text: `${dp > 0 ? '+' : ''}${dp.toFixed(1)}% wall vs prev (${versionLabelFor(prev)} · ${prev.tag})`,
+      text: `${dp > 0 ? '+' : ''}${dp.toFixed(1)}% duration vs prev (${versionLabelFor(prev)} · ${prev.tag})`,
       class: cls,
     };
   },
@@ -141,7 +141,7 @@ Template.detail.helpers({
     if (sha && sha !== 'unknown') {
       rows.push({ label: 'Meteor sha', value: `<span class="font-mono text-[12px]">${sha}</span>` });
     }
-    rows.push({ label: 'Wall clock', value: this.wall_clock_ms ? `${(this.wall_clock_ms / 1000).toFixed(2)}s` : '-' });
+    rows.push({ label: 'Duration', value: this.wall_clock_ms ? `${(this.wall_clock_ms / 1000).toFixed(2)}s` : '-' });
     if (this.source) rows.push({ label: 'Source', value: this.source });
     if (this.prNumber) rows.push({ label: 'PR', value: `#${this.prNumber}` });
     return rows;
