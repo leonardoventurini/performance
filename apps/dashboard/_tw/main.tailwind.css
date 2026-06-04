@@ -1,5 +1,18 @@
 @import "tailwindcss";
 
+/* Meteor strips attributes from <body>, so use the canvas tokens here
+   instead of via Tailwind utilities on the element. */
+html, body {
+  background-color: #ffffff;
+  color: #313030;
+  font-family: "Geist", ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+html.dark, html.dark body {
+  background-color: #0a0a0a;
+  color: #c9c6c5;
+}
+
 /* Tell Tailwind 4 where the markup lives. Without this, it scans relative
    to this file (and would miss imports/) and `.html` files aren't on the
    default extension list. Glob is rooted at this file. */

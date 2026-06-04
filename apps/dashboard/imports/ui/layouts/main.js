@@ -33,7 +33,7 @@ Template.mainLayout.helpers({
 });
 
 Template.mainLayout.events({
-  'click #themeToggle'(event, instance) {
+  'click .js-theme-toggle'(event, instance) {
     const current = instance.theme.get();
     const next = current === 'dark' ? 'light' : 'dark';
     document.documentElement.classList.toggle('dark', next === 'dark');

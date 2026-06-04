@@ -36,8 +36,7 @@
 
       {{!-- Footer block: theme toggle + user --}}
       <div class="border-t border-neutral-200 dark:border-neutral-800 px-5 py-4 flex items-center justify-between">
-        <button id="themeToggle"
-                class="inline-flex items-center justify-center w-8 h-8 rounded border border-neutral-300 dark:border-neutral-700 text-neutral-700 dark:text-neutral-200 hover:bg-neutral-200 dark:hover:bg-neutral-800 transition"
+        <button class="js-theme-toggle inline-flex items-center justify-center w-8 h-8 rounded border border-neutral-300 dark:border-neutral-700 text-neutral-700 dark:text-neutral-200 hover:bg-neutral-200 dark:hover:bg-neutral-800 transition"
                 title="Toggle theme">
           {{themeIcon}}
         </button>
@@ -48,8 +47,7 @@
     {{!-- Mobile top bar --}}
     <header class="lg:hidden fixed top-0 left-0 right-0 z-30 flex items-center justify-between px-4 h-12 border-b border-neutral-200 dark:border-neutral-800 bg-neutral-100 dark:bg-neutral-900">
       <a href="/" class="text-sm font-semibold text-neutral-950 dark:text-neutral-100">Meteor Benchmark</a>
-      <button id="themeToggle"
-              class="inline-flex items-center justify-center w-8 h-8 rounded border border-neutral-300 dark:border-neutral-700 text-neutral-700 dark:text-neutral-200"
+      <button class="js-theme-toggle inline-flex items-center justify-center w-8 h-8 rounded border border-neutral-300 dark:border-neutral-700 text-neutral-700 dark:text-neutral-200"
               title="Toggle theme">
         {{themeIcon}}
       </button>
