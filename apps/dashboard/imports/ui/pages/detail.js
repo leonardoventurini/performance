@@ -132,10 +132,16 @@ Template.detail.helpers({
           hour: '2-digit', minute: '2-digit', second: '2-digit' }) },
       { label: 'Tag', value: `<span class="font-mono">${this.tag}</span>` },
       { label: 'Scenario', value: this.scenario },
-      { label: 'Meteor version', value: this.meteor?.version || '-' },
-      { label: 'Meteor sha', value: `<span class="font-mono text-[12px]">${this.meteor?.sha || '-'}</span>` },
-      { label: 'Wall clock', value: this.wall_clock_ms ? `${(this.wall_clock_ms / 1000).toFixed(2)}s` : '-' },
     ];
+    const v = this.meteor?.version;
+    if (v && v !== 'system' && v !== 'unknown') {
+      rows.push({ label: 'Meteor version', value: v });
+    }
+    const sha = this.meteor?.sha;
+    if (sha && sha !== 'unknown') {
+      rows.push({ label: 'Meteor sha', value: `<span class="font-mono text-[12px]">${sha}</span>` });
+    }
+    rows.push({ label: 'Wall clock', value: this.wall_clock_ms ? `${(this.wall_clock_ms / 1000).toFixed(2)}s` : '-' });
     if (this.source) rows.push({ label: 'Source', value: this.source });
     if (this.prNumber) rows.push({ label: 'PR', value: `#${this.prNumber}` });
     return rows;
