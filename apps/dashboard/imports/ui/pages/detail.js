@@ -3,31 +3,60 @@ import { FlowRouter } from 'meteor/ostrio:flow-router-extra';
 import { Runs } from '../../api/runs';
 import './detail.html';
 
+// ── Helpers ──────────────────────────────────────────────────────────
+const fmtMs = (n) => (n == null || !Number.isFinite(n)) ? '-' : n.toFixed(2);
+const fmtInt = (n) => (n == null || !Number.isFinite(n)) ? '-' : Math.round(n).toString();
+const fmtRate = (n) => (n == null || !Number.isFinite(n)) ? '-' : n.toFixed(2);
+const fmtPctValue = (n) => (n == null || !Number.isFinite(n)) ? '-' : `${n.toFixed(1)}%`;
+const fmtMb = (n) => (n == null || !Number.isFinite(n)) ? '-' : `${n.toFixed(0)} MB`;
+const fmt1 = (n) => (n == null || !Number.isFinite(n)) ? '-' : n.toFixed(1);
+
+// Build a cells[] array for the metricCard tableRows partial. Each cell
+// has { value, cls } so the partial can right-align numbers.
+function row(...cells) {
+  return { cells: cells.map((c) => (typeof c === 'object' ? c : { value: c, cls: 'text-right' })) };
+}
+const left = (value) => ({ value, cls: 'text-left' });
+const right = (value) => ({ value, cls: 'text-right' });
+
+function versionLabelFor(run) {
+  const v = run.meteor?.version;
+  if (v && v !== 'system' && v !== 'unknown') return v;
+  if (run.runtime?.channel) return run.runtime.channel;
+  return 'local';
+}
+
 Template.detail.onCreated(function () {
   this.autorun(() => {
     const runId = FlowRouter.getParam('id');
-    if (runId) this.subscribe('runs.single', runId);
+    if (runId) {
+      this.subscribe('runs.single', runId);
+      this.subscribe('runs.recent', 200);
+    }
   });
 });
 
-// Helpers below all read `this.metrics.<key>`. Each metric panel guards
-// rendering with `hasXxx` (absence convention CC-5: missing key → omit
-// the whole card), so a run JSON without a given metric stays clean.
+// ── Section-presence flags (derived from the hasXxx leaves) ──────────
+const ddpKeys = ['ddp_methods', 'ddp_subscriptions', 'live_update_propagation',
+                 'ddp_messages', 'ddp_frame_size', 'ddp_compression'];
+const mongoKeys = ['mongo_ops', 'mongo_pool', 'mongo_slow_queries',
+                   'mongo_index_usage', 'mongo_changestream', 'mongo_wiredtiger'];
+const observerKeys = ['observer_pool', 'driver_fallbacks'];
+const buildKeys = ['build_profile', 'plugin_compile'];
 
-function fmtMs(n) {
-  if (n == null || !Number.isFinite(n)) return '-';
-  return n.toFixed(2);
+function anyOf(metrics, keys) {
+  return keys.some((k) => metrics?.[k] != null);
 }
 
-function fmtInt(n) {
-  if (n == null || !Number.isFinite(n)) return '-';
-  return Math.round(n).toString();
-}
-
-function fmtRate(n) {
-  if (n == null || !Number.isFinite(n)) return '-';
-  return n.toFixed(2);
-}
+// All known metric families — used to compute "Not in this run".
+const ALL_FAMILIES = [
+  'ddp_methods', 'ddp_subscriptions', 'live_update_propagation',
+  'ddp_messages', 'ddp_frame_size', 'ddp_compression',
+  'mongo_ops', 'mongo_pool', 'mongo_slow_queries',
+  'mongo_index_usage', 'mongo_changestream', 'mongo_wiredtiger',
+  'observer_pool', 'driver_fallbacks',
+  'build_profile', 'plugin_compile',
+];
 
 Template.detail.helpers({
   run() {
@@ -37,116 +66,197 @@ Template.detail.helpers({
     if (!date) return '-';
     return new Date(date).toLocaleString('en-GB', {
       day: '2-digit', month: 'short', year: 'numeric',
-      hour: '2-digit', minute: '2-digit', second: '2-digit',
+      hour: '2-digit', minute: '2-digit',
     });
   },
   formatMs(ms) {
     if (!ms) return '-';
     return `${(ms / 1000).toFixed(1)}s`;
   },
-  appCpuAvg() { return this.metrics?.app_resources?.cpu?.avg?.toFixed(1) || '-'; },
-  appCpuMax() { return this.metrics?.app_resources?.cpu?.max?.toFixed(1) || '-'; },
-  appRamAvg() { return this.metrics?.app_resources?.memory?.avg_mb?.toFixed(0) || '-'; },
-  appRamMax() { return this.metrics?.app_resources?.memory?.max_mb?.toFixed(0) || '-'; },
-  dbCpuAvg() { return this.metrics?.db_resources?.cpu?.avg?.toFixed(1) || '-'; },
-  dbRamAvg() { return this.metrics?.db_resources?.memory?.avg_mb?.toFixed(0) || '-'; },
-  gcCount() { return this.metrics?.gc?.count || '-'; },
-  gcTotalPause() { return this.metrics?.gc?.total_pause_ms?.toFixed(0) || '-'; },
-  gcMaxPause() { return this.metrics?.gc?.max_pause_ms?.toFixed(1) || '-'; },
-  gcAvgPause() { return this.metrics?.gc?.avg_pause_ms?.toFixed(1) || '-'; },
-  gcMinorCount() { return this.metrics?.gc?.minor?.count || '-'; },
-  gcMinorMs() { return this.metrics?.gc?.minor?.total_ms?.toFixed(0) || '-'; },
-  gcMajorCount() { return this.metrics?.gc?.major?.count || '-'; },
-  gcMajorMs() { return this.metrics?.gc?.major?.total_ms?.toFixed(0) || '-'; },
+  versionLabel() { return versionLabelFor(this); },
+  shortSha() {
+    const s = this.meteor?.sha;
+    return s && s !== 'unknown' ? s.slice(0, 8) : '';
+  },
 
-  // ─── DDP method latency (task 01) ──────────────────────────────────
+  pillClass(active) {
+    return active
+      ? 'block pl-3 pr-2 py-1.5 border-l-2 border-indigo-500 text-neutral-950 dark:text-neutral-100 bg-neutral-100 dark:bg-neutral-800/60 rounded-r-md'
+      : 'block pl-3 pr-2 py-1.5 border-l-2 border-transparent text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-200 hover:bg-neutral-50 dark:hover:bg-neutral-900/40 rounded-r-md transition';
+  },
+
+  // ── Verdict: Δ vs predecessor run of the same scenario ──────────
+  prevRunId() {
+    const prev = Runs.find(
+      { scenario: this.scenario, timestamp: { $lt: this.timestamp } },
+      { sort: { timestamp: -1 }, limit: 1 }
+    ).fetch()[0];
+    return prev?._id;
+  },
+  verdict() {
+    const prev = Runs.find(
+      { scenario: this.scenario, timestamp: { $lt: this.timestamp } },
+      { sort: { timestamp: -1 }, limit: 1 }
+    ).fetch()[0];
+    if (!prev || !prev.wall_clock_ms || !this.wall_clock_ms) return null;
+    const dp = ((this.wall_clock_ms - prev.wall_clock_ms) / prev.wall_clock_ms) * 100;
+    if (Math.abs(dp) < 1) return null;
+    const sign = dp > 0 ? '▲' : '▼';
+    const cls = Math.abs(dp) < 5
+      ? 'text-neutral-500'
+      : dp > 0 ? 'text-orange-500' : 'text-green-500';
+    return {
+      arrow: sign,
+      text: `${dp > 0 ? '+' : ''}${dp.toFixed(1)}% wall vs prev (${versionLabelFor(prev)} · ${prev.tag})`,
+      class: cls,
+    };
+  },
+
+  // ── Section flags ───────────────────────────────────────────────
+  hasDdpSection() { return anyOf(this.metrics, ddpKeys); },
+  hasMongoSection() { return anyOf(this.metrics, mongoKeys); },
+  hasObserverSection() { return anyOf(this.metrics, observerKeys); },
+  hasBuildSection() { return anyOf(this.metrics, buildKeys); },
+  hasMissingSection() {
+    return ALL_FAMILIES.some((k) => this.metrics?.[k] == null);
+  },
+  missingMetrics() {
+    return ALL_FAMILIES.filter((k) => this.metrics?.[k] == null);
+  },
+
+  // ── Overview cards ──────────────────────────────────────────────
+  runInfoRows() {
+    const rows = [
+      { label: 'Date', value: new Date(this.timestamp).toLocaleString('en-GB', {
+          day: '2-digit', month: 'short', year: 'numeric',
+          hour: '2-digit', minute: '2-digit', second: '2-digit' }) },
+      { label: 'Tag', value: `<span class="font-mono">${this.tag}</span>` },
+      { label: 'Scenario', value: this.scenario },
+      { label: 'Meteor version', value: this.meteor?.version || '-' },
+      { label: 'Meteor sha', value: `<span class="font-mono text-[12px]">${this.meteor?.sha || '-'}</span>` },
+      { label: 'Wall clock', value: this.wall_clock_ms ? `${(this.wall_clock_ms / 1000).toFixed(2)}s` : '-' },
+    ];
+    if (this.source) rows.push({ label: 'Source', value: this.source });
+    if (this.prNumber) rows.push({ label: 'PR', value: `#${this.prNumber}` });
+    return rows;
+  },
+
+  appResourcesRows() {
+    const a = this.metrics?.app_resources || {};
+    return [
+      { label: 'CPU avg', value: fmtPctValue(a.cpu?.avg) },
+      { label: 'CPU max', value: fmtPctValue(a.cpu?.max) },
+      { label: 'RAM avg', value: fmtMb(a.memory?.avg_mb) },
+      { label: 'RAM max', value: fmtMb(a.memory?.max_mb) },
+    ];
+  },
+
+  dbResourcesRows() {
+    const a = this.metrics?.db_resources || {};
+    return [
+      { label: 'CPU avg', value: fmtPctValue(a.cpu?.avg) },
+      { label: 'CPU max', value: fmtPctValue(a.cpu?.max) },
+      { label: 'RAM avg', value: fmtMb(a.memory?.avg_mb) },
+      { label: 'RAM max', value: fmtMb(a.memory?.max_mb) },
+    ];
+  },
+
+  gcRows() {
+    const g = this.metrics?.gc || {};
+    return [
+      { label: 'GC count', value: fmtInt(g.count) },
+      { label: 'Total pause', value: `${fmtInt(g.total_pause_ms)} ms` },
+      { label: 'Max pause', value: `${fmt1(g.max_pause_ms)} ms` },
+      { label: 'Avg pause', value: `${fmt1(g.avg_pause_ms)} ms` },
+      { label: 'Minor (scavenge)', value: `${fmtInt(g.minor?.count)} (${fmtInt(g.minor?.total_ms)} ms)` },
+      { label: 'Major (full)', value: `${fmtInt(g.major?.count)} (${fmtInt(g.major?.total_ms)} ms)` },
+    ];
+  },
+
+  // ── DDP methods ─────────────────────────────────────────────────
   hasDdpMethods() { return !!this.metrics?.ddp_methods; },
-  ddpMethodsTotal() { return this.metrics?.ddp_methods?.total_calls ?? '-'; },
+  ddpMethodsBadge() {
+    const n = this.metrics?.ddp_methods?.total_calls;
+    return n != null ? `${n} calls` : '';
+  },
+  ddpMethodsHeaders: [
+    { label: 'Method', cls: 'text-left' },
+    { label: 'count', cls: 'text-right' },
+    { label: 'avg', cls: 'text-right' },
+    { label: 'p95', cls: 'text-right' },
+    { label: 'p99', cls: 'text-right' },
+    { label: 'max', cls: 'text-right' },
+  ],
   ddpMethodsRows() {
     const methods = this.metrics?.ddp_methods?.methods ?? {};
     return Object.entries(methods)
       .sort((a, b) => b[1].count - a[1].count)
-      .map(([name, m]) => ({
-        name,
-        count: fmtInt(m.count),
-        avg: fmtMs(m.avg_ms),
-        p95: fmtMs(m.p95),
-        p99: fmtMs(m.p99),
-        max: fmtMs(m.max_ms),
-      }));
+      .map(([name, m]) => row(
+        left(`<code class="font-mono text-[12px]">${name}</code>`),
+        right(fmtInt(m.count)),
+        right(fmtMs(m.avg_ms)),
+        right(fmtMs(m.p95)),
+        right(fmtMs(m.p99)),
+        right(fmtMs(m.max_ms)),
+      ));
   },
 
-  // ─── DDP subscription ready latency (task 02) ──────────────────────
+  // ── DDP subscriptions ───────────────────────────────────────────
   hasDdpSubscriptions() { return !!this.metrics?.ddp_subscriptions; },
-  ddpSubsTotal() { return this.metrics?.ddp_subscriptions?.total_subs ?? '-'; },
+  ddpSubsBadge() {
+    const n = this.metrics?.ddp_subscriptions?.total_subs;
+    return n != null ? `${n} subs` : '';
+  },
   ddpSubsRows() {
     const pubs = this.metrics?.ddp_subscriptions?.publications ?? {};
     return Object.entries(pubs)
       .sort((a, b) => b[1].count - a[1].count)
-      .map(([name, p]) => ({
-        name,
-        count: fmtInt(p.count),
-        avg: fmtMs(p.avg_ms),
-        p95: fmtMs(p.p95),
-        p99: fmtMs(p.p99),
-        max: fmtMs(p.max_ms),
-      }));
+      .map(([name, p]) => row(
+        left(`<code class="font-mono text-[12px]">${name}</code>`),
+        right(fmtInt(p.count)),
+        right(fmtMs(p.avg_ms)),
+        right(fmtMs(p.p95)),
+        right(fmtMs(p.p99)),
+        right(fmtMs(p.max_ms)),
+      ));
   },
 
-  // ─── Live-update propagation latency (task 03) ─────────────────────
+  // ── Live update propagation ─────────────────────────────────────
   hasLiveUpdatePropagation() { return !!this.metrics?.live_update_propagation; },
-  lupObservedUpdates() { return fmtInt(this.metrics?.live_update_propagation?.observed_updates); },
-  lupAvg() { return fmtMs(this.metrics?.live_update_propagation?.avg_ms); },
-  lupP50() { return fmtMs(this.metrics?.live_update_propagation?.p50); },
-  lupP95() { return fmtMs(this.metrics?.live_update_propagation?.p95); },
-  lupP99() { return fmtMs(this.metrics?.live_update_propagation?.p99); },
-  lupMax() { return fmtMs(this.metrics?.live_update_propagation?.max_ms); },
-
-  // ─── Mongo opcounters (task 04) ────────────────────────────────────
-  hasMongoOps() { return !!this.metrics?.mongo_ops; },
-  mongoOpsDuration() {
-    const d = this.metrics?.mongo_ops?.duration_s;
-    return d != null && Number.isFinite(d) ? d.toFixed(1) : '-';
+  lupBadge() {
+    const n = this.metrics?.live_update_propagation?.observed_updates;
+    return n != null ? `${fmtInt(n)} emits` : '';
   },
-  mongoOpsRows() {
-    const totals = this.metrics?.mongo_ops?.totals ?? {};
-    const rates = this.metrics?.mongo_ops?.ops_per_sec ?? {};
-    return Object.keys(totals).map((op) => ({
-      op,
-      total: fmtInt(totals[op]),
-      perSec: fmtRate(rates[op]),
-    }));
+  lupRows() {
+    const l = this.metrics?.live_update_propagation || {};
+    return [
+      { label: 'avg', value: `${fmtMs(l.avg_ms)} ms` },
+      { label: 'p50', value: `${fmtMs(l.p50)} ms` },
+      { label: 'p95', value: `${fmtMs(l.p95)} ms` },
+      { label: 'p99', value: `${fmtMs(l.p99)} ms` },
+      { label: 'max', value: `${fmtMs(l.max_ms)} ms` },
+    ];
   },
 
-  // ─── Observer pool (task 05) ───────────────────────────────────────
-  hasObserverPool() { return !!this.metrics?.observer_pool; },
-  observerPoolSamples() { return fmtInt(this.metrics?.observer_pool?.samples); },
-  observerPoolInterval() { return fmtInt(this.metrics?.observer_pool?.interval_ms); },
-  observerMuxMin() { return fmtInt(this.metrics?.observer_pool?.multiplexer_count?.min); },
-  observerMuxMax() { return fmtInt(this.metrics?.observer_pool?.multiplexer_count?.max); },
-  observerMuxAvg() {
-    const v = this.metrics?.observer_pool?.multiplexer_count?.avg;
-    return v != null && Number.isFinite(v) ? v.toFixed(1) : '-';
-  },
-  observerMuxEnd() { return fmtInt(this.metrics?.observer_pool?.multiplexer_count?.end); },
-  observerHandleMin() { return fmtInt(this.metrics?.observer_pool?.handle_count?.min); },
-  observerHandleMax() { return fmtInt(this.metrics?.observer_pool?.handle_count?.max); },
-  observerHandleAvg() {
-    const v = this.metrics?.observer_pool?.handle_count?.avg;
-    return v != null && Number.isFinite(v) ? v.toFixed(1) : '-';
-  },
-  observerHandleEnd() { return fmtInt(this.metrics?.observer_pool?.handle_count?.end); },
-
-  // ─── DDP messages (task 07) ────────────────────────────────────────
+  // ── DDP messages ────────────────────────────────────────────────
   hasDdpMessages() { return !!this.metrics?.ddp_messages; },
-  ddpMsgsDuration() {
-    const d = this.metrics?.ddp_messages?.duration_s;
-    return d != null && Number.isFinite(d) ? d.toFixed(1) : '-';
+  ddpMsgsBadge() {
+    const m = this.metrics?.ddp_messages;
+    if (!m) return '';
+    return `${fmt1(m.duration_s)}s · ${fmtInt(m.total_in)} in / ${fmtInt(m.total_out)} out`;
   },
-  ddpMsgsTotalIn() { return fmtInt(this.metrics?.ddp_messages?.total_in); },
-  ddpMsgsTotalOut() { return fmtInt(this.metrics?.ddp_messages?.total_out); },
-  ddpMsgsInPerSec() { return fmtRate(this.metrics?.ddp_messages?.in_per_sec); },
-  ddpMsgsOutPerSec() { return fmtRate(this.metrics?.ddp_messages?.out_per_sec); },
+  ddpMsgsRows() {
+    const m = this.metrics?.ddp_messages || {};
+    return [
+      { label: 'incoming (client → server)', value: `${fmtInt(m.total_in)} (${fmtRate(m.in_per_sec)}/s)` },
+      { label: 'outgoing (server → client)', value: `${fmtInt(m.total_out)} (${fmtRate(m.out_per_sec)}/s)` },
+    ];
+  },
+  ddpMsgsByTypeHeaders: [
+    { label: 'Type', cls: 'text-left' },
+    { label: 'in',   cls: 'text-right' },
+    { label: 'out',  cls: 'text-right' },
+  ],
   ddpMsgsByTypeRows() {
     const inMap = this.metrics?.ddp_messages?.by_type?.in ?? {};
     const outMap = this.metrics?.ddp_messages?.by_type?.out ?? {};
@@ -154,206 +264,318 @@ Template.detail.helpers({
     return Array.from(allTypes)
       .map((type) => ({
         type,
-        in: inMap[type] != null ? fmtInt(inMap[type]) : '-',
-        out: outMap[type] != null ? fmtInt(outMap[type]) : '-',
+        inV: inMap[type], outV: outMap[type],
         _sortKey: (inMap[type] ?? 0) + (outMap[type] ?? 0),
       }))
       .sort((a, b) => b._sortKey - a._sortKey)
-      .map(({ _sortKey, ...row }) => row);
+      .map(({ type, inV, outV }) => row(
+        left(`<code class="font-mono text-[12px]">${type}</code>`),
+        right(inV != null ? fmtInt(inV) : '-'),
+        right(outV != null ? fmtInt(outV) : '-'),
+      ));
   },
 
-  // ─── Mongo slow queries (task 12) ──────────────────────────────────
+  // ── DDP frame size ──────────────────────────────────────────────
+  hasDdpFrameSize() { return !!this.metrics?.ddp_frame_size; },
+  ddpFrameHeaders: [
+    { label: 'Dir',   cls: 'text-left' },
+    { label: 'count', cls: 'text-right' },
+    { label: 'avg',   cls: 'text-right' },
+    { label: 'p50',   cls: 'text-right' },
+    { label: 'p95',   cls: 'text-right' },
+    { label: 'p99',   cls: 'text-right' },
+    { label: 'max',   cls: 'text-right' },
+  ],
+  ddpFrameRows() {
+    const f = this.metrics?.ddp_frame_size || {};
+    const dir = (d, label) => row(
+      left(label),
+      right(fmtInt(d?.count)),
+      right(fmtInt(d?.avg_bytes)),
+      right(fmtInt(d?.p50_bytes)),
+      right(fmtInt(d?.p95_bytes)),
+      right(fmtInt(d?.p99_bytes)),
+      right(fmtInt(d?.max_bytes)),
+    );
+    return [dir(f.in, 'in'), dir(f.out, 'out')];
+  },
+
+  // ── DDP compression ─────────────────────────────────────────────
+  hasDdpCompression() { return !!this.metrics?.ddp_compression; },
+  ddpCompHeaders: [
+    { label: 'Dir',         cls: 'text-left' },
+    { label: 'uncompressed', cls: 'text-right' },
+    { label: 'compressed',   cls: 'text-right' },
+    { label: 'ratio',        cls: 'text-right' },
+    { label: 'savings',      cls: 'text-right' },
+  ],
+  ddpCompRows() {
+    const c = this.metrics?.ddp_compression || {};
+    const dir = (d, label) => row(
+      left(label),
+      right(fmtInt(d?.uncompressed_bytes)),
+      right(fmtInt(d?.compressed_bytes)),
+      right(d?.ratio == null ? '-' : d.ratio.toFixed(4)),
+      right(d?.savings_pct == null ? '-' : `${d.savings_pct}%`),
+    );
+    return [dir(c.in, 'in'), dir(c.out, 'out')];
+  },
+
+  // ── Mongo opcounters ────────────────────────────────────────────
+  hasMongoOps() { return !!this.metrics?.mongo_ops; },
+  mongoOpsBadge() {
+    const d = this.metrics?.mongo_ops?.duration_s;
+    return d != null ? `${fmt1(d)}s window` : '';
+  },
+  mongoOpsHeaders: [
+    { label: 'Op',     cls: 'text-left' },
+    { label: 'total',  cls: 'text-right' },
+    { label: 'ops/sec', cls: 'text-right' },
+  ],
+  mongoOpsRows() {
+    const totals = this.metrics?.mongo_ops?.totals ?? {};
+    const rates = this.metrics?.mongo_ops?.ops_per_sec ?? {};
+    return Object.keys(totals).map((op) => row(
+      left(`<code class="font-mono text-[12px]">${op}</code>`),
+      right(fmtInt(totals[op])),
+      right(fmtRate(rates[op])),
+    ));
+  },
+
+  // ── Mongo pool ──────────────────────────────────────────────────
+  hasMongoPool() { return !!this.metrics?.mongo_pool; },
+  mongoPoolBadge() {
+    const m = this.metrics?.mongo_pool;
+    return m ? `${fmtInt(m.samples)} samples @ ${fmtInt(m.interval_ms)}ms` : '';
+  },
+  mongoPoolHeaders: [
+    { label: 'Metric', cls: 'text-left' },
+    { label: 'min',    cls: 'text-right' },
+    { label: 'max',    cls: 'text-right' },
+    { label: 'avg',    cls: 'text-right' },
+    { label: 'end',    cls: 'text-right' },
+  ],
+  mongoPoolRows() {
+    const p = this.metrics?.mongo_pool || {};
+    return [
+      row(left('Current'), right(fmtInt(p.current?.min)), right(fmtInt(p.current?.max)), right(fmt1(p.current?.avg)), right(fmtInt(p.current?.end))),
+      row(left('Active'),  right(fmtInt(p.active?.min)),  right(fmtInt(p.active?.max)),  right(fmt1(p.active?.avg)),  right(fmtInt(p.active?.end))),
+      row(left('Total created Δ'), right(fmtInt(p.total_created?.start)), right(fmtInt(p.total_created?.end)), right(`+${fmtInt(p.total_created?.delta)}`), right('')),
+    ];
+  },
+
+  // ── Mongo slow queries ──────────────────────────────────────────
   hasMongoSlowQueries() { return !!this.metrics?.mongo_slow_queries; },
-  mongoSlowTotal() { return fmtInt(this.metrics?.mongo_slow_queries?.total_slow); },
-  mongoSlowThreshold() { return fmtInt(this.metrics?.mongo_slow_queries?.threshold_ms); },
+  mongoSlowBadge() {
+    const m = this.metrics?.mongo_slow_queries;
+    return m ? `${fmtInt(m.total_slow)} slow · ≥${fmtInt(m.threshold_ms)}ms` : '';
+  },
+  mongoSlowHeaders: [
+    { label: 'Op type', cls: 'text-left' },
+    { label: 'count',   cls: 'text-right' },
+  ],
   mongoSlowByOpRows() {
     const byOp = this.metrics?.mongo_slow_queries?.by_op ?? {};
     return Object.entries(byOp)
       .sort((a, b) => b[1] - a[1])
-      .map(([op, count]) => ({ op, count: fmtInt(count) }));
+      .map(([op, count]) => row(
+        left(`<code class="font-mono text-[12px]">${op}</code>`),
+        right(fmtInt(count)),
+      ));
   },
-  hasMongoSlowSample() { return !!this.metrics?.mongo_slow_queries?.slowest_sample; },
-  mongoSlowSampleNs() { return this.metrics?.mongo_slow_queries?.slowest_sample?.ns ?? '-'; },
-  mongoSlowSampleOp() { return this.metrics?.mongo_slow_queries?.slowest_sample?.op ?? '-'; },
-  mongoSlowSampleMs() { return fmtInt(this.metrics?.mongo_slow_queries?.slowest_sample?.millis); },
-  mongoSlowSampleFilterKeys() {
-    const keys = this.metrics?.mongo_slow_queries?.slowest_sample?.filter_keys ?? [];
-    return keys.length ? keys.join(', ') : '(none)';
-  },
-  mongoSlowSamplePlan() {
-    return this.metrics?.mongo_slow_queries?.slowest_sample?.planSummary ?? '(none)';
+  mongoSlowSampleRows() {
+    const s = this.metrics?.mongo_slow_queries?.slowest_sample;
+    if (!s) return [];
+    return [
+      { label: 'slowest', value: `<code class="font-mono text-[12px]">${s.ns}</code> · ${s.op} · ${fmtInt(s.millis)} ms` },
+      { label: 'filter keys', value: `<code class="font-mono text-[12px]">${(s.filter_keys || []).join(', ') || '(none)'}</code>` },
+      { label: 'plan', value: `<code class="font-mono text-[12px]">${s.planSummary || '(none)'}</code>` },
+    ];
   },
 
-  // ─── Mongo connection pool (task 14) ───────────────────────────────
-  hasMongoPool() { return !!this.metrics?.mongo_pool; },
-  mongoPoolSamples() { return fmtInt(this.metrics?.mongo_pool?.samples); },
-  mongoPoolInterval() { return fmtInt(this.metrics?.mongo_pool?.interval_ms); },
-  mongoPoolCurrentMin() { return fmtInt(this.metrics?.mongo_pool?.current?.min); },
-  mongoPoolCurrentMax() { return fmtInt(this.metrics?.mongo_pool?.current?.max); },
-  mongoPoolCurrentAvg() {
-    const v = this.metrics?.mongo_pool?.current?.avg;
-    return v != null && Number.isFinite(v) ? v.toFixed(1) : '-';
-  },
-  mongoPoolCurrentEnd() { return fmtInt(this.metrics?.mongo_pool?.current?.end); },
-  mongoPoolActiveMin() { return fmtInt(this.metrics?.mongo_pool?.active?.min); },
-  mongoPoolActiveMax() { return fmtInt(this.metrics?.mongo_pool?.active?.max); },
-  mongoPoolActiveAvg() {
-    const v = this.metrics?.mongo_pool?.active?.avg;
-    return v != null && Number.isFinite(v) ? v.toFixed(1) : '-';
-  },
-  mongoPoolActiveEnd() { return fmtInt(this.metrics?.mongo_pool?.active?.end); },
-  mongoPoolTotalStart() { return fmtInt(this.metrics?.mongo_pool?.total_created?.start); },
-  mongoPoolTotalEnd() { return fmtInt(this.metrics?.mongo_pool?.total_created?.end); },
-  mongoPoolTotalDelta() { return fmtInt(this.metrics?.mongo_pool?.total_created?.delta); },
-
-  // ─── Mongo index usage (task 13) ───────────────────────────────────
+  // ── Mongo index usage ───────────────────────────────────────────
   hasMongoIndexUsage() { return !!this.metrics?.mongo_index_usage; },
   mongoIndexCollections() {
     const collections = this.metrics?.mongo_index_usage?.collections ?? {};
     return Object.entries(collections).map(([collection, indexes]) => ({
-      collection,
-      indexes: (indexes || []).map((idx) => ({
-        ...idx,
-        keyJson: JSON.stringify(idx.key ?? {}),
-      })),
+      collectionTitle: `Index usage · ${collection}`,
+      indexHeaders: [
+        { label: 'Index',           cls: 'text-left' },
+        { label: 'Key',             cls: 'text-left' },
+        { label: 'ops in window',   cls: 'text-right' },
+        { label: 'tracked since',   cls: 'text-right' },
+      ],
+      indexes: (indexes || []).map((idx) => row(
+        left(`<code class="font-mono text-[12px]">${idx.name}</code>`),
+        left(`<code class="font-mono text-[12px]">${JSON.stringify(idx.key ?? {})}</code>`),
+        right(fmtInt(idx.ops_in_window)),
+        right(`<span class="text-[10px]">${idx.since || ''}</span>`),
+      )),
     }));
   },
 
-  // ─── DDP frame size (task 08) ──────────────────────────────────────
-  hasDdpFrameSize() { return !!this.metrics?.ddp_frame_size; },
-  frameInCount() { return fmtInt(this.metrics?.ddp_frame_size?.in?.count); },
-  frameInAvg() { return fmtInt(this.metrics?.ddp_frame_size?.in?.avg_bytes); },
-  frameInP50() { return fmtInt(this.metrics?.ddp_frame_size?.in?.p50_bytes); },
-  frameInP95() { return fmtInt(this.metrics?.ddp_frame_size?.in?.p95_bytes); },
-  frameInP99() { return fmtInt(this.metrics?.ddp_frame_size?.in?.p99_bytes); },
-  frameInMax() { return fmtInt(this.metrics?.ddp_frame_size?.in?.max_bytes); },
-  frameOutCount() { return fmtInt(this.metrics?.ddp_frame_size?.out?.count); },
-  frameOutAvg() { return fmtInt(this.metrics?.ddp_frame_size?.out?.avg_bytes); },
-  frameOutP50() { return fmtInt(this.metrics?.ddp_frame_size?.out?.p50_bytes); },
-  frameOutP95() { return fmtInt(this.metrics?.ddp_frame_size?.out?.p95_bytes); },
-  frameOutP99() { return fmtInt(this.metrics?.ddp_frame_size?.out?.p99_bytes); },
-  frameOutMax() { return fmtInt(this.metrics?.ddp_frame_size?.out?.max_bytes); },
-
-  // ─── DDP compression (task 09) ─────────────────────────────────────
-  hasDdpCompression() { return !!this.metrics?.ddp_compression; },
-  compIn() {
-    const d = this.metrics?.ddp_compression?.in ?? {};
-    return {
-      uncompressed: fmtInt(d.uncompressed_bytes),
-      compressed: fmtInt(d.compressed_bytes),
-      ratio: d.ratio == null ? '-' : d.ratio.toFixed(4),
-      savings: d.savings_pct == null ? '-' : `${d.savings_pct}%`,
-    };
-  },
-  compOut() {
-    const d = this.metrics?.ddp_compression?.out ?? {};
-    return {
-      uncompressed: fmtInt(d.uncompressed_bytes),
-      compressed: fmtInt(d.compressed_bytes),
-      ratio: d.ratio == null ? '-' : d.ratio.toFixed(4),
-      savings: d.savings_pct == null ? '-' : `${d.savings_pct}%`,
-    };
-  },
-
-  // ─── Mongo change-stream cursors (task 24) ─────────────────────────
+  // ── Mongo changestream ──────────────────────────────────────────
   hasMongoChangestream() { return !!this.metrics?.mongo_changestream; },
-  changestreamSamples() { return fmtInt(this.metrics?.mongo_changestream?.samples); },
-  changestreamInterval() { return fmtInt(this.metrics?.mongo_changestream?.interval_ms); },
-  changestreamCursorMin() { return fmtInt(this.metrics?.mongo_changestream?.cursor_count?.min); },
-  changestreamCursorMax() { return fmtInt(this.metrics?.mongo_changestream?.cursor_count?.max); },
-  changestreamCursorAvg() {
-    const v = this.metrics?.mongo_changestream?.cursor_count?.avg;
-    return v != null && Number.isFinite(v) ? v.toFixed(1) : '-';
+  changestreamBadge() {
+    const m = this.metrics?.mongo_changestream;
+    return m ? `${fmtInt(m.samples)} samples @ ${fmtInt(m.interval_ms)}ms` : '';
   },
-  changestreamCursorEnd() { return fmtInt(this.metrics?.mongo_changestream?.cursor_count?.end); },
-  hasChangestreamNamespaces() {
-    const byNs = this.metrics?.mongo_changestream?.by_namespace;
-    return byNs && Object.keys(byNs).length > 0;
-  },
-  changestreamNamespaces() {
-    const byNs = this.metrics?.mongo_changestream?.by_namespace ?? {};
-    return Object.entries(byNs)
+  changestreamHeaders: [
+    { label: 'Namespace', cls: 'text-left' },
+    { label: 'min', cls: 'text-right' },
+    { label: 'max', cls: 'text-right' },
+    { label: 'avg', cls: 'text-right' },
+    { label: 'end', cls: 'text-right' },
+  ],
+  changestreamRows() {
+    const c = this.metrics?.mongo_changestream || {};
+    const total = row(
+      left('total cursors'),
+      right(fmtInt(c.cursor_count?.min)),
+      right(fmtInt(c.cursor_count?.max)),
+      right(fmt1(c.cursor_count?.avg)),
+      right(fmtInt(c.cursor_count?.end)),
+    );
+    const byNs = c.by_namespace || {};
+    const nsRows = Object.entries(byNs)
       .sort((a, b) => (b[1].max ?? 0) - (a[1].max ?? 0))
-      .map(([ns, v]) => ({
-        ns,
-        max: fmtInt(v.max),
-        avg: v.avg != null && Number.isFinite(v.avg) ? v.avg.toFixed(1) : '-',
-      }));
+      .map(([ns, v]) => row(
+        left(`<code class="font-mono text-[12px]">${ns}</code>`),
+        right('-'),
+        right(fmtInt(v.max)),
+        right(fmt1(v.avg)),
+        right('-'),
+      ));
+    return [total, ...nsRows];
   },
 
-  // ─── Mongo WiredTiger cache (task 15) ──────────────────────────────
+  // ── Mongo WT ────────────────────────────────────────────────────
   hasMongoWiredtiger() { return !!this.metrics?.mongo_wiredtiger; },
-  wtRatio() {
+  wtBadge() {
     const v = this.metrics?.mongo_wiredtiger?.cache_hit_ratio;
-    return v == null ? '-' : v.toFixed(4);
+    return v == null ? '' : `hit ratio ${(v * 100).toFixed(1)}%`;
   },
-  wtRatioPct() {
-    const v = this.metrics?.mongo_wiredtiger?.cache_hit_ratio;
-    return v == null ? 'n/a' : `${(v * 100).toFixed(1)}%`;
-  },
-  wtRequested() { return fmtInt(this.metrics?.mongo_wiredtiger?.pages_requested_in_window); },
-  wtReadIn() { return fmtInt(this.metrics?.mongo_wiredtiger?.pages_read_into_cache); },
-  wtWritten() { return fmtInt(this.metrics?.mongo_wiredtiger?.pages_written_from_cache); },
-  wtBytesInCache() {
-    const b = this.metrics?.mongo_wiredtiger?.bytes_in_cache_end;
-    if (b == null || !Number.isFinite(b)) return '-';
-    return `${(b / 1024 / 1024).toFixed(1)} MB`;
+  wtRows() {
+    const w = this.metrics?.mongo_wiredtiger || {};
+    const mb = w.bytes_in_cache_end != null
+      ? `${(w.bytes_in_cache_end / 1024 / 1024).toFixed(1)} MB` : '-';
+    return [
+      { label: 'cache hit ratio', value: w.cache_hit_ratio == null ? '-' : w.cache_hit_ratio.toFixed(4) },
+      { label: 'pages requested', value: fmtInt(w.pages_requested_in_window) },
+      { label: 'pages read into cache', value: fmtInt(w.pages_read_into_cache) },
+      { label: 'pages written from cache', value: fmtInt(w.pages_written_from_cache) },
+      { label: 'bytes in cache (end)', value: mb },
+    ];
   },
 
-  // ─── Driver fallbacks (task 10) ────────────────────────────────────
+  // ── Observer pool ───────────────────────────────────────────────
+  hasObserverPool() { return !!this.metrics?.observer_pool; },
+  observerPoolBadge() {
+    const o = this.metrics?.observer_pool;
+    return o ? `${fmtInt(o.samples)} samples @ ${fmtInt(o.interval_ms)}ms` : '';
+  },
+  observerPoolHeaders: [
+    { label: 'Metric', cls: 'text-left' },
+    { label: 'min',    cls: 'text-right' },
+    { label: 'max',    cls: 'text-right' },
+    { label: 'avg',    cls: 'text-right' },
+    { label: 'end',    cls: 'text-right' },
+  ],
+  observerPoolRows() {
+    const o = this.metrics?.observer_pool || {};
+    return [
+      row(left('Multiplexers'),
+        right(fmtInt(o.multiplexer_count?.min)),
+        right(fmtInt(o.multiplexer_count?.max)),
+        right(fmt1(o.multiplexer_count?.avg)),
+        right(fmtInt(o.multiplexer_count?.end)),
+      ),
+      row(left('Handles'),
+        right(fmtInt(o.handle_count?.min)),
+        right(fmtInt(o.handle_count?.max)),
+        right(fmt1(o.handle_count?.avg)),
+        right(fmtInt(o.handle_count?.end)),
+      ),
+    ];
+  },
+
+  // ── Driver fallbacks ────────────────────────────────────────────
   hasDriverFallbacks() { return !!this.metrics?.driver_fallbacks; },
-  driverTotal() { return fmtInt(this.metrics?.driver_fallbacks?.total_cursors); },
-  driverNoFallback() { return fmtInt(this.metrics?.driver_fallbacks?.no_fallback); },
-  driverFallbackCount() {
-    const t = this.metrics?.driver_fallbacks?.total_cursors ?? 0;
-    const nf = this.metrics?.driver_fallbacks?.no_fallback ?? 0;
-    return fmtInt(t - nf);
+  driverBadge() {
+    const v = this.metrics?.driver_fallbacks?.configured_first;
+    return v != null ? `${v} configured` : '';
   },
-  driverConfiguredFirst() {
-    return this.metrics?.driver_fallbacks?.configured_first ?? '-';
+  driverRows() {
+    const d = this.metrics?.driver_fallbacks || {};
+    const t = d.total_cursors ?? 0;
+    const nf = d.no_fallback ?? 0;
+    return [
+      { label: 'total observe() calls', value: fmtInt(t) },
+      { label: 'no fallback', value: fmtInt(nf) },
+      { label: 'fell back', value: fmtInt(t - nf) },
+    ];
   },
-  hasDriverFallbackTransitions() {
-    const f = this.metrics?.driver_fallbacks?.fallbacks;
-    return f && Object.keys(f).length > 0;
-  },
+  driverFallbackHeaders: [
+    { label: 'Transition', cls: 'text-left' },
+    { label: 'cursors',    cls: 'text-right' },
+  ],
   driverFallbackRows() {
     const f = this.metrics?.driver_fallbacks?.fallbacks ?? {};
     return Object.entries(f)
       .sort((a, b) => b[1] - a[1])
-      .map(([transition, count]) => ({ transition, count: fmtInt(count) }));
+      .map(([transition, count]) => row(
+        left(`<code class="font-mono text-[12px]">${transition}</code>`),
+        right(fmtInt(count)),
+      ));
   },
 
-  // ─── Build profile (task 20) ───────────────────────────────────────
+  // ── Build profile ───────────────────────────────────────────────
   hasBuildProfile() { return !!this.metrics?.build_profile; },
-  buildTotalMs() { return fmtInt(this.metrics?.build_profile?.total_ms); },
-  buildTopNCount() { return fmtInt(this.metrics?.build_profile?.top_n_count); },
-  buildTopNTotalMs() { return fmtInt(this.metrics?.build_profile?.top_n_total_ms); },
-  buildLongTailMs() { return fmtInt(this.metrics?.build_profile?.long_tail_ms); },
+  buildBadge() {
+    const m = this.metrics?.build_profile;
+    return m ? `total ${fmtInt(m.total_ms)} ms` : '';
+  },
+  buildFooter() {
+    const b = this.metrics?.build_profile;
+    if (!b) return '';
+    return `top ${fmtInt(b.top_n_count)} = ${fmtInt(b.top_n_total_ms)} ms · long tail = ${fmtInt(b.long_tail_ms)} ms`;
+  },
+  buildHeaders: [
+    { label: 'Node',        cls: 'text-left' },
+    { label: 'self ms',     cls: 'text-right' },
+    { label: 'children ms', cls: 'text-right' },
+    { label: 'count',       cls: 'text-right' },
+  ],
   buildTopNodes() {
-    const nodes = this.metrics?.build_profile?.top_nodes ?? [];
-    return nodes.map((n) => ({
-      name: n.name,
-      self_ms: fmtInt(n.self_ms),
-      children_ms: fmtInt(n.children_ms),
-      count: fmtInt(n.count),
-    }));
+    return (this.metrics?.build_profile?.top_nodes ?? []).map((n) => row(
+      left(`<code class="font-mono text-[12px]">${n.name}</code>`),
+      right(fmtInt(n.self_ms)),
+      right(fmtInt(n.children_ms)),
+      right(fmtInt(n.count)),
+    ));
   },
 
-  // ─── Per-compiler-plugin time (task 21) ────────────────────────────
+  // ── Per-plugin compile ──────────────────────────────────────────
   hasPluginCompile() { return !!this.metrics?.plugin_compile; },
-  pluginTotalMs() { return fmtInt(this.metrics?.plugin_compile?.total_plugin_ms); },
-  pluginCount() {
-    const p = this.metrics?.plugin_compile?.plugins;
-    return fmtInt(p ? Object.keys(p).length : 0);
+  pluginBadge() {
+    const p = this.metrics?.plugin_compile;
+    if (!p) return '';
+    const n = p.plugins ? Object.keys(p.plugins).length : 0;
+    return `${fmtInt(p.total_plugin_ms)} ms across ${n} plugins`;
   },
+  pluginHeaders: [
+    { label: 'Plugin',  cls: 'text-left' },
+    { label: 'self ms', cls: 'text-right' },
+    { label: 'count',   cls: 'text-right' },
+  ],
   pluginRows() {
     const plugins = this.metrics?.plugin_compile?.plugins ?? {};
     return Object.entries(plugins)
       .sort((a, b) => (b[1].self_ms ?? 0) - (a[1].self_ms ?? 0))
-      .map(([plugin, v]) => ({
-        plugin,
-        self_ms: fmtInt(v.self_ms),
-        count: fmtInt(v.count),
-      }));
+      .map(([plugin, v]) => row(
+        left(`<code class="font-mono text-[12px]">${plugin}</code>`),
+        right(fmtInt(v.self_ms)),
+        right(fmtInt(v.count)),
+      ));
   },
 });
