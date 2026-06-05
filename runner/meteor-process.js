@@ -41,7 +41,10 @@ export function resetMeteorApp(source, appPath) {
 export function startMeteorApp({ source, appPath, port, env = {}, gcMonitorPath, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath, frameSizePath, compressionPath, driverFallbackPath }) {
   const spawnEnv = { ...process.env, ...env, METEOR_NO_DEPRECATION: 'true' };
   if (gcMonitorPath) {
-    spawnEnv.SERVER_NODE_OPTIONS = `--require ${gcMonitorPath}`;
+    /* PATCH-PROF: respect existing SERVER_NODE_OPTIONS (e.g. --prof passed
+       via shell). Concat instead of overwrite. */
+    const existing = spawnEnv.SERVER_NODE_OPTIONS ? spawnEnv.SERVER_NODE_OPTIONS + ' ' : '';
+    spawnEnv.SERVER_NODE_OPTIONS = `${existing}--require ${gcMonitorPath}`;
     if (gcOutputPath) spawnEnv.GC_MONITOR_OUTPUT = gcOutputPath;
   }
   if (methodTimingPath) spawnEnv.METHOD_TIMING_OUTPUT = methodTimingPath;
