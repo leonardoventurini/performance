@@ -4,6 +4,20 @@ import { check, Match } from 'meteor/check';
 
 const Runs = new Mongo.Collection('runs');
 
+// Recursively replace '.' in object keys with '_'. Mongo allows dots
+// server-side but minimongo (client) rejects them, breaking the publication
+// for every connected client. Some bench collectors index by Mongo namespace
+// (`<db>.<collection>`) — e.g. `metrics.mongo_changestream.by_namespace`.
+function sanitizeKeys(value) {
+  if (!value || typeof value !== 'object') return value;
+  if (Array.isArray(value)) return value.map(sanitizeKeys);
+  const out = {};
+  for (const [k, v] of Object.entries(value)) {
+    out[k.replace(/\./g, '_')] = sanitizeKeys(v);
+  }
+  return out;
+}
+
 // Deny all direct client-side writes — only server methods allowed
 Runs.deny({
   insert() { return true; },
@@ -57,7 +71,7 @@ if (Meteor.isServer) {
         resultJson.timestamp = new Date();
       }
 
-      return await Runs.insertAsync(resultJson);
+      return await Runs.insertAsync(sanitizeKeys(resultJson));
     },
 
     async 'runs.distinctTags'() {
