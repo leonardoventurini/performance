@@ -10,6 +10,11 @@ const Runs = new Mongo.Collection('runs');
 // (`<db>.<collection>`) — e.g. `metrics.mongo_changestream.by_namespace`.
 function sanitizeKeys(value) {
   if (!value || typeof value !== 'object') return value;
+  // Pass non-plain objects (Date, etc.) through untouched — recursing would
+  // rebuild them as {} (a Date has no own enumerable keys), which is how the
+  // `timestamp` field was getting stored as an empty object and rendering as
+  // "Invalid Date" on the dashboard.
+  if (value instanceof Date) return value;
   if (Array.isArray(value)) return value.map(sanitizeKeys);
   const out = {};
   for (const [k, v] of Object.entries(value)) {
@@ -72,6 +77,20 @@ if (Meteor.isServer) {
       }
 
       return await Runs.insertAsync(sanitizeKeys(resultJson));
+    },
+
+    // Wipe all stored runs. Authenticated by the same benchApiKey as
+    // runs.insert so the CLI (`bench.js clear`) can purge the dashboard
+    // before a fresh benchmark sweep. Returns the number removed.
+    async 'runs.clear'(apiKey) {
+      check(apiKey, String);
+
+      const expectedKey = Meteor.settings?.benchApiKey;
+      if (!expectedKey || apiKey !== expectedKey) {
+        throw new Meteor.Error('unauthorized', 'Invalid API key');
+      }
+
+      return await Runs.removeAsync({});
     },
 
     async 'runs.distinctTags'() {

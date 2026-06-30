@@ -56,27 +56,6 @@ Template.dashboard.helpers({
     if (sc) q.scenario = sc;
     const all = Runs.find(q, { sort: { timestamp: -1 } }).fetch();
 
-    // Δ vs previous: for each row, find the most recent earlier run of
-    // the same scenario (regardless of tag) and compute wall_clock_ms
-    // percentage delta. Sorting is descending by timestamp so we walk
-    // by scenario lazily.
-    const prevByScenario = {};
-    // Build a per-scenario list sorted ascending so we can pair
-    // chronologically. We compute the delta on the table-display order.
-    const ascByScenario = {};
-    for (const r of all) {
-      (ascByScenario[r.scenario] ||= []).push(r);
-    }
-    for (const list of Object.values(ascByScenario)) {
-      // Mongo gave us desc; reverse for chronological walk.
-      list.reverse();
-      for (let i = 1; i < list.length; i++) {
-        list[i]._deltaPct = list[i - 1].wall_clock_ms
-          ? ((list[i].wall_clock_ms - list[i - 1].wall_clock_ms) / list[i - 1].wall_clock_ms) * 100
-          : null;
-      }
-    }
-
     return all
       .filter((r) => !tag || r.tag?.toLowerCase().includes(tag))
       .map((r) => ({
@@ -90,16 +69,6 @@ Template.dashboard.helpers({
           ? `${r.metrics.app_resources.memory.avg_mb.toFixed(0)} MB` : '-',
         gcPause: r.metrics?.gc?.total_pause_ms != null
           ? `${r.metrics.gc.total_pause_ms.toFixed(0)} ms` : '-',
-        deltaStr: r._deltaPct == null
-          ? '—'
-          : `${r._deltaPct > 0 ? '+' : ''}${r._deltaPct.toFixed(1)}%`,
-        deltaClass: r._deltaPct == null
-          ? 'text-neutral-500'
-          : Math.abs(r._deltaPct) < 5
-            ? 'text-neutral-500'
-            : r._deltaPct > 0
-              ? 'text-orange-500 font-medium'
-              : 'text-green-500 font-medium',
       }));
   },
 

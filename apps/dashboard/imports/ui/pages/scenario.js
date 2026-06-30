@@ -82,6 +82,30 @@ const SCENARIOS = {
       'No Chromium process, no DOM — measures pure Meteor server + MongoDB + DDP transport performance. ' +
       'Much faster to run than browser scenarios and scales to higher VU counts.',
   },
+  'ddp-reactive-extended': {
+    name: 'ddp-reactive-extended',
+    driver: 'Artillery + SimpleDDP',
+    vus: 'up to 10 new DDP conns/s',
+    duration: '~7 min',
+    browser: false,
+    summary:
+      'Extended sustained version of ddp-reactive-light, sized for a capable machine. ' +
+      'Warms up, ramps, then holds a moderate-high reactive DDP load for 6 minutes — long ' +
+      'enough to surface steady-state behavior without dropping connections. Used for the ' +
+      'observer-driver × transport matrix (oplog / polling / changeStreams × sockjs / uws).',
+    technical:
+      'Artillery drives raw SimpleDDP WebSocket clients through three phases: 2 VU/s warm up (30s), ' +
+      '5 VU/s ramp (30s), then 10 VU/s sustained (360s). Each VU subscribes to ' +
+      '<code class="font-mono text-[12px]">fetchTasks</code> and performs insert/remove cycles, ' +
+      'so reactive updates fan out to all subscribers through the configured observe driver. ' +
+      'Because DDP sessions are short (~4-10s), the sustained phase holds ~50-100 concurrent ' +
+      'connections — heavy enough to be meaningful, light enough that no connections drop. ' +
+      'The <code class="font-mono text-[12px]">runtime</code> field records which observe driver ' +
+      '(<code class="font-mono text-[12px]">oplog</code>/<code class="font-mono text-[12px]">polling</code>/' +
+      '<code class="font-mono text-[12px]">changeStreams</code>) and DDP transport ' +
+      '(<code class="font-mono text-[12px]">sockjs</code>/<code class="font-mono text-[12px]">uws</code>) ' +
+      'each run actually used, so runs are comparable across the matrix.',
+  },
   'ddp-non-reactive-light': {
     name: 'ddp-non-reactive-light',
     driver: 'Artillery + SimpleDDP',
