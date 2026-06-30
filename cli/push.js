@@ -1,15 +1,14 @@
-// `bench.js push` and `bench.js baseline` — both talk to the Galaxy dashboard
-// over DDP (the same protocol Meteor clients use, no REST):
+// `bench.js push`, `bench.js baseline` and `bench.js clear` — all talk to the
+// Galaxy dashboard over DDP (the same protocol Meteor clients use, no REST):
 //
 //   1. Resolve the dashboard URL + API key from flag > env > config > default
 //   2. Open a SimpleDDP connection (uses io.ws under the hood so tests can mock)
-//   3. Call ONE method (runs.insert or baselines.set)
+//   3. Call ONE method (runs.insert / baselines.set / runs.clear)
 //   4. Disconnect in a finally — even on error, so the process can exit cleanly
 //
 // SimpleDDP+ws is on runner/_io.js so the same mockable boundary works here
-// as in runner/. The shared `connect()` helper exists so push and baseline
-// stay symmetric — adding a third dashboard command means one more handler,
-// not duplicated connection code.
+// as in runner/. The shared `connect()` helper keeps these dashboard commands
+// symmetric — each one is one more handler, not duplicated connection code.
 
 import { io } from '../runner/_io.js';
 
@@ -85,6 +84,32 @@ export async function runBaseline({ values, config }) {
     console.log('Baseline set successfully.');
   } catch (err) {
     console.error(`Setting baseline failed: ${err.message || err}. Check the dashboard URL (${url}) is reachable and BENCH_API_KEY is valid.`);
+    process.exit(1);
+  } finally {
+    ddp.disconnect();
+  }
+}
+
+// Wipe every run from the dashboard. Destructive and irreversible, so it
+// requires --confirm (or BENCH_CLEAR_CONFIRM=1) to avoid a fat-fingered purge.
+export async function runClear({ values, config }) {
+  const url = resolveUrl(values, config);
+  const apiKey = resolveKey(values, config);
+
+  if (!values.confirm && process.env.BENCH_CLEAR_CONFIRM !== '1') {
+    console.error(`Refusing to clear ${url} without confirmation.\nRe-run with --confirm (or BENCH_CLEAR_CONFIRM=1) to wipe ALL runs.`);
+    process.exit(1);
+  }
+
+  console.log(`Clearing ALL runs on ${url}...`);
+
+  const ddp = connect(url);
+  try {
+    await ddp.connect();
+    const removed = await ddp.call('runs.clear', apiKey);
+    console.log(`Cleared successfully. Removed ${removed} run(s).`);
+  } catch (err) {
+    console.error(`Clear failed: ${err.message || err}. Check the dashboard URL (${url}) is reachable and BENCH_API_KEY is valid.`);
     process.exit(1);
   } finally {
     ddp.disconnect();

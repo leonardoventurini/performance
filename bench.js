@@ -24,7 +24,7 @@ import config from './bench.config.js';
 import { resolveMeteorSource } from './meteor-source.js';
 import * as cli from './cli/index.js';
 
-const { runList, runBenchmark, runCompare, runPush, runBaseline, runBundleDelta } = cli;
+const { runList, runBenchmark, runCompare, runPush, runBaseline, runClear, runBundleDelta } = cli;
 
 // One shared schema for every subcommand — parseArgs is the single source of
 // truth for which flags exist. `multiple: true` for --env lets it be passed
@@ -53,6 +53,9 @@ const OPTIONS = {
   // handler coerces. limit = how many recent runs, warn-kb = ⚠️ threshold.
   limit: { type: 'string' },
   'warn-kb': { type: 'string' },
+  // `clear` guard — wiping the dashboard is destructive, so require an
+  // explicit opt-in flag (boolean, no value).
+  confirm: { type: 'boolean' },
 };
 
 const { values, positionals } = parseArgs({
@@ -74,6 +77,7 @@ Usage:
   node bench.js compare --baseline A --target B          Compare two results
   node bench.js push --result <file.json> [--url <ws>]   Push results to dashboard
   node bench.js baseline --scenario X --run-id Y         Set baseline for a scenario
+  node bench.js clear --confirm [--url <ws>] [--key K]   Wipe ALL runs from the dashboard
   node bench.js bundle-delta [--limit N] [--format markdown|json] [--warn-kb N]
                                                          Bundle-size trend across saved runs
 
@@ -110,6 +114,9 @@ switch (command) {
     break;
   case 'baseline':
     runBaseline({ values, config }).catch((err) => { console.error(err); process.exit(1); });
+    break;
+  case 'clear':
+    runClear({ values, config }).catch((err) => { console.error(err); process.exit(1); });
     break;
   case 'bundle-delta':
     runBundleDelta({ values, config });

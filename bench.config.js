@@ -54,6 +54,16 @@ export default {
       config: 'artillery/ddp-reactive-light.yml',
       description: 'DDP-only reactive CRUD with 150 VUs (no browser)',
     },
+    'ddp-reactive-5min': {
+      driver: 'artillery',
+      config: 'artillery/ddp-reactive-5min.yml',
+      description: 'DDP reactive CRUD, moderate sustained ≥5-min load (oplog×CS × sockjs×uws matrix)',
+    },
+    'ddp-reactive-extended': {
+      driver: 'artillery',
+      config: 'artillery/ddp-reactive-extended.yml',
+      description: 'DDP reactive CRUD, ~7-min extended load sized for M4 Pro (oplog×polling×CS × sockjs×uws matrix)',
+    },
     'ddp-non-reactive-light': {
       driver: 'artillery',
       config: 'artillery/ddp-non-reactive-light.yml',
