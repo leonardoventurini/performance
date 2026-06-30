@@ -11,6 +11,14 @@ const fmtPctValue = (n) => (n == null || !Number.isFinite(n)) ? '-' : `${n.toFix
 const fmtMb = (n) => (n == null || !Number.isFinite(n)) ? '-' : `${n.toFixed(0)} MB`;
 const fmt1 = (n) => (n == null || !Number.isFinite(n)) ? '-' : n.toFixed(1);
 
+// Cells render via {{{value}}} (raw HTML) so the <code>/<span> wrappers below
+// take effect. That means any interpolated DATA must be HTML-escaped first —
+// run fields (mongo namespaces, index/plugin names, tags) are machine-generated
+// but still untrusted, so escape every dynamic value to prevent stored XSS.
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => (
+  { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+));
+
 // Build a cells[] array for the metricCard tableRows partial. Each cell
 // has { value, cls } so the partial can right-align numbers.
 function row(...cells) {
@@ -34,6 +42,21 @@ Template.detail.onCreated(function () {
       this.subscribe('runs.recent', 200);
     }
   });
+});
+
+// FlowRouter intercepts all <a> clicks as route changes — hash anchors
+// would fall through silently. Capture sidebar nav-pill clicks and scroll
+// to the section manually instead of relying on browser default.
+Template.detail.events({
+  'click a[href^="#"]'(event, template) {
+    event.preventDefault();
+    const id = event.currentTarget.getAttribute('href').slice(1);
+    const target = template.find('#' + id);
+    if (target) {
+      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      if (history.replaceState) history.replaceState(null, '', '#' + id);
+    }
+  },
 });
 
 // ── Section-presence flags (derived from the hasXxx leaves) ──────────
@@ -130,16 +153,16 @@ Template.detail.helpers({
       { label: 'Date', value: new Date(this.timestamp).toLocaleString('en-GB', {
           day: '2-digit', month: 'short', year: 'numeric',
           hour: '2-digit', minute: '2-digit', second: '2-digit' }) },
-      { label: 'Tag', value: `<span class="font-mono">${this.tag}</span>` },
-      { label: 'Scenario', value: this.scenario },
+      { label: 'Tag', value: `<span class="font-mono">${esc(this.tag)}</span>` },
+      { label: 'Scenario', value: esc(this.scenario) },
     ];
     const v = this.meteor?.version;
     if (v && v !== 'system' && v !== 'unknown') {
-      rows.push({ label: 'Meteor version', value: v });
+      rows.push({ label: 'Meteor version', value: esc(v) });
     }
     const sha = this.meteor?.sha;
     if (sha && sha !== 'unknown') {
-      rows.push({ label: 'Meteor sha', value: `<span class="font-mono text-[12px]">${sha}</span>` });
+      rows.push({ label: 'Meteor sha', value: `<span class="font-mono text-[12px]">${esc(sha)}</span>` });
     }
     rows.push({ label: 'Duration', value: this.wall_clock_ms ? `${(this.wall_clock_ms / 1000).toFixed(2)}s` : '-' });
     if (this.source) rows.push({ label: 'Source', value: this.source });
@@ -198,7 +221,7 @@ Template.detail.helpers({
     return Object.entries(methods)
       .sort((a, b) => b[1].count - a[1].count)
       .map(([name, m]) => row(
-        left(`<code class="font-mono text-[12px]">${name}</code>`),
+        left(`<code class="font-mono text-[12px]">${esc(name)}</code>`),
         right(fmtInt(m.count)),
         right(fmtMs(m.avg_ms)),
         right(fmtMs(m.p95)),
@@ -218,7 +241,7 @@ Template.detail.helpers({
     return Object.entries(pubs)
       .sort((a, b) => b[1].count - a[1].count)
       .map(([name, p]) => row(
-        left(`<code class="font-mono text-[12px]">${name}</code>`),
+        left(`<code class="font-mono text-[12px]">${esc(name)}</code>`),
         right(fmtInt(p.count)),
         right(fmtMs(p.avg_ms)),
         right(fmtMs(p.p95)),
@@ -275,7 +298,7 @@ Template.detail.helpers({
       }))
       .sort((a, b) => b._sortKey - a._sortKey)
       .map(({ type, inV, outV }) => row(
-        left(`<code class="font-mono text-[12px]">${type}</code>`),
+        left(`<code class="font-mono text-[12px]">${esc(type)}</code>`),
         right(inV != null ? fmtInt(inV) : '-'),
         right(outV != null ? fmtInt(outV) : '-'),
       ));
@@ -342,7 +365,7 @@ Template.detail.helpers({
     const totals = this.metrics?.mongo_ops?.totals ?? {};
     const rates = this.metrics?.mongo_ops?.ops_per_sec ?? {};
     return Object.keys(totals).map((op) => row(
-      left(`<code class="font-mono text-[12px]">${op}</code>`),
+      left(`<code class="font-mono text-[12px]">${esc(op)}</code>`),
       right(fmtInt(totals[op])),
       right(fmtRate(rates[op])),
     ));
@@ -385,7 +408,7 @@ Template.detail.helpers({
     return Object.entries(byOp)
       .sort((a, b) => b[1] - a[1])
       .map(([op, count]) => row(
-        left(`<code class="font-mono text-[12px]">${op}</code>`),
+        left(`<code class="font-mono text-[12px]">${esc(op)}</code>`),
         right(fmtInt(count)),
       ));
   },
@@ -393,9 +416,9 @@ Template.detail.helpers({
     const s = this.metrics?.mongo_slow_queries?.slowest_sample;
     if (!s) return [];
     return [
-      { label: 'slowest', value: `<code class="font-mono text-[12px]">${s.ns}</code> · ${s.op} · ${fmtInt(s.millis)} ms` },
-      { label: 'filter keys', value: `<code class="font-mono text-[12px]">${(s.filter_keys || []).join(', ') || '(none)'}</code>` },
-      { label: 'plan', value: `<code class="font-mono text-[12px]">${s.planSummary || '(none)'}</code>` },
+      { label: 'slowest', value: `<code class="font-mono text-[12px]">${esc(s.ns)}</code> · ${esc(s.op)} · ${fmtInt(s.millis)} ms` },
+      { label: 'filter keys', value: `<code class="font-mono text-[12px]">${esc((s.filter_keys || []).join(', ') || '(none)')}</code>` },
+      { label: 'plan', value: `<code class="font-mono text-[12px]">${esc(s.planSummary || '(none)')}</code>` },
     ];
   },
 
@@ -412,10 +435,10 @@ Template.detail.helpers({
         { label: 'tracked since',   cls: 'text-right' },
       ],
       indexes: (indexes || []).map((idx) => row(
-        left(`<code class="font-mono text-[12px]">${idx.name}</code>`),
-        left(`<code class="font-mono text-[12px]">${JSON.stringify(idx.key ?? {})}</code>`),
+        left(`<code class="font-mono text-[12px]">${esc(idx.name)}</code>`),
+        left(`<code class="font-mono text-[12px]">${esc(JSON.stringify(idx.key ?? {}))}</code>`),
         right(fmtInt(idx.ops_in_window)),
-        right(`<span class="text-[10px]">${idx.since || ''}</span>`),
+        right(`<span class="text-[10px]">${esc(idx.since || '')}</span>`),
       )),
     }));
   },
@@ -446,7 +469,7 @@ Template.detail.helpers({
     const nsRows = Object.entries(byNs)
       .sort((a, b) => (b[1].max ?? 0) - (a[1].max ?? 0))
       .map(([ns, v]) => row(
-        left(`<code class="font-mono text-[12px]">${ns}</code>`),
+        left(`<code class="font-mono text-[12px]">${esc(ns)}</code>`),
         right('-'),
         right(fmtInt(v.max)),
         right(fmt1(v.avg)),
@@ -530,7 +553,7 @@ Template.detail.helpers({
     return Object.entries(f)
       .sort((a, b) => b[1] - a[1])
       .map(([transition, count]) => row(
-        left(`<code class="font-mono text-[12px]">${transition}</code>`),
+        left(`<code class="font-mono text-[12px]">${esc(transition)}</code>`),
         right(fmtInt(count)),
       ));
   },
@@ -554,7 +577,7 @@ Template.detail.helpers({
   ],
   buildTopNodes() {
     return (this.metrics?.build_profile?.top_nodes ?? []).map((n) => row(
-      left(`<code class="font-mono text-[12px]">${n.name}</code>`),
+      left(`<code class="font-mono text-[12px]">${esc(n.name)}</code>`),
       right(fmtInt(n.self_ms)),
       right(fmtInt(n.children_ms)),
       right(fmtInt(n.count)),
@@ -579,7 +602,7 @@ Template.detail.helpers({
     return Object.entries(plugins)
       .sort((a, b) => (b[1].self_ms ?? 0) - (a[1].self_ms ?? 0))
       .map(([plugin, v]) => row(
-        left(`<code class="font-mono text-[12px]">${plugin}</code>`),
+        left(`<code class="font-mono text-[12px]">${esc(plugin)}</code>`),
         right(fmtInt(v.self_ms)),
         right(fmtInt(v.count)),
       ));
