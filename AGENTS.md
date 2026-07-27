@@ -52,6 +52,9 @@ they disagree.
 
 - Use Node 24 or newer and npm 10 or newer. Volta pins Node 24.0.0.
 - Use npm; every JavaScript workspace has a committed `package-lock.json`.
+- Use the root `justfile` as the discoverable command surface. Run
+  `just --list` to inspect recipes; the underlying npm, Meteor, Playwright,
+  Tailwind, and benchmark commands remain authoritative.
 - Install root dependencies with `npm ci`.
 - Install an app's dependencies with `npm ci` inside that app.
 - The benchmark app's Meteor packages are app-local. Do not restore the old
@@ -64,6 +67,12 @@ they disagree.
 Safe root verification:
 
 ```sh
+just check
+```
+
+The equivalent direct commands are:
+
+```sh
 npm ci
 npm test
 node bench.js list
@@ -74,7 +83,8 @@ for file in scripts/helpers/*.js; do node --check "$file"; done
 
 `node bench.js list` resolves and inspects the configured Meteor source. The
 root Playwright configuration only discovers or runs tests; it does not start
-an application server.
+an application server. `just check-all` adds both Meteor application suites
+and requires the Meteor CLI.
 
 App-local verification:
 

@@ -13,8 +13,30 @@ A comprehensive benchmarking suite for Meteor applications. It allows you to run
 Clone the repository and install dependencies:
 
 ```bash
-npm install
+just install
 ```
+
+This installs the root harness, task fixture, and dashboard from their
+committed npm lockfiles. Use `npm ci` in each workspace directly when Just is
+not available.
+
+## Common commands
+
+The root `justfile` provides discoverable shortcuts for installation, checks,
+local applications, Tailwind generation, and benchmark CLI operations:
+
+```bash
+just --list
+just check
+just bench-list
+just bench reactive-light --tag local
+```
+
+`just check-all` additionally runs both Meteor application suites and requires
+the Meteor CLI. Run `just install` before checks so recipes use only
+workspace-local binaries. Destructive dashboard mutations and legacy remote
+operations remain explicit low-level commands and intentionally have no Just
+recipes.
 
 ## Usage
 
