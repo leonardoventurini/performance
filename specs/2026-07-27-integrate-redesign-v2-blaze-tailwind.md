@@ -66,16 +66,16 @@ during the merge until that explicit resolution is staged.
 
 ## Execution checklist
 
-- [ ] Preserve the chosen local state — files: `.envrc`, `.gitignore`, this
+- [x] Preserve the chosen local state — files: `.envrc`, `.gitignore`, this
   spec; verify: `git status --short`; done when `.envrc` is committed deleted
   and `.gitignore` no longer carries the superseded local edit.
-- [ ] Merge the redesign — verify: ancestry and unmerged-path gates; done when
+- [x] Merge the redesign — verify: ancestry and unmerged-path gates; done when
   target history is integrated, `.envrc` is absent, and `AGENTS.md` remains.
-- [ ] Remap architecture and rewrite guidance — file: `AGENTS.md`; verify
+- [x] Remap architecture and rewrite guidance — file: `AGENTS.md`; verify
   against repository manifests, docs, workflows, and syntax-aware searches.
-- [ ] Validate locally — verify with lockfile install, repository unit/static
+- [x] Validate locally — verify with lockfile install, repository unit/static
   commands, and safe dashboard inspection where available.
-- [ ] Review and commit — independently challenge preservation and command
+- [x] Review and commit — independently challenge preservation and command
   accuracy, stage only task-owned paths, and create semantic signed commits.
 
 ## Verification and rollout
@@ -84,3 +84,13 @@ The rollout is the current branch merge plus refreshed guidance. No push or
 remote deployment is included. Recovery before push is a normal revert of the
 integration and documentation commits; do not use destructive history
 rewrites when a revert preserves auditability.
+
+Verification completed with 413 passing root unit tests, two discovered
+Playwright scenarios, CLI scenario discovery, shell/helper syntax checks,
+Tailwind output reproducibility, target-branch ancestry, and preservation
+assertions. The task and dashboard Meteor suites and live dashboard inspection
+were unavailable because this environment has no Meteor CLI. Dependency
+auditing and non-breaking updates removed all root production advisories, the
+task app's critical advisories, and dashboard high/critical advisories;
+residual findings are bundled Meteor polyfill and development-tooling issues
+without a non-breaking automated remedy.
