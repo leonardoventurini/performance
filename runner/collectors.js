@@ -488,3 +488,16 @@ export function drainPostStopGc(gcOutputPath) {
     return [];
   }
 }
+
+export function drainPostStopDriverFallback(driverFallbackPath) {
+  if (!driverFallbackPath || !io.existsSync(driverFallbackPath)) return [];
+  try {
+    const dump = JSON.parse(io.readFileSync(driverFallbackPath, 'utf8'));
+    io.unlinkSync(driverFallbackPath);
+    const aggregated = aggregateDriverFallback(dump);
+    return aggregated ? [aggregated] : [];
+  } catch (err) {
+    console.error(`Could not read late driver-fallback metrics from ${driverFallbackPath}: ${err.message}`);
+    return [];
+  }
+}

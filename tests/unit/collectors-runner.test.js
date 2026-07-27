@@ -17,7 +17,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import { io } from '../../runner/_io.js';
-import { startCollectors, stopCollectors } from '../../runner/collectors.js';
+import {
+  drainPostStopDriverFallback,
+  startCollectors,
+  stopCollectors,
+} from '../../runner/collectors.js';
 
 let tmpDir;
 
@@ -248,5 +252,37 @@ describe('stopCollectors', () => {
     const results = await stopCollectors(handle);
     const keys = results.map((r) => r.metric).sort();
     assert.deepEqual(keys, ['app_resources', 'gc']);
+  });
+});
+
+describe('drainPostStopDriverFallback', () => {
+  test('reads a shutdown dump, aggregates it, and removes the file', () => {
+    const outputPath = path.join(tmpDir, 'driver-fallback.json');
+    fs.writeFileSync(outputPath, JSON.stringify({
+      total_cursors: 3,
+      no_fallback: 3,
+      configured_first: 'changeStreams',
+      fallbacks: {},
+    }));
+
+    assert.deepEqual(drainPostStopDriverFallback(outputPath), [{
+      metric: 'driver_fallbacks',
+      total_cursors: 3,
+      no_fallback: 3,
+      configured_first: 'changeStreams',
+      fallbacks: {},
+    }]);
+    assert.equal(fs.existsSync(outputPath), false);
+  });
+
+  test('returns no metric when no cursor was observed', () => {
+    const outputPath = path.join(tmpDir, 'driver-fallback-empty.json');
+    fs.writeFileSync(outputPath, JSON.stringify({
+      total_cursors: 0,
+      no_fallback: 0,
+      configured_first: 'changeStreams',
+      fallbacks: {},
+    }));
+    assert.deepEqual(drainPostStopDriverFallback(outputPath), []);
   });
 });

@@ -1,4 +1,4 @@
-import { TasksCollection, initializeTaskCollection, registerTaskApi  } from './tasks-common';
+import { ReliabilityCollection, TasksCollection, initializeTaskCollection, registerTaskApi } from './tasks-common';
 import React, { useCallback, useEffect, useState, useRef } from 'react';
 import { useFind, useSubscribe } from 'meteor/react-meteor-data';
 import { Random } from 'meteor/random';
@@ -102,4 +102,4 @@ const TasksList = ({ tasks }) => {
   );
 };
 
-export { TasksCollection, initializeTaskCollection, registerTaskApi, App };
+export { ReliabilityCollection, TasksCollection, initializeTaskCollection, registerTaskApi, App };

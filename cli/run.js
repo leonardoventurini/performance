@@ -111,6 +111,7 @@ export async function runBenchmark({ values, config }) {
   const runs = scenarioName === 'cold-start' ? parseInt(values.runs || '3', 10) : undefined;
   const result = await driver({
     scenario, scenarioName, app, appName, source, env: extraEnv, tag, config, runs,
+    scriptArgs: values.scriptArgs,
   });
 
   // writeResult goes to the operator-chosen path; appendToHistory keeps
@@ -128,5 +129,9 @@ export async function runBenchmark({ values, config }) {
   for (const r of Object.values(result.metrics)) {
     if (r.cpu) console.log(`${r.name} CPU: avg ${r.cpu.avg}% max ${r.cpu.max}%`);
     if (r.memory) console.log(`${r.name} RAM: avg ${r.memory.avg_mb}MB max ${r.memory.max_mb}MB`);
+  }
+
+  if (result.metrics.change_stream_audit && result.metrics.change_stream_audit.status !== 'passed') {
+    throw new Error(`Change-stream audit ${result.metrics.change_stream_audit.status}: ${result.metrics.change_stream_audit.failure_reasons.join(', ')}`);
   }
 }

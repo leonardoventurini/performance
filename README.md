@@ -65,6 +65,29 @@ node bench.js run --scenario <scenario-name> --app <app-name>
 - `--meteor-version <v>`: Run against a pinned published release (e.g., `3.1.2`).
 - `--meteor-checkout <path>`: Run against a local Meteor checkout.
 
+### Run a Change-Stream Audit
+
+The reliability flow writes deterministic, oversized adversarial documents
+directly to MongoDB and verifies that every DDP subscriber converges on the
+same final state:
+
+```bash
+just audit
+just audit extreme changeStreams
+just audit smoke oplog --env MONGO_OPLOG_URL=mongodb://127.0.0.1:3001/local
+```
+
+The bounded `smoke` profile and `changeStreams` driver are the defaults.
+`extreme` must be selected explicitly. Oplog runs require a working
+`MONGO_OPLOG_URL`; the run fails if Meteor falls back to a different observer
+driver. Non-loopback MongoDB targets are rejected unless
+`--allow-remote-mongo` is passed explicitly.
+
+Synthetic data is generated locally from a seed. No model or network call is
+made during the workload, which keeps runs reproducible and avoids including
+generated payloads in result files. Results use the normal output/history
+contract and appear in the dashboard after `bench.js push`.
+
 ### Compare Results
 
 Compare a benchmark result against a baseline to detect regressions:

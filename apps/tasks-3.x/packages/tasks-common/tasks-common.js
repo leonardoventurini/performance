@@ -1,8 +1,8 @@
-import { TasksCollection  } from './tasks-collection';
+import { ReliabilityCollection, TasksCollection } from './tasks-collection';
 import { registerTaskApi  } from './tasks-api';
 
 function initializeTaskCollection() {
   return TasksCollection;
 }
 
-export { TasksCollection, initializeTaskCollection, registerTaskApi };
+export { ReliabilityCollection, TasksCollection, initializeTaskCollection, registerTaskApi };

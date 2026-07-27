@@ -66,6 +66,7 @@ const mongoKeys = ['mongo_ops', 'mongo_pool', 'mongo_slow_queries',
                    'mongo_index_usage', 'mongo_changestream', 'mongo_wiredtiger'];
 const observerKeys = ['observer_pool', 'driver_fallbacks'];
 const buildKeys = ['build_profile', 'plugin_compile'];
+const reliabilityKeys = ['change_stream_audit'];
 
 function anyOf(metrics, keys) {
   return keys.some((k) => metrics?.[k] != null);
@@ -79,6 +80,7 @@ const ALL_FAMILIES = [
   'mongo_index_usage', 'mongo_changestream', 'mongo_wiredtiger',
   'observer_pool', 'driver_fallbacks',
   'build_profile', 'plugin_compile',
+  'change_stream_audit',
 ];
 
 Template.detail.helpers({
@@ -140,11 +142,53 @@ Template.detail.helpers({
   hasMongoSection() { return anyOf(this.metrics, mongoKeys); },
   hasObserverSection() { return anyOf(this.metrics, observerKeys); },
   hasBuildSection() { return anyOf(this.metrics, buildKeys); },
+  hasReliabilitySection() { return anyOf(this.metrics, reliabilityKeys); },
   hasMissingSection() {
     return ALL_FAMILIES.some((k) => this.metrics?.[k] == null);
   },
   missingMetrics() {
     return ALL_FAMILIES.filter((k) => this.metrics?.[k] == null);
+  },
+
+  reliabilityBadge() {
+    const status = this.metrics?.change_stream_audit?.status;
+    return status ? status.toUpperCase() : '';
+  },
+  reliabilityRows() {
+    const metric = this.metrics?.change_stream_audit || {};
+    return [
+      { label: 'Status', value: esc(metric.status || 'incomplete') },
+      { label: 'Profile', value: esc(metric.profile || '-') },
+      { label: 'Observer requested', value: `<code class="font-mono text-[12px]">${esc(metric.requested_driver || '-')}</code>` },
+      { label: 'Observer actual', value: `<code class="font-mono text-[12px]">${esc(metric.actual_driver || this.runtime?.observer_driver_actual || '-')}</code>` },
+      { label: 'DDP transport', value: `<code class="font-mono text-[12px]">${esc(metric.transport || this.runtime?.transport || '-')}</code>` },
+      { label: 'Subscribers converged', value: `${fmtInt(metric.converged_subscribers)} / ${fmtInt(metric.subscribers)}` },
+      { label: 'Final-state mismatches', value: fmtInt(metric.final_state_mismatches) },
+      { label: 'Digest mismatches', value: fmtInt(metric.digest_mismatches) },
+      { label: 'Out-of-order events', value: fmtInt(metric.out_of_order_events) },
+      { label: 'Foreign-run events', value: fmtInt(metric.foreign_events) },
+      { label: 'Observed events', value: fmtInt(metric.observed_events) },
+      { label: 'Propagation p95', value: `${fmtMs(metric.propagation_p95)} ms` },
+      { label: 'Generated BSON', value: metric.generated_bson_bytes == null ? '-' : fmtMb(metric.generated_bson_bytes / 1024 / 1024) },
+    ];
+  },
+  reliabilityFailureRows() {
+    return (this.metrics?.change_stream_audit?.failure_reasons || []).map((reason) => ({
+      label: 'Failure',
+      value: esc(reason),
+    }));
+  },
+  reliabilityCapabilityHeaders: [
+    { label: 'Feature', cls: 'text-left' },
+    { label: 'Declared support', cls: 'text-left' },
+    { label: 'Audit evidence', cls: 'text-left' },
+  ],
+  reliabilityCapabilityRows() {
+    return (this.metrics?.change_stream_audit?.capabilities || []).map((capability) => row(
+      left(`<code class="font-mono text-[12px]">${esc(capability.id)}</code>`),
+      left(esc(capability.support)),
+      left(esc(capability.audit_status)),
+    ));
   },
 
   // ── Overview cards ──────────────────────────────────────────────

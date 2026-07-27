@@ -8,3 +8,4 @@ export { runBenchmark } from './run.js';
 export { runCompare } from './compare.js';
 export { runPush, runBaseline, runClear } from './push.js';
 export { runBundleDelta } from './bundle-delta.js';
+export { runAudit } from './audit.js';

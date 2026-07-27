@@ -76,6 +76,15 @@ bench scenario="reactive-light" *args:
     shift
     node bench.js run --scenario "$scenario" "$@"
 
+# Verify reactive correctness with bounded adversarial data.
+audit profile="smoke" observer_driver="changeStreams" *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    profile="$1"
+    observer_driver="$2"
+    shift 2
+    node bench.js audit --profile "$profile" --observer-driver "$observer_driver" "$@"
+
 # Run a scenario against a pinned published Meteor release.
 bench-release scenario release *args:
     #!/usr/bin/env bash

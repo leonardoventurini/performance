@@ -38,14 +38,13 @@ import {
   prepareDriverFallbackOutput,
   startCollectors,
   stopCollectors,
-  drainPostStopGc,
 } from '../runner/collectors.js';
 import { buildResult } from '../reporters/json-reporter.js';
 
 const HERE = import.meta.dirname;
 const SCRIPT_TIMEOUT_MS = 300_000;
 
-export async function runScriptDriver({ scenario, scenarioName, app, appName, source, env, tag, config }) {
+export async function runScriptDriver({ scenario, scenarioName, app, appName, source, env, tag, config, scriptArgs: extraScriptArgs = [] }) {
   ensureAppDeps(app.path);
   resetMeteorApp(source, app.path);
 
@@ -68,12 +67,12 @@ export async function runScriptDriver({ scenario, scenarioName, app, appName, so
   await waitForApp(config.appPort);
   console.log('App started.');
 
-  const mongoUri = process.env.BENCH_MONGO_URL || `mongodb://127.0.0.1:${config.appPort + 1}`;
+  const mongoUri = env.BENCH_MONGO_URL || process.env.BENCH_MONGO_URL || `mongodb://127.0.0.1:${config.appPort + 1}/meteor`;
   const collectors = startCollectors({ appName, mongoUri, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath, frameSizePath, compressionPath, driverFallbackPath });
 
   const scriptPath = path.resolve(HERE, '..', scenario.script);
-  const scriptArgs = (scenario.args || '').split(/\s+/).filter(Boolean);
-  console.log(`\nRunning: node ${scenario.script} ${scenario.args || ''}\n`);
+  const scriptArgs = [...(scenario.args || '').split(/\s+/).filter(Boolean), ...extraScriptArgs];
+  console.log(`\nRunning: node ${scenario.script} ${scriptArgs.join(' ')}\n`);
 
   const scriptStart = Date.now();
   let scriptOutput = '';
@@ -81,7 +80,12 @@ export async function runScriptDriver({ scenario, scenarioName, app, appName, so
     scriptOutput = io.execFileSync('node', [scriptPath, ...scriptArgs], {
       cwd: path.resolve(HERE, '..'),
       encoding: 'utf8',
-      env: { ...process.env },
+      env: {
+        ...process.env,
+        ...env,
+        REMOTE_URL: `http://127.0.0.1:${config.appPort}`,
+        BENCH_MONGO_URL: mongoUri,
+      },
       stdio: ['ignore', 'pipe', 'pipe'],
       timeout: SCRIPT_TIMEOUT_MS,
     });
@@ -107,14 +111,15 @@ export async function runScriptDriver({ scenario, scenarioName, app, appName, so
 
   const collectorResults = await stopCollectors(collectors);
   await stopMeteorApp(meteorProc);
-  collectorResults.push(...drainPostStopGc(gcOutputPath));
-  collectorResults.push({ metric: 'fanout', ...scriptMetrics });
+  collectorResults.push(...await stopCollectors({ ...collectors, procs: [] }));
+  const metricName = scenario.metric || 'fanout';
+  collectorResults.push({ metric: metricName, ...scriptMetrics });
 
   if (scriptMetrics.fanout_avg_ms) {
     console.log(`Fanout: avg=${scriptMetrics.fanout_avg_ms}ms p50=${scriptMetrics.fanout_p50_ms}ms p95=${scriptMetrics.fanout_p95_ms}ms max=${scriptMetrics.fanout_max_ms}ms`);
   }
 
-  return buildResult({
+  const result = buildResult({
     scenario: scenarioName,
     app: appName,
     tag,
@@ -123,4 +128,36 @@ export async function runScriptDriver({ scenario, scenarioName, app, appName, so
     collectorResults,
     wallClockMs,
   });
+  if (scenario.strict && Object.keys(scriptMetrics).length === 0) {
+    throw new Error(`Strict script scenario "${scenarioName}" produced no metrics`);
+  }
+  if (metricName === 'change_stream_audit') {
+    const actualDriver = result.runtime?.observer_driver_actual;
+    result.metrics.change_stream_audit.audited_meteor = result.meteor;
+    result.metrics.change_stream_audit.transport = result.runtime?.transport || null;
+    result.metrics.change_stream_audit.actual_driver = actualDriver;
+    if (actualDriver !== result.metrics.change_stream_audit.requested_driver) {
+      result.metrics.change_stream_audit.status = 'failed';
+      result.metrics.change_stream_audit.failure_reasons = [
+        ...(result.metrics.change_stream_audit.failure_reasons || []),
+        'observer_driver_mismatch',
+      ].slice(0, 20);
+    }
+    const fallbackMetric = result.metrics.driver_fallbacks;
+    if (!fallbackMetric || fallbackMetric.no_fallback !== fallbackMetric.total_cursors) {
+      result.metrics.change_stream_audit.status = 'failed';
+      result.metrics.change_stream_audit.failure_reasons = [
+        ...(result.metrics.change_stream_audit.failure_reasons || []),
+        fallbackMetric ? 'publication_observer_fallback' : 'publication_observer_unverified',
+      ].slice(0, 20);
+    }
+    if (!result.metrics.ddp_messages || !result.metrics.ddp_frame_size || !result.runtime?.transport) {
+      result.metrics.change_stream_audit.status = 'failed';
+      result.metrics.change_stream_audit.failure_reasons = [
+        ...(result.metrics.change_stream_audit.failure_reasons || []),
+        'transport_evidence_missing',
+      ].slice(0, 20);
+    }
+  }
+  return result;
 }

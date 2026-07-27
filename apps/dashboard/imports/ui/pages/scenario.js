@@ -123,6 +123,34 @@ const SCENARIOS = {
       'Comparing with <code class="font-mono text-[12px]">ddp-reactive-light</code> shows the exact cost ' +
       'of pub/sub reactivity at the DDP transport level.',
   },
+  'change-stream-audit-smoke': {
+    name: 'change-stream-audit-smoke',
+    driver: 'SimpleDDP + MongoDB',
+    vus: '3 DDP subscribers',
+    duration: '~1 min',
+    browser: false,
+    summary:
+      'Checks reactive correctness with deterministic oversized and structurally unusual documents. ' +
+      'Every subscriber must converge on the authoritative final MongoDB state.',
+    technical:
+      'Writes run-scoped documents directly through the MongoDB driver while SimpleDDP clients subscribe ' +
+      'to a dedicated publication. This exercises MongoDB → observer driver → publication → DDP delivery. ' +
+      'The run fails on convergence, digest, ordering, isolation, timeout, or observer-driver violations.',
+  },
+  'change-stream-audit-extreme': {
+    name: 'change-stream-audit-extreme',
+    driver: 'SimpleDDP + MongoDB',
+    vus: '12 DDP subscribers',
+    duration: 'varies',
+    browser: false,
+    summary:
+      'Extreme version of the reactive reliability workload, using hundreds of large deterministic ' +
+      'documents and burst updates to expose correctness failures under unusual pressure.',
+    technical:
+      'Uses the same correctness oracle as the smoke profile with substantially larger payload volume, ' +
+      'more subscribers, and burstier mutations. Intermediate DDP event counts are diagnostic because ' +
+      'current-state updates may coalesce; exact final-state and payload-digest convergence is required.',
+  },
   'cold-start': {
     name: 'cold-start',
     driver: 'CLI',

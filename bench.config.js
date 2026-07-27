@@ -81,6 +81,22 @@ export default {
       args: '--subscribers 200 --writes 50',
       description: 'Reactive fanout: 200 subscribers, 1 writer, measure propagation latency',
     },
+    'change-stream-audit-smoke': {
+      driver: 'script',
+      script: 'tests/reliability-change-streams.js',
+      args: '--profile smoke',
+      metric: 'change_stream_audit',
+      strict: true,
+      description: 'Reactive correctness smoke test with oversized adversarial documents',
+    },
+    'change-stream-audit-extreme': {
+      driver: 'script',
+      script: 'tests/reliability-change-streams.js',
+      args: '--profile extreme',
+      metric: 'change_stream_audit',
+      strict: true,
+      description: 'Extreme reactive correctness and convergence test with adversarial documents',
+    },
     'cold-start': {
       driver: 'cli',
       description: 'App startup time from clean state (meteor reset)',

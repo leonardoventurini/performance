@@ -40,6 +40,7 @@ const ALLOWED_METRIC_KEYS = new Set([
   'bundle_size',       // bundle-size driver
   'cold_start',        // cold-start driver
   'fanout',            // script driver (fanout-bench)
+  'change_stream_audit', // deterministic observer and transport conformance audit
 
   // Phase A metrics:
   'ddp_methods',              // task 01 — DDP method latency

@@ -24,7 +24,7 @@ import config from './bench.config.js';
 import { resolveMeteorSource } from './meteor-source.js';
 import * as cli from './cli/index.js';
 
-const { runList, runBenchmark, runCompare, runPush, runBaseline, runClear, runBundleDelta } = cli;
+const { runList, runBenchmark, runCompare, runPush, runBaseline, runClear, runBundleDelta, runAudit } = cli;
 
 // One shared schema for every subcommand — parseArgs is the single source of
 // truth for which flags exist. `multiple: true` for --env lets it be passed
@@ -56,6 +56,10 @@ const OPTIONS = {
   // `clear` guard — wiping the dashboard is destructive, so require an
   // explicit opt-in flag (boolean, no value).
   confirm: { type: 'boolean' },
+  profile: { type: 'string' },
+  seed: { type: 'string' },
+  'observer-driver': { type: 'string' },
+  'allow-remote-mongo': { type: 'boolean' },
 };
 
 const { values, positionals } = parseArgs({
@@ -80,6 +84,9 @@ Usage:
   node bench.js clear --confirm [--url <ws>] [--key K]   Wipe ALL runs from the dashboard
   node bench.js bundle-delta [--limit N] [--format markdown|json] [--warn-kb N]
                                                          Bundle-size trend across saved runs
+  node bench.js audit [--profile smoke|extreme]
+                            [--observer-driver changeStreams|oplog]
+                                                         Verify reactive correctness under adversarial load
 
 Dashboard:
   Default URL: ${config.dashboardUrl || 'ws://localhost:4000/websocket'}
@@ -120,6 +127,9 @@ switch (command) {
     break;
   case 'bundle-delta':
     runBundleDelta({ values, config });
+    break;
+  case 'audit':
+    runAudit({ values, config }).catch((err) => { console.error(err); process.exit(1); });
     break;
   default:
     printHelp();

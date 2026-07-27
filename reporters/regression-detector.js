@@ -32,6 +32,18 @@ function compare(baseline, target) {
     { key: 'wall_clock_ms', baseVal: baseline.wall_clock_ms, targetVal: target.wall_clock_ms },
   ];
 
+  const targetReliability = target.metrics?.change_stream_audit;
+  if (targetReliability && targetReliability.status !== 'passed') {
+    failures += 1;
+    details.push({
+      metric: 'Reliability correctness',
+      baseline: baseline.metrics?.change_stream_audit?.status ?? 'missing',
+      target: targetReliability.status ?? 'incomplete',
+      delta: null,
+      status: 'FAIL',
+    });
+  }
+
   // Each collector contributes one entry under target.metrics keyed by its
   // self-declared `metric` field (app_resources / db_resources / gc /
   // event_loop_delay). Walk the target's metrics and pull the matching
@@ -204,7 +216,7 @@ function toMarkdown(report) {
       md += `| ${d.metric} | ${baselineCell} | ${targetCell} |  | ⏭ (${reasonText}) |\n`;
       continue;
     }
-    const deltaStr = d.delta > 0 ? `+${d.delta}%` : `${d.delta}%`;
+    const deltaStr = d.delta == null ? '' : d.delta > 0 ? `+${d.delta}%` : `${d.delta}%`;
     const statusIcon = d.status === 'FAIL' ? '❌' : d.status === 'WARN' ? '⚠️' : '✅';
     md += `| ${d.metric} | ${d.baseline} | ${d.target} | ${deltaStr} | ${statusIcon} |\n`;
   }

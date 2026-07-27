@@ -20,6 +20,14 @@ The runtime flow is:
 6. `reporters/` persist the canonical JSON result and compare it against
    configured regression thresholds.
 
+The `audit` subcommand is a correctness path, not a performance scenario. It
+uses the same process, collector, and result envelope, but
+`metrics.change_stream_audit.status` is authoritative and any non-passing
+status must produce a nonzero CLI exit after the evidence file is persisted.
+`reliability/` owns its deterministic data generator, operation/capability
+registry, and correctness aggregation. The task fixture exposes only the
+run-scoped `reliability.documents` publication for this flow.
+
 Preserve the result contract consumed by tests and the dashboard:
 `timestamp`, `tag`, `meteor`, `runtime`, `scenario`, `app`, `wall_clock_ms`,
 and `metrics`. Metric names and nested paths are public contracts; update the
@@ -127,6 +135,28 @@ node bench.js run \
   does not prove a valid run; inspect workload output and reject any run with
   an Artillery or script error, timeout, incomplete scenario, or missing
   expected metric.
+
+Run a change-stream conformance audit:
+
+```sh
+node bench.js audit \
+  --profile smoke \
+  --observer-driver changeStreams \
+  --meteor-version <release>
+```
+
+- `smoke` is the bounded default; `extreme` requires explicit selection.
+- The audit writes only to `reliabilityDocuments` and scopes every mutation
+  and cleanup by a unique `runId`.
+- Non-loopback MongoDB targets require `--allow-remote-mongo`.
+- The requested observer must match both the startup probe and per-cursor
+  fallback evidence.
+- Supported operation capabilities require serialized delivery evidence.
+  Burst event counts are diagnostic because DDP may coalesce intermediate
+  current states; exact final state and content digests remain mandatory.
+- Unsupported, fallback-only, and unexercised capabilities must remain
+  explicit in the capability matrix and must never be described as passing.
+- DDP message/frame evidence is mandatory for a passing transport audit.
 
 Offline result operations:
 

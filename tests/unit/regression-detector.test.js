@@ -9,6 +9,25 @@ const load = (name) => JSON.parse(fs.readFileSync(path.join(FIXTURES, name), 'ut
 const clone = (obj) => JSON.parse(JSON.stringify(obj));
 
 describe('compare() — happy paths', () => {
+  test('a failed reliability oracle always fails comparison', () => {
+    const baseline = { tag: 'base', scenario: 'change-stream-audit-smoke', wall_clock_ms: 100, metrics: {
+      change_stream_audit: { metric: 'change_stream_audit', status: 'passed' },
+    } };
+    const target = { tag: 'target', scenario: 'change-stream-audit-smoke', wall_clock_ms: 100, metrics: {
+      change_stream_audit: { metric: 'change_stream_audit', status: 'failed' },
+    } };
+    const report = compare(baseline, target);
+    assert.equal(report.summary.passed, false);
+    assert.equal(report.summary.failures, 1);
+    assert.deepEqual(report.details[0], {
+      metric: 'Reliability correctness',
+      baseline: 'passed',
+      target: 'failed',
+      delta: null,
+      status: 'FAIL',
+    });
+  });
+
   test('passing run: all deltas under warn thresholds', () => {
     const report = compare(load('baseline.json'), load('target.json'));
     assert.equal(report.summary.passed, true);
