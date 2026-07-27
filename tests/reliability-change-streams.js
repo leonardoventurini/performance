@@ -16,6 +16,7 @@ import { summarizeReliability } from '../reliability/metrics.js';
 import {
   CAPABILITY_CONTRACT,
   buildMutation,
+  recordCapabilityOutcome,
   summarizeCapabilities,
 } from '../reliability/operation-matrix.js';
 
@@ -126,6 +127,8 @@ async function run() {
   }
 
   const runId = crypto.randomUUID();
+  const auditStartedAt = new Date().toISOString();
+  console.error(`Change-stream audit run ID: ${runId}`);
   const client = new MongoClient(mongoUri);
   const subscribers = [];
   const handlers = [];
@@ -142,6 +145,20 @@ async function run() {
   await client.connect();
   const collection = client.db().collection(COLLECTION_NAME);
   await collection.deleteMany({ runId });
+  let cleanupStarted = false;
+  const cleanup = async () => {
+    if (cleanupStarted) return;
+    cleanupStarted = true;
+    for (const handler of handlers) handler.stop();
+    for (const subscriber of subscribers) subscriber.disconnect();
+    await collection.deleteMany({ runId });
+    await client.close();
+  };
+  const handleSignal = () => {
+    cleanup().finally(() => process.exit(1));
+  };
+  process.once('SIGINT', handleSignal);
+  process.once('SIGTERM', handleSignal);
 
   try {
     console.error(`Reliability ${options.profile}: ${options.subscribers} subscribers, ${options.documents} documents, ${options.mutations} mutations`);
@@ -187,13 +204,29 @@ async function run() {
 
     const expected = new Map();
     const documents = Array.from({ length: options.documents }, (_, sequence) => (
-      buildSyntheticDocument({ runId, sequence, revision: 0, payloadBytes: options.payloadBytes, seed: options.seed })
+      {
+        ...buildSyntheticDocument({ runId, sequence, revision: 0, payloadBytes: options.payloadBytes, seed: options.seed }),
+        auditStartedAt,
+      }
     ));
     const bsonSizes = documents.map((document) => BSON.calculateObjectSize(document));
     if (bsonSizes.some((size) => size > MAX_DOCUMENT_BSON_BYTES)) {
       throw new Error(`Generated document exceeds conservative BSON limit of ${MAX_DOCUMENT_BSON_BYTES} bytes`);
     }
-    await runBurst(documents, options.burstSize, async (burst) => {
+    const [conformanceDocument, ...burstDocuments] = documents;
+    const insertStart = process.hrtime.bigint();
+    sentAt.set(`insert:${conformanceDocument._id}:0`, insertStart);
+    expected.set(conformanceDocument._id, conformanceDocument);
+    await collection.insertOne(conformanceDocument);
+    recordCapabilityOutcome(capabilityOutcomes, 'insert', await waitUntil(
+      () => subscribers.every((subscriber, index) => (
+        seen.has(`${index}:insert:${conformanceDocument._id}:0`)
+        && expectedStateMatches(subscriber, expected)
+      )),
+      options.timeoutMs,
+    ));
+
+    await runBurst(burstDocuments, options.burstSize, async (burst) => {
       const now = process.hrtime.bigint();
       for (const document of burst) {
         sentAt.set(`insert:${document._id}:0`, now);
@@ -201,10 +234,6 @@ async function run() {
       }
       await collection.insertMany(burst, { ordered: true });
     });
-    capabilityOutcomes.insert = await waitUntil(
-      () => subscribers.every((subscriber) => expectedStateMatches(subscriber, expected)),
-      options.timeoutMs,
-    ) ? 'passed' : 'failed';
 
     for (let revision = 1; revision <= options.mutations; revision += 1) {
       const mutations = [...expected.values()].map((previous) => (
@@ -215,10 +244,13 @@ async function run() {
       sentAt.set(`update:${conformanceMutation.next._id}:${revision}`, conformanceStart);
       expected.set(conformanceMutation.next._id, conformanceMutation.next);
       await collection.bulkWrite([conformanceMutation.write], { ordered: true });
-      capabilityOutcomes[conformanceMutation.operationId] = await waitUntil(
-        () => subscribers.every((subscriber) => expectedStateMatches(subscriber, expected)),
+      recordCapabilityOutcome(capabilityOutcomes, conformanceMutation.operationId, await waitUntil(
+        () => subscribers.every((subscriber, index) => (
+          seen.has(`${index}:update:${conformanceMutation.next._id}:${revision}`)
+          && expectedStateMatches(subscriber, expected)
+        )),
         options.timeoutMs,
-      ) ? 'passed' : 'failed';
+      ));
 
       await runBurst(burstMutations, options.burstSize, async (burst) => {
         const now = process.hrtime.bigint();
@@ -231,7 +263,20 @@ async function run() {
     }
 
     const removed = documents.filter((document) => document.sequence % 3 === 0);
-    await runBurst(removed, options.burstSize, async (burst) => {
+    const [conformanceRemoval, ...burstRemovals] = removed;
+    const removalStart = process.hrtime.bigint();
+    sentAt.set(`remove:${conformanceRemoval._id}:${options.mutations}`, removalStart);
+    expected.delete(conformanceRemoval._id);
+    await collection.deleteOne({ runId, _id: conformanceRemoval._id });
+    const deleteConformancePassed = await waitUntil(
+      () => subscribers.every((subscriber, index) => (
+        seen.has(`${index}:remove:${conformanceRemoval._id}:${options.mutations}`)
+        && expectedStateMatches(subscriber, expected)
+      )),
+      options.timeoutMs,
+    );
+
+    await runBurst(burstRemovals, options.burstSize, async (burst) => {
       const now = process.hrtime.bigint();
       for (const document of burst) {
         sentAt.set(`remove:${document._id}:${options.mutations}`, now);
@@ -248,7 +293,7 @@ async function run() {
     const timedOutSubscribers = options.subscribers - convergedSubscribers;
     const failureReasons = [];
     if (!converged) failureReasons.push('subscriber convergence deadline exceeded');
-    capabilityOutcomes.delete = converged ? 'passed' : 'failed';
+    recordCapabilityOutcome(capabilityOutcomes, 'delete', deleteConformancePassed && converged);
     const failedCapabilities = Object.entries(capabilityOutcomes)
       .filter(([, status]) => status !== 'passed')
       .map(([id]) => id);
@@ -289,10 +334,9 @@ async function run() {
     console.log(JSON.stringify(metric));
     if (metric.status !== 'passed') process.exitCode = 1;
   } finally {
-    for (const handler of handlers) handler.stop();
-    for (const subscriber of subscribers) subscriber.disconnect();
-    await collection.deleteMany({ runId });
-    await client.close();
+    process.removeListener('SIGINT', handleSignal);
+    process.removeListener('SIGTERM', handleSignal);
+    await cleanup();
   }
 }
 

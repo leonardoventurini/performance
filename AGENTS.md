@@ -35,7 +35,8 @@ producer, fixtures, contract tests, comparator, and dashboard together.
 
 Repository areas:
 
-- `apps/tasks-3.x` is the only benchmark target. It is a Meteor 3.0.2 React
+- `apps/tasks-3.x` is the only benchmark target. It is a Meteor 3.5.1-beta.0
+  React
   fixture with app-local packages under `packages/`.
 - `apps/tasks-3.x/packages/tasks-common` owns the task workload and UI.
 - `apps/tasks-3.x/packages/bench-monitors` instruments DDP, observers,

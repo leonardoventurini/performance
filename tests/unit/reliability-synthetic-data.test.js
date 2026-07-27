@@ -43,12 +43,16 @@ describe('reliability synthetic data', () => {
     assert.throws(() => validateWorkloadOptions({ ...valid, payloadBytes: MAX_PAYLOAD_BYTES + 1 }), /must not exceed/);
     assert.throws(() => validateWorkloadOptions({ ...valid, burstSize: 11 }), /must not exceed documents/);
     assert.throws(() => validateWorkloadOptions({ ...valid, subscribers: 0 }), /positive integer/);
+    assert.throws(() => validateWorkloadOptions({ ...valid, subscribers: 101 }), /must not exceed/);
+    assert.throws(() => validateWorkloadOptions({ ...valid, documents: 1_001, burstSize: 5 }), /must not exceed/);
   });
 
   test('recognizes only loopback MongoDB targets by default', () => {
     assert.equal(isLoopbackMongoUri('mongodb://127.0.0.1:3001/meteor'), true);
     assert.equal(isLoopbackMongoUri('mongodb://user:pass@localhost:27017/meteor'), true);
     assert.equal(isLoopbackMongoUri('mongodb://[::1]:27017/meteor'), true);
+    assert.equal(isLoopbackMongoUri('mongodb://127.example.com:27017/meteor'), false);
+    assert.equal(isLoopbackMongoUri('mongodb://127.0.0.1.example.com:27017/meteor'), false);
     assert.equal(isLoopbackMongoUri('mongodb://db.internal:27017/meteor'), false);
     assert.equal(isLoopbackMongoUri('not-a-uri'), false);
   });

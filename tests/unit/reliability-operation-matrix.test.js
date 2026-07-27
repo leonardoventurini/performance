@@ -3,10 +3,17 @@ import assert from 'node:assert/strict';
 import { buildSyntheticDocument } from '../../reliability/synthetic-data.js';
 import {
   buildMutation,
+  recordCapabilityOutcome,
   summarizeCapabilities,
 } from '../../reliability/operation-matrix.js';
 
 describe('reliability operation matrix', () => {
+  test('capability failures are monotonic across repeated attempts', () => {
+    const outcomes = {};
+    assert.equal(recordCapabilityOutcome(outcomes, 'update.set', false), 'failed');
+    assert.equal(recordCapabilityOutcome(outcomes, 'update.set', true), 'failed');
+  });
+
   test('cycles through supported update and replacement shapes deterministically', () => {
     let previous = buildSyntheticDocument({
       runId: 'run', sequence: 1, revision: 0, payloadBytes: 256, seed: 7,
@@ -31,7 +38,7 @@ describe('reliability operation matrix', () => {
     const matrix = summarizeCapabilities({ insert: 'passed', 'update.set': 'failed', delete: 'passed' });
     assert.equal(matrix.find((item) => item.id === 'insert').audit_status, 'passed');
     assert.equal(matrix.find((item) => item.id === 'replace').audit_status, 'not_exercised');
-    assert.equal(matrix.find((item) => item.id === 'ordered_observer').audit_status, 'fallback_expected');
+    assert.equal(matrix.find((item) => item.id === 'ordered_observer').audit_status, 'not_exercised');
     assert.equal(matrix.find((item) => item.id === 'collection_ddl').audit_status, 'not_supported');
   });
 });

@@ -80,3 +80,8 @@ metric derivation, CLI mapping, schema compatibility, and dashboard build
 integrity. They do not establish that a particular Meteor/MongoDB topology
 passes the audit. That evidence exists only after running the CLI against the
 specified Meteor source and database topology and retaining its result file.
+
+The tracked fixture release is Meteor 3.5.1-beta.0, which includes the 3.5
+Change Streams, pluggable DDP transport, and session-resumption line. The
+actual driver, per-cursor fallback, transport, and content evidence remain
+authoritative; the release label alone never establishes conformance.

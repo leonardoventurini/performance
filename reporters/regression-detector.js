@@ -33,12 +33,13 @@ function compare(baseline, target) {
   ];
 
   const targetReliability = target.metrics?.change_stream_audit;
-  if (targetReliability && targetReliability.status !== 'passed') {
+  const isAuditScenario = String(target.scenario || '').startsWith('change-stream-audit-');
+  if (isAuditScenario && targetReliability?.status !== 'passed') {
     failures += 1;
     details.push({
       metric: 'Reliability correctness',
       baseline: baseline.metrics?.change_stream_audit?.status ?? 'missing',
-      target: targetReliability.status ?? 'incomplete',
+      target: targetReliability?.status ?? 'incomplete',
       delta: null,
       status: 'FAIL',
     });

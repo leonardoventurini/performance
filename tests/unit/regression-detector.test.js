@@ -28,6 +28,14 @@ describe('compare() — happy paths', () => {
     });
   });
 
+  test('an audit scenario with no audit metric fails as incomplete evidence', () => {
+    const baseline = { tag: 'base', scenario: 'change-stream-audit-smoke', wall_clock_ms: 100, metrics: {} };
+    const target = { tag: 'target', scenario: 'change-stream-audit-smoke', wall_clock_ms: 100, metrics: {} };
+    const report = compare(baseline, target);
+    assert.equal(report.summary.passed, false);
+    assert.equal(report.details[0].target, 'incomplete');
+  });
+
   test('passing run: all deltas under warn thresholds', () => {
     const report = compare(load('baseline.json'), load('target.json'));
     assert.equal(report.summary.passed, true);

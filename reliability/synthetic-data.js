@@ -1,6 +1,12 @@
 import crypto from 'node:crypto';
+import net from 'node:net';
 
 export const MAX_PAYLOAD_BYTES = 8 * 1024 * 1024;
+const MAX_SUBSCRIBERS = 100;
+const MAX_DOCUMENTS = 1_000;
+const MAX_MUTATIONS = 25;
+const MAX_TIMEOUT_MS = 10 * 60 * 1_000;
+const MAX_GENERATED_PAYLOAD_BYTES = 1024 * 1024 * 1024;
 
 function createRandom(seed) {
   let state = seed >>> 0;
@@ -87,6 +93,14 @@ export function validateWorkloadOptions(options) {
   if (options.burstSize > options.documents) {
     throw new Error('burstSize must not exceed documents');
   }
+  if (options.subscribers > MAX_SUBSCRIBERS) throw new Error(`subscribers must not exceed ${MAX_SUBSCRIBERS}`);
+  if (options.documents > MAX_DOCUMENTS) throw new Error(`documents must not exceed ${MAX_DOCUMENTS}`);
+  if (options.mutations > MAX_MUTATIONS) throw new Error(`mutations must not exceed ${MAX_MUTATIONS}`);
+  if (options.timeoutMs > MAX_TIMEOUT_MS) throw new Error(`timeoutMs must not exceed ${MAX_TIMEOUT_MS}`);
+  const generatedPayloadBytes = options.documents * options.payloadBytes * (options.mutations + 1);
+  if (generatedPayloadBytes > MAX_GENERATED_PAYLOAD_BYTES) {
+    throw new Error(`generated payload must not exceed ${MAX_GENERATED_PAYLOAD_BYTES} bytes`);
+  }
   return options;
 }
 
@@ -98,6 +112,7 @@ export function isLoopbackMongoUri(uri) {
     const hostname = host.startsWith('[')
       ? host.slice(1, host.indexOf(']'))
       : host.split(':')[0];
-    return hostname === 'localhost' || hostname === '::1' || hostname.startsWith('127.');
+    if (hostname === 'localhost' || hostname === '::1') return true;
+    return net.isIP(hostname) === 4 && hostname.startsWith('127.');
   });
 }

@@ -40,11 +40,34 @@ import {
   stopCollectors,
 } from '../runner/collectors.js';
 import { buildResult } from '../reporters/json-reporter.js';
+import {
+  createIncompleteAuditMetric,
+  finalizeAuditEvidence,
+  resolveAuditMongoTarget,
+} from '../reliability/audit-evidence.js';
 
 const HERE = import.meta.dirname;
 const SCRIPT_TIMEOUT_MS = 300_000;
 
 export async function runScriptDriver({ scenario, scenarioName, app, appName, source, env, tag, config, scriptArgs: extraScriptArgs = [] }) {
+  const metricName = scenario.metric || 'fanout';
+  const configuredBenchMongoUri = env.BENCH_MONGO_URL || process.env.BENCH_MONGO_URL;
+  const configuredMeteorMongoUri = env.MONGO_URL || process.env.MONGO_URL;
+  const fallbackMongoUri = `mongodb://127.0.0.1:${config.appPort + 1}/meteor`;
+  const mongoUri = metricName === 'change_stream_audit'
+    ? resolveAuditMongoTarget({
+      benchMongoUri: configuredBenchMongoUri,
+      meteorMongoUri: configuredMeteorMongoUri,
+      fallbackMongoUri,
+      allowRemote: extraScriptArgs.includes('--allow-remote-mongo'),
+    })
+    : configuredBenchMongoUri
+    || configuredMeteorMongoUri
+    || fallbackMongoUri;
+  const meteorEnv = configuredBenchMongoUri && !configuredMeteorMongoUri
+    ? { ...env, MONGO_URL: mongoUri }
+    : env;
+
   ensureAppDeps(app.path);
   resetMeteorApp(source, app.path);
 
@@ -60,15 +83,17 @@ export async function runScriptDriver({ scenario, scenarioName, app, appName, so
 
   console.log('Starting Meteor app...');
   const { proc: meteorProc, getRuntimeInfo } = startMeteorApp({
-    source, appPath: app.path, port: config.appPort, env, gcMonitorPath, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath, frameSizePath, compressionPath, driverFallbackPath,
+    source, appPath: app.path, port: config.appPort, env: meteorEnv, gcMonitorPath, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath, frameSizePath, compressionPath, driverFallbackPath,
   });
 
-  console.log('Waiting for app to start...');
-  await waitForApp(config.appPort);
-  console.log('App started.');
+  let collectors = null;
+  let lifecycleComplete = false;
+  try {
+    console.log('Waiting for app to start...');
+    await waitForApp(config.appPort);
+    console.log('App started.');
 
-  const mongoUri = env.BENCH_MONGO_URL || process.env.BENCH_MONGO_URL || `mongodb://127.0.0.1:${config.appPort + 1}/meteor`;
-  const collectors = startCollectors({ appName, mongoUri, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath, frameSizePath, compressionPath, driverFallbackPath });
+    collectors = startCollectors({ appName, mongoUri, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath, frameSizePath, compressionPath, driverFallbackPath });
 
   const scriptPath = path.resolve(HERE, '..', scenario.script);
   const scriptArgs = [...(scenario.args || '').split(/\s+/).filter(Boolean), ...extraScriptArgs];
@@ -76,13 +101,14 @@ export async function runScriptDriver({ scenario, scenarioName, app, appName, so
 
   const scriptStart = Date.now();
   let scriptOutput = '';
+  let scriptError = null;
   try {
     scriptOutput = io.execFileSync('node', [scriptPath, ...scriptArgs], {
       cwd: path.resolve(HERE, '..'),
       encoding: 'utf8',
       env: {
         ...process.env,
-        ...env,
+        ...meteorEnv,
         REMOTE_URL: `http://127.0.0.1:${config.appPort}`,
         BENCH_MONGO_URL: mongoUri,
       },
@@ -90,6 +116,7 @@ export async function runScriptDriver({ scenario, scenarioName, app, appName, so
       timeout: SCRIPT_TIMEOUT_MS,
     });
   } catch (err) {
+    scriptError = err;
     console.error('Script failed:', err.stderr || err.message);
     scriptOutput = err.stdout || '';
   }
@@ -108,12 +135,18 @@ export async function runScriptDriver({ scenario, scenarioName, app, appName, so
       console.error(`Could not parse script metrics JSON from last stdout line: ${err.message}. Last line was: ${jsonLine.slice(0, 200)}`);
     }
   }
+  if (metricName === 'change_stream_audit' && Object.keys(scriptMetrics).length === 0) {
+    scriptMetrics = createIncompleteAuditMetric({
+      requestedDriver: meteorEnv.METEOR_REACTIVITY_ORDER || null,
+      scriptFailed: Boolean(scriptError),
+    });
+  }
 
   const collectorResults = await stopCollectors(collectors);
   await stopMeteorApp(meteorProc);
   collectorResults.push(...await stopCollectors({ ...collectors, procs: [] }));
-  const metricName = scenario.metric || 'fanout';
   collectorResults.push({ metric: metricName, ...scriptMetrics });
+  lifecycleComplete = true;
 
   if (scriptMetrics.fanout_avg_ms) {
     console.log(`Fanout: avg=${scriptMetrics.fanout_avg_ms}ms p50=${scriptMetrics.fanout_p50_ms}ms p95=${scriptMetrics.fanout_p95_ms}ms max=${scriptMetrics.fanout_max_ms}ms`);
@@ -128,36 +161,29 @@ export async function runScriptDriver({ scenario, scenarioName, app, appName, so
     collectorResults,
     wallClockMs,
   });
-  if (scenario.strict && Object.keys(scriptMetrics).length === 0) {
+  if (scenario.strict && metricName !== 'change_stream_audit' && Object.keys(scriptMetrics).length === 0) {
     throw new Error(`Strict script scenario "${scenarioName}" produced no metrics`);
   }
   if (metricName === 'change_stream_audit') {
-    const actualDriver = result.runtime?.observer_driver_actual;
-    result.metrics.change_stream_audit.audited_meteor = result.meteor;
-    result.metrics.change_stream_audit.transport = result.runtime?.transport || null;
-    result.metrics.change_stream_audit.actual_driver = actualDriver;
-    if (actualDriver !== result.metrics.change_stream_audit.requested_driver) {
-      result.metrics.change_stream_audit.status = 'failed';
-      result.metrics.change_stream_audit.failure_reasons = [
-        ...(result.metrics.change_stream_audit.failure_reasons || []),
-        'observer_driver_mismatch',
-      ].slice(0, 20);
-    }
-    const fallbackMetric = result.metrics.driver_fallbacks;
-    if (!fallbackMetric || fallbackMetric.no_fallback !== fallbackMetric.total_cursors) {
-      result.metrics.change_stream_audit.status = 'failed';
-      result.metrics.change_stream_audit.failure_reasons = [
-        ...(result.metrics.change_stream_audit.failure_reasons || []),
-        fallbackMetric ? 'publication_observer_fallback' : 'publication_observer_unverified',
-      ].slice(0, 20);
-    }
-    if (!result.metrics.ddp_messages || !result.metrics.ddp_frame_size || !result.runtime?.transport) {
-      result.metrics.change_stream_audit.status = 'failed';
-      result.metrics.change_stream_audit.failure_reasons = [
-        ...(result.metrics.change_stream_audit.failure_reasons || []),
-        'transport_evidence_missing',
-      ].slice(0, 20);
+    finalizeAuditEvidence({
+      audit: result.metrics.change_stream_audit,
+      meteor: result.meteor,
+      runtime: result.runtime,
+      metrics: result.metrics,
+      scriptFailed: Boolean(scriptError),
+    });
+  }
+    return result;
+  } finally {
+    if (!lifecycleComplete) {
+      if (collectors) {
+        try {
+          await stopCollectors(collectors);
+        } catch (error) {
+          console.error(`Could not stop collectors after driver failure: ${error.message}`);
+        }
+      }
+      await stopMeteorApp(meteorProc);
     }
   }
-  return result;
 }

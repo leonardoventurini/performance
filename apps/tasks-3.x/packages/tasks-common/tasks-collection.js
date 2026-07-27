@@ -4,11 +4,6 @@ export const TasksCollection = new Meteor.Collection('taskCollection');
 export const ReliabilityCollection = new Meteor.Collection('reliabilityDocuments');
 
 TasksCollection.allow({
-  ...Meteor.isFibersDisabled && {
-    insertAsync() { return true; },
-    updateAsync() { return true; },
-    removeAsync() { return true; },
-  },
   insert() { return true; },
   update() { return true; },
   remove() { return true; },

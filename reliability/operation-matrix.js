@@ -15,6 +15,21 @@ export const CHANGE_STREAM_CAPABILITIES = [
   { id: 'replace', support: 'supported', exercisedBy: 'replaceOne' },
   { id: 'delete', support: 'supported', exercisedBy: 'deleteMany' },
   {
+    id: 'selector_membership_transition',
+    support: 'supported',
+    reason: 'Declared by live-query semantics but not part of the bounded document-operation set',
+  },
+  {
+    id: 'projection_cleared_field',
+    support: 'supported',
+    reason: 'Declared by observeChanges projection semantics but not exercised by this publication',
+  },
+  {
+    id: 'reconnect_resubscription',
+    support: 'supported',
+    reason: 'Transport recovery requires a separate controlled disconnect topology',
+  },
+  {
     id: 'ordered_observer',
     support: 'fallback_expected',
     reason: 'Meteor change streams support unordered observers only',
@@ -42,6 +57,12 @@ export const CHANGE_STREAM_CAPABILITIES = [
 ];
 
 const OPERATION_IDS = ['update.set', 'update.unset', 'update.increment', 'update.array', 'replace'];
+
+export function recordCapabilityOutcome(outcomes, capabilityId, passed) {
+  const nextStatus = passed ? 'passed' : 'failed';
+  outcomes[capabilityId] = outcomes[capabilityId] === 'failed' ? 'failed' : nextStatus;
+  return outcomes[capabilityId];
+}
 
 function withoutId(document) {
   const { _id, ...fields } = document;
@@ -101,7 +122,7 @@ export function summarizeCapabilities(outcomes) {
     id: capability.id,
     support: capability.support,
     audit_status: outcomes[capability.id]
-      || (capability.support === 'supported' ? 'not_exercised' : capability.support),
+      || (capability.support === 'not_supported' ? 'not_supported' : 'not_exercised'),
     ...(capability.exercisedBy ? { operation: capability.exercisedBy } : {}),
     ...(capability.reason ? { reason: capability.reason } : {}),
   }));
