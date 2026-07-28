@@ -170,4 +170,3 @@ function normalizeOptionalString(value) {
   const normalized = value.trim();
   return normalized === '' ? null : normalized;
 }
-
