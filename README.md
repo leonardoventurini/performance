@@ -16,9 +16,10 @@ Clone the repository and install dependencies:
 just install
 ```
 
-This installs the root harness, task fixture, and dashboard from their
-committed npm lockfiles. Use `npm ci` in each workspace directly when Just is
-not available.
+This installs the root harness with system `npm` and installs the task fixture
+and dashboard with Meteor's bundled `meteor npm`, all from their committed
+lockfiles. When Just is unavailable, use `npm ci` at the repository root and
+`meteor npm ci` inside each Meteor application.
 
 ## Common commands
 

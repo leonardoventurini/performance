@@ -38,7 +38,7 @@ export async function runBuildProfileDriver({ scenarioName, app, appName, source
   const buildDir = path.join('/tmp', `meteor-build-profile-${Date.now()}`);
   console.log('\nBuild profile benchmark (METEOR_PROFILE=1)\n');
 
-  ensureAppDeps(app.path);
+  ensureAppDeps(source, app.path);
   resetMeteorApp(source, app.path);
 
   console.log('Building production bundle with profiling...');

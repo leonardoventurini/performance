@@ -65,7 +65,8 @@ they disagree.
   `just --list` to inspect recipes; the underlying npm, Meteor, Playwright,
   Tailwind, and benchmark commands remain authoritative.
 - Install root dependencies with `npm ci`.
-- Install an app's dependencies with `npm ci` inside that app.
+- Install a Meteor app's dependencies with `meteor npm ci` inside that app so
+  its npm and Node toolchain match the active Meteor release.
 - The benchmark app's Meteor packages are app-local. Do not restore the old
   top-level `packages/` or `METEOR_PACKAGE_DIRS` wiring.
 - A real benchmark also requires a Meteor CLI or checkout and, depending on
@@ -98,8 +99,8 @@ and requires the Meteor CLI.
 App-local verification:
 
 ```sh
-(cd apps/tasks-3.x && npm ci && npm test)
-(cd apps/dashboard && npm ci && npm test)
+(cd apps/tasks-3.x && meteor npm ci && meteor npm test)
+(cd apps/dashboard && meteor npm ci && meteor npm test)
 ```
 
 `test-app` in either app is a watch/full-app command, not a one-shot gate.
@@ -246,7 +247,7 @@ Tailwind source lives in `_tw/main.tailwind.css`; `client/main.css` is tracked
 generated output:
 
 ```sh
-(cd apps/dashboard && npm run tw)
+(cd apps/dashboard && meteor npm run tw)
 ```
 
 After template, class, token, or Tailwind changes, regenerate the CSS and
@@ -256,9 +257,10 @@ behavior where relevant. Preserve HTML escaping in detail panels and
 server-only writes to `Runs` and `Baselines`.
 
 Do not describe Galaxy dashboard deployment as verified without fixing and
-testing its contract: `apps/dashboard/galaxy.json` calls `npm run build`, but
-the dashboard package currently declares no `build` script. Its `/health`
-configuration also has no explicit route in the application.
+testing its contract: `apps/dashboard/galaxy.json` calls
+`meteor npm run build`, but the dashboard package currently declares no
+`build` script. Its `/health` configuration also has no explicit route in the
+application.
 
 ## Tests and change matrix
 

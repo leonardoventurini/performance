@@ -44,7 +44,7 @@ export async function runBundleSizeDriver({ scenarioName, app, appName, source, 
   const buildDir = path.join('/tmp', `meteor-bundle-${Date.now()}`);
   console.log('\nBundle size benchmark\n');
 
-  ensureAppDeps(app.path);
+  ensureAppDeps(source, app.path);
 
   console.log('Building production bundle...');
   const buildStart = Date.now();

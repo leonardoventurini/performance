@@ -12,11 +12,14 @@ function meteorArgv(source, subcommandArgs) {
   return source.releaseArg ? [source.releaseArg, ...subcommandArgs] : subcommandArgs;
 }
 
-export function ensureAppDeps(appPath) {
+export function ensureAppDeps(source, appPath) {
   const nodeModules = path.join(appPath, 'node_modules');
   if (io.existsSync(nodeModules)) return;
-  console.log('Installing app npm dependencies...');
-  io.execFileSync('npm', ['install'], { cwd: appPath, stdio: 'inherit' });
+  console.log('Installing app dependencies with Meteor npm...');
+  io.execFileSync(source.meteorCmd, meteorArgv(source, ['npm', 'ci']), {
+    cwd: appPath,
+    stdio: 'inherit',
+  });
 }
 
 export function resetMeteorApp(source, appPath) {

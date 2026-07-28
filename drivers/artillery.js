@@ -29,7 +29,7 @@ import { buildResult } from '../reporters/json-reporter.js';
 const HERE = import.meta.dirname;
 
 export async function runArtilleryDriver({ scenario, scenarioName, app, appName, source, env, tag, config }) {
-  ensureAppDeps(app.path);
+  ensureAppDeps(source, app.path);
   resetMeteorApp(source, app.path);
 
   const { gcMonitorPath, gcOutputPath } = prepareGcOutput(tag);

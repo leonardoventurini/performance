@@ -50,7 +50,7 @@ jobs:
           git checkout ${{ inputs.branch }}
 
       - name: Install app dependencies
-        run: npm install
+        run: '"$METEOR_REPO/meteor" npm ci'
         working-directory: apps/tasks-3.x
 
       - name: Run benchmark (${{ matrix.transport }})

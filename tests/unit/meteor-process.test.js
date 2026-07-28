@@ -17,32 +17,51 @@ import {
 afterEach(() => mock.restoreAll());
 
 describe('ensureAppDeps', () => {
-  test('skips npm install when node_modules already exists', () => {
+  const source = { meteorCmd: '/checkout/meteor', releaseArg: null };
+
+  test('skips Meteor npm when node_modules already exists', () => {
     mock.method(io, 'existsSync', () => true);
     const spy = mock.method(io, 'execFileSync', () => '');
-    ensureAppDeps('/some/app');
+    ensureAppDeps(source, '/some/app');
     assert.equal(spy.mock.callCount(), 0);
   });
 
-  test('runs npm install via execFileSync (argv form, no shell) when node_modules missing', () => {
+  test('runs meteor npm ci via execFileSync when node_modules is missing', () => {
     mock.method(io, 'existsSync', () => false);
     const calls = [];
     mock.method(io, 'execFileSync', (cmd, args, opts) => {
       calls.push({ cmd, args, opts });
       return '';
     });
-    ensureAppDeps('/path/to/app');
+    ensureAppDeps(source, '/path/to/app');
     assert.equal(calls.length, 1);
-    assert.equal(calls[0].cmd, 'npm');
-    assert.deepEqual(calls[0].args, ['install']);
+    assert.equal(calls[0].cmd, '/checkout/meteor');
+    assert.deepEqual(calls[0].args, ['npm', 'ci']);
     assert.equal(calls[0].opts.cwd, '/path/to/app');
     assert.equal(calls[0].opts.stdio, 'inherit');
+  });
+
+  test('pins Meteor npm to the requested published release', () => {
+    mock.method(io, 'existsSync', () => false);
+    const calls = [];
+    mock.method(io, 'execFileSync', (cmd, args) => {
+      calls.push({ cmd, args });
+      return '';
+    });
+    ensureAppDeps({
+      meteorCmd: 'meteor',
+      releaseArg: '--release=3.5.1-beta.0',
+    }, '/path/to/app');
+    assert.deepEqual(calls[0], {
+      cmd: 'meteor',
+      args: ['--release=3.5.1-beta.0', 'npm', 'ci'],
+    });
   });
 
   test('checks for the node_modules path inside appPath', () => {
     const checked = [];
     mock.method(io, 'existsSync', (p) => { checked.push(p); return true; });
-    ensureAppDeps('/my/app');
+    ensureAppDeps(source, '/my/app');
     assert.equal(checked[0], path.join('/my/app', 'node_modules'));
   });
 });

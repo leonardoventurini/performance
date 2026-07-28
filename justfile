@@ -27,11 +27,11 @@ install-root:
 
 # Install the benchmark fixture dependencies.
 install-task:
-    npm ci --prefix "{{ task_app }}"
+    cd "{{ task_app }}" && meteor npm ci
 
 # Install the dashboard dependencies.
 install-dashboard:
-    npm ci --prefix "{{ dashboard_app }}"
+    cd "{{ dashboard_app }}" && meteor npm ci
 
 # Run the fast, credential-free root verification suite.
 check: test bench-list playwright-list syntax-check dashboard-css-check
@@ -45,11 +45,11 @@ test:
 
 # Run the benchmark fixture's one-shot Meteor tests.
 test-task:
-    npm test --prefix "{{ task_app }}"
+    cd "{{ task_app }}" && meteor npm test
 
 # Run the dashboard's one-shot Meteor tests.
 test-dashboard:
-    npm test --prefix "{{ dashboard_app }}"
+    cd "{{ dashboard_app }}" && meteor npm test
 
 # Discover Playwright scenarios without starting an application.
 playwright-list:
@@ -121,7 +121,7 @@ dashboard-start port="4000":
 
 # Rebuild the dashboard's tracked Tailwind output.
 dashboard-css:
-    npm run tw --prefix "{{ dashboard_app }}"
+    cd "{{ dashboard_app }}" && meteor npm run tw
 
 # Prove the tracked dashboard CSS matches its Tailwind source.
 dashboard-css-check:
@@ -137,16 +137,19 @@ dashboard-css-check:
 
 # Watch dashboard Tailwind sources during local UI development.
 dashboard-css-watch:
-    npm run tw:watch --prefix "{{ dashboard_app }}"
+    cd "{{ dashboard_app }}" && meteor npm run tw:watch
 
 # Audit production dependencies in every workspace.
 audit-production:
     #!/usr/bin/env bash
     set -uo pipefail
     status=0
-    for workspace in "." "{{ task_app }}" "{{ dashboard_app }}"; do
+    echo
+    echo "Auditing production dependencies in ."
+    npm audit --omit=dev || status=1
+    for workspace in "{{ task_app }}" "{{ dashboard_app }}"; do
       echo
       echo "Auditing production dependencies in $workspace"
-      npm audit --omit=dev --prefix "$workspace" || status=1
+      (cd "$workspace" && meteor npm audit --omit=dev) || status=1
     done
     exit "$status"
