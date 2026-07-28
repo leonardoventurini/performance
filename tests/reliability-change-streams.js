@@ -19,6 +19,8 @@ import {
   recordCapabilityOutcome,
   summarizeCapabilities,
 } from '../reliability/operation-matrix.js';
+import { attestMongoIdentity } from '../reliability/release-audit/identity.js';
+import { snapshotDigest } from '../reliability/oracles/snapshot.js';
 
 const COLLECTION_NAME = 'reliabilityDocuments';
 const MAX_DOCUMENT_BSON_BYTES = 12 * 1024 * 1024;
@@ -331,6 +333,15 @@ async function run() {
     metric.max_document_bson_bytes = Math.max(...bsonSizes);
     metric.capabilities = summarizeCapabilities(capabilityOutcomes);
     metric.capability_contract = CAPABILITY_CONTRACT;
+    const mongoDocuments = await collection.find({ runId }).toArray();
+    metric.release_evidence = {
+      mongo_identity: await attestMongoIdentity(client.db()),
+      mongo_final_state_digest: snapshotDigest(mongoDocuments),
+      expected_final_state_digest: snapshotDigest([...expected.values()]),
+      subscriber_final_state_digests: subscribers.map((subscriber) => (
+        snapshotDigest(subscriber.collection(COLLECTION_NAME).fetch())
+      )),
+    };
     console.log(JSON.stringify(metric));
     if (metric.status !== 'passed') process.exitCode = 1;
   } finally {

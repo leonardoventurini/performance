@@ -134,4 +134,5 @@ export async function runBenchmark({ values, config }) {
   if (result.metrics.change_stream_audit && result.metrics.change_stream_audit.status !== 'passed') {
     throw new Error(`Change-stream audit ${result.metrics.change_stream_audit.status}: ${result.metrics.change_stream_audit.failure_reasons.join(', ')}`);
   }
+  return result;
 }
