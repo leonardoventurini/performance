@@ -23,6 +23,9 @@
         <a href="/trends" class="{{navItemClass 'trends'}}">
           <span class="inline-block w-4 mr-2 text-neutral-500">·</span>Trends
         </a>
+        <a href="/audits" class="{{navItemClass 'audits'}}">
+          <span class="inline-block w-4 mr-2 text-neutral-500">·</span>Audits
+        </a>
 
         <div class="mt-6 mx-5 border-t border-dashed border-neutral-300 dark:border-neutral-800"></div>
 
@@ -47,10 +50,16 @@
     {{!-- Mobile top bar --}}
     <header class="lg:hidden fixed top-0 left-0 right-0 z-30 flex items-center justify-between px-4 h-12 border-b border-neutral-200 dark:border-neutral-800 bg-neutral-100 dark:bg-neutral-900">
       <a href="/" class="text-sm font-semibold text-neutral-950 dark:text-neutral-100">Meteor Benchmark</a>
-      <button class="js-theme-toggle inline-flex items-center justify-center w-8 h-8 rounded border border-neutral-300 dark:border-neutral-700 text-neutral-700 dark:text-neutral-200"
-              title="Toggle theme">
-        {{themeIcon}}
-      </button>
+      <div class="flex items-center gap-2">
+        <a href="/audits"
+           class="min-h-8 inline-flex items-center rounded px-2 text-xs text-neutral-700 dark:text-neutral-300 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+          Audits
+        </a>
+        <button class="js-theme-toggle inline-flex items-center justify-center w-8 h-8 rounded border border-neutral-300 dark:border-neutral-700 text-neutral-700 dark:text-neutral-200"
+                title="Toggle theme">
+          {{themeIcon}}
+        </button>
+      </div>
     </header>
 
     {{!-- Content --}}

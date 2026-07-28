@@ -1,6 +1,7 @@
 import { Mongo } from 'meteor/mongo';
 import { Meteor } from 'meteor/meteor';
 import { check, Match } from 'meteor/check';
+import { normalizeRunResult } from './run-contract';
 
 const Runs = new Mongo.Collection('runs');
 
@@ -21,6 +22,21 @@ function sanitizeKeys(value) {
     out[k.replace(/\./g, '_')] = sanitizeKeys(v);
   }
   return out;
+}
+
+/**
+ * Validates and inserts one canonical benchmark result.
+ *
+ * Keeping every ingestion path behind this service prevents a
+ * dashboard-launched audit from bypassing the same result contract used by
+ * CLI uploads.
+ *
+ * @param {unknown} resultJson Untrusted result envelope.
+ * @returns {Promise<string>} Inserted run identifier.
+ */
+async function insertRunResult(resultJson) {
+  const normalized = normalizeRunResult(resultJson);
+  return await Runs.insertAsync(sanitizeKeys(normalized));
 }
 
 // Deny all direct client-side writes — only server methods allowed
@@ -68,15 +84,7 @@ if (Meteor.isServer) {
         throw new Meteor.Error('unauthorized', 'Invalid API key');
       }
 
-      // Ensure timestamp is a Date
-      if (resultJson.timestamp && typeof resultJson.timestamp === 'string') {
-        resultJson.timestamp = new Date(resultJson.timestamp);
-      }
-      if (!resultJson.timestamp) {
-        resultJson.timestamp = new Date();
-      }
-
-      return await Runs.insertAsync(sanitizeKeys(resultJson));
+      return await insertRunResult(resultJson);
     },
 
     // Wipe all stored runs. Authenticated by the same benchApiKey as
@@ -105,4 +113,4 @@ if (Meteor.isServer) {
   });
 }
 
-export { Runs };
+export { Runs, insertRunResult };

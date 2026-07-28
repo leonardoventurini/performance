@@ -17,7 +17,9 @@ The direct rollout adds:
 - honest capability reporting when the dashboard cannot locate the benchmark
   repository or a suitable Node executable.
 
-This does not implement the broader `release-audit` coordinator described in
+This is high-risk control-plane work because a false pass or an orphaned
+process tree can invalidate evidence or alter the shared local runtime. It
+does not implement the broader `release-audit` coordinator described in
 the release-conformance specification. It controls the currently implemented
 `smoke` and `extreme` change-stream audits. It does not add arbitrary CLI
 arguments, arbitrary environment variables, remote MongoDB authorization, or
@@ -73,8 +75,8 @@ Stop conditions:
 
 - `profile`: `smoke | extreme`;
 - `observerDriver`: `changeStreams | oplog`;
-- `meteorVersion`: an optional published-release identifier matching a
-  conservative allowlist;
+- `meteorVersion`: a published-release identifier selected from a
+  server-configured allowlist;
 - `seed`: an optional unsigned integer serialized as decimal text; and
 - `tag`: an optional bounded label containing letters, digits, `.`, `_`, `/`,
   `:` and `-`.
@@ -97,12 +99,20 @@ from the client.
 
 Terminal states are monotonic. A server startup marks stale `queued`,
 `running`, or `cancelling` records as `interrupted`; it does not claim that an
-unknown process completed or was cancelled.
+unknown process completed or was cancelled. An execution that had a process
+group retains the unique lease until an authenticated recovery action verifies
+that the group no longer exists. The dashboard cannot start another audit
+while this recovery lease remains.
 
-Each record includes the validated request, timestamps, bounded log entries,
-exit metadata, the imported `runId` when successful, and a stable error code
-and actionable message when unsuccessful. Process identifiers and filesystem
-paths are server-only and are not published.
+Each record includes the validated request, timestamps, bounded event counts,
+exit metadata, the imported `runId` when evidence is valid, and a stable error
+code and actionable message when unsuccessful. Process identifiers and
+filesystem paths are server-only and are not published.
+
+Process output is stored in a separate append-only event collection keyed by
+`(executionId, sequence)`, with unique ordering, per-line and per-execution
+limits, and time-based retention. This avoids growing one execution document
+toward MongoDB's document limit.
 
 ### Process and result integrity
 
@@ -116,13 +126,14 @@ paths are server-only and are not published.
   `metrics.change_stream_audit.status === "passed"`.
 - A valid non-passing result is still imported as audit evidence, while the
   execution is marked `failed`.
-- Logs are real child output, timestamped and bounded by entry count and entry
-  length. No guessed percentage or synthetic stage is shown.
+- Logs are real child output, sequenced, timestamped, stored separately, and
+  bounded by entry count and entry length. No guessed percentage or synthetic
+  stage is shown.
 
 ### Concurrency and cancellation
 
-Only one non-terminal audit execution may exist per dashboard server. The
-server checks and reserves this invariant before spawning.
+Only one non-terminal audit execution may exist per dashboard server. A unique
+sparse lease index reserves this invariant atomically before spawning.
 
 Cancellation is authenticated and idempotent:
 
@@ -131,9 +142,18 @@ Cancellation is authenticated and idempotent:
 3. after a bounded grace interval, use `SIGKILL` only if the tracked group
    still exists;
 4. record `cancelled` only after the child closes;
-5. preserve any canonical result produced before shutdown.
+5. preserve any canonical result produced before shutdown on disk, but do not
+   import a cancelled or timed-out result as an ordinary dashboard run.
 
 ### Dashboard behavior
+
+The browser first exchanges the existing API key for an in-memory authorization
+bound to its current DDP connection. The key remains only in the page's memory.
+Start, cancel, execution metadata, and event publications require that live
+connection authorization; reconnects must reauthorize. Failed authorization is
+rate-limited per connection. Locking the controls revokes the server-side
+authorization and stops its protected publications. Authorization expiry also
+stops existing protected publications.
 
 The `/audits` page shows:
 
@@ -143,6 +163,8 @@ The `/audits` page shows:
 - a single `Start audit` action with disabled and busy states;
 - the active execution's exact inputs, status, elapsed time, and real output;
 - a `Cancel audit` action only for cancellable states;
+- a recovery action for interrupted executions that refuses to release the
+  global lease while the old process group still exists;
 - actionable error text;
 - a link to the imported run when evidence exists; and
 - recent audit executions for restart/recovery context.
@@ -196,8 +218,9 @@ Hard gates:
   non-passing evidence never becomes `passed`.
   Oracle: execution finalizer unit tests, including a mutation that changes the
   authoritative metric to `failed`.
-- Authentication: missing or incorrect key cannot start or cancel.
-  Oracle: Meteor method tests.
+- Authentication: missing or incorrect connection authorization cannot start,
+  cancel, or subscribe to execution data.
+  Oracle: Meteor method and publication tests.
 - Non-blocking execution: the start method returns an execution ID before the
   child completes and progress remains publishable.
   Oracle: server integration test with a held child process.

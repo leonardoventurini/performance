@@ -78,6 +78,18 @@ just audit extreme changeStreams
 just audit smoke oplog --env MONGO_OPLOG_URL=mongodb://127.0.0.1:3001/local
 ```
 
+Start the dashboard with access to the local audit runner:
+
+```sh
+just dashboard
+```
+
+Open `http://localhost:4000/audits`. The page requires the private
+`benchApiKey` from the dashboard settings before it can start or cancel an
+audit. The browser can select only the bounded profile, observer driver,
+configured Meteor release, seed, and tag; database targets and arbitrary CLI
+arguments remain server-controlled.
+
 The bounded `smoke` profile and `changeStreams` driver are the defaults.
 `extreme` must be selected explicitly. Oplog runs require a working
 `MONGO_OPLOG_URL`; the run fails if Meteor falls back to a different observer

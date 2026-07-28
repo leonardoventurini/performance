@@ -117,7 +117,15 @@ task-start port="3000":
 
 # Start the dashboard with its tracked development settings.
 dashboard-start port="4000":
-    cd "{{ dashboard_app }}" && meteor run --port {{ quote(port) }} --settings settings.json
+    #!/usr/bin/env bash
+    set -euo pipefail
+    repository_root="$(pwd)"
+    cd "{{ dashboard_app }}"
+    BENCH_REPOSITORY_ROOT="$repository_root" meteor run --port {{ quote(port) }} --settings settings.json
+
+# Start the dashboard and its local audit control plane.
+dashboard port="4000":
+    just dashboard-start {{ quote(port) }}
 
 # Rebuild the dashboard's tracked Tailwind output.
 dashboard-css:

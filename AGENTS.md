@@ -240,8 +240,20 @@ must inject a real `Meteor.settings.benchApiKey` through private settings.
 Run the dashboard on port 4000 to match the CLI's default DDP endpoint:
 
 ```sh
-(cd apps/dashboard && meteor run --port 4000 --settings settings.json)
+just dashboard
 ```
+
+`just dashboard` sets `BENCH_REPOSITORY_ROOT` to the current repository so the
+authenticated `/audits` control plane can launch the canonical root CLI.
+Starting the Meteor app directly leaves audit execution unavailable unless the
+server receives that variable explicitly. Dashboard audit requests are a
+strict subset of CLI inputs: never add browser-controlled environment maps,
+MongoDB URLs, paths, checkout locations, output locations, or raw arguments.
+Keep audit execution single-flight, backgrounded, process-group cancellable,
+and fail closed unless the correlated canonical result passes validation.
+Audit execution metadata and logs require connection authorization; never
+persist or publish the API key, child process IDs, repository paths, or
+credentialed database URLs.
 
 Tailwind source lives in `_tw/main.tailwind.css`; `client/main.css` is tracked
 generated output:

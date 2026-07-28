@@ -1,0 +1,304 @@
+<template name="audits">
+  <div class="max-w-6xl">
+    <div class="flex flex-wrap items-end justify-between gap-4 mb-6">
+      <div>
+        <h1 class="text-2xl font-semibold text-neutral-950 dark:text-neutral-100 tracking-tight">
+          Reliability audits
+        </h1>
+        <p class="mt-1 text-sm text-neutral-600 dark:text-neutral-400 max-w-2xl">
+          Start the bounded Meteor change-stream conformance audit and inspect its real execution output.
+        </p>
+      </div>
+      {{#if capabilityReady}}
+        <span class="{{capabilityClass}}">
+          {{capabilityLabel}}
+        </span>
+      {{/if}}
+    </div>
+
+    {{#unless capabilityReady}}
+      <section class="rounded-md border border-neutral-200 dark:border-neutral-800 p-5"
+               aria-live="polite">
+        <p class="text-sm text-neutral-500">Checking the audit executor…</p>
+      </section>
+    {{else}}
+      {{#unless executorAvailable}}
+        <section class="rounded-md border border-amber-300/70 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/20 p-5"
+                 role="status">
+          <h2 class="font-medium text-amber-950 dark:text-amber-200">Audit execution unavailable</h2>
+          <p class="mt-1 text-sm text-amber-800 dark:text-amber-300">{{capabilityMessage}}</p>
+          <p class="mt-3 text-xs text-amber-700 dark:text-amber-400">
+            Historical results remain available. Start this dashboard through the repository Just command to enable local execution.
+          </p>
+        </section>
+      {{else}}
+        {{#unless isAuthorized}}
+          <section class="rounded-md border border-neutral-200 dark:border-neutral-800 p-5 max-w-xl">
+            <h2 class="font-medium text-neutral-950 dark:text-neutral-100">Authorize audit controls</h2>
+            <p class="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
+              The key stays in this browser tab and is not written to MongoDB or browser storage.
+            </p>
+            <form id="auditAuthorizationForm" class="mt-4">
+              <label for="auditApiKey"
+                     class="block text-xs font-medium text-neutral-700 dark:text-neutral-300">
+                Dashboard API key
+              </label>
+              <div class="mt-1.5 flex flex-col sm:flex-row gap-2">
+                <input id="auditApiKey"
+                       name="apiKey"
+                       type="password"
+                       required
+                       autocomplete="off"
+                       aria-describedby="auditAuthorizationHelp"
+                       class="min-h-11 flex-1 rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 text-sm text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                <button type="submit"
+                        disabled="{{authorizationBusy}}"
+                        class="min-h-11 rounded-md bg-indigo-600 hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50 px-4 text-sm font-medium text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 dark:focus:ring-offset-neutral-950 transition">
+                  {{authorizationButtonLabel}}
+                </button>
+              </div>
+              <p id="auditAuthorizationHelp" class="mt-2 text-xs text-neutral-500">
+                Use the private <span class="font-mono">benchApiKey</span> configured for this dashboard server.
+              </p>
+            </form>
+          </section>
+        {{else}}
+          <div class="grid grid-cols-1 xl:grid-cols-[22rem_minmax(0,1fr)] gap-6 items-start">
+            <section class="rounded-md border border-neutral-200 dark:border-neutral-800 p-5">
+              <div class="flex items-center justify-between gap-3">
+                <h2 class="font-medium text-neutral-950 dark:text-neutral-100">New audit</h2>
+                <button id="lockAuditControls"
+                        type="button"
+                        class="text-xs text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 rounded">
+                  Lock controls
+                </button>
+              </div>
+
+              <form id="auditLaunchForm" class="mt-4 space-y-4">
+                <div>
+                  <label for="auditProfile"
+                         class="block text-xs font-medium text-neutral-700 dark:text-neutral-300">
+                    Workload profile
+                  </label>
+                  <select id="auditProfile"
+                          name="profile"
+                          class="mt-1.5 min-h-11 w-full rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 text-sm text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                    <option value="smoke">Smoke — bounded setup and correctness check</option>
+                    <option value="extreme">Extreme — larger adversarial data and concurrency</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label for="auditObserverDriver"
+                         class="block text-xs font-medium text-neutral-700 dark:text-neutral-300">
+                    Observer driver
+                  </label>
+                  <select id="auditObserverDriver"
+                          name="observerDriver"
+                          class="mt-1.5 min-h-11 w-full rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 text-sm text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                    <option value="changeStreams">Change Streams</option>
+                    <option value="oplog" disabled="{{oplogUnavailable}}">Oplog{{oplogOptionSuffix}}</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label for="auditMeteorVersion"
+                         class="block text-xs font-medium text-neutral-700 dark:text-neutral-300">
+                    Meteor release
+                  </label>
+                  <select id="auditMeteorVersion"
+                          name="meteorVersion"
+                          class="mt-1.5 min-h-11 w-full rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 text-sm font-mono text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                    {{#each allowedMeteorVersions}}
+                      <option value="{{this}}">{{this}}</option>
+                    {{/each}}
+                  </select>
+                </div>
+
+                <div>
+                  <label for="auditSeed"
+                         class="block text-xs font-medium text-neutral-700 dark:text-neutral-300">
+                    Deterministic seed <span class="font-normal text-neutral-500">(optional)</span>
+                  </label>
+                  <input id="auditSeed"
+                         name="seed"
+                         type="number"
+                         min="0"
+                         max="4294967295"
+                         inputmode="numeric"
+                         class="mt-1.5 min-h-11 w-full rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 text-sm font-mono text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                </div>
+
+                <div>
+                  <label for="auditTag"
+                         class="block text-xs font-medium text-neutral-700 dark:text-neutral-300">
+                    Result tag <span class="font-normal text-neutral-500">(optional)</span>
+                  </label>
+                  <input id="auditTag"
+                         name="tag"
+                         type="text"
+                         maxlength="80"
+                         pattern="[A-Za-z0-9][A-Za-z0-9._/:+\-]*"
+                         class="mt-1.5 min-h-11 w-full rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 text-sm font-mono text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                </div>
+
+                <button type="submit"
+                        disabled="{{startDisabled}}"
+                        class="min-h-11 w-full rounded-md bg-indigo-600 hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50 px-4 text-sm font-medium text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 dark:focus:ring-offset-neutral-950 transition">
+                  {{startButtonLabel}}
+                </button>
+                <p class="text-xs leading-relaxed text-neutral-500">
+                  Audits reset and run the shared task fixture. Only one dashboard audit can run at a time.
+                  Remote MongoDB authorization and arbitrary CLI arguments are intentionally unavailable here.
+                </p>
+              </form>
+            </section>
+
+            <div class="min-w-0 space-y-6">
+              {{#if selectedExecution}}
+                {{#with selectedExecution}}
+                  <section class="rounded-md border border-neutral-200 dark:border-neutral-800 overflow-hidden">
+                    <header class="p-4 border-b border-neutral-200 dark:border-neutral-800 flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <div class="flex flex-wrap items-center gap-2">
+                          <h2 class="font-medium text-neutral-950 dark:text-neutral-100">Audit execution</h2>
+                          <span class="{{statusClass}}">{{statusLabel}}</span>
+                        </div>
+                        <p class="mt-1 text-xs text-neutral-500 font-mono">
+                          {{request.profile}} · {{request.observerDriver}} · {{meteorVersionLabel}}
+                        </p>
+                      </div>
+                      <div class="flex items-center gap-2">
+                        {{#if resultRunId}}
+                          <a href="/run/{{resultRunId}}"
+                             class="min-h-10 inline-flex items-center rounded-md border border-neutral-300 dark:border-neutral-700 px-3 text-sm text-neutral-700 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition">
+                            Open evidence
+                          </a>
+                        {{/if}}
+                        {{#if canCancel}}
+                          <button type="button"
+                                  class="js-cancel-audit min-h-10 rounded-md border border-red-300 dark:border-red-800 px-3 text-sm text-red-700 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-950/30 focus:outline-none focus:ring-2 focus:ring-red-500 disabled:opacity-50"
+                                  disabled="{{cancelBusy}}">
+                            {{cancelButtonLabel}}
+                          </button>
+                        {{/if}}
+                        {{#if canResolveRecovery}}
+                          <button type="button"
+                                  class="js-resolve-audit-recovery min-h-10 rounded-md border border-amber-300 dark:border-amber-800 px-3 text-sm text-amber-800 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-950/30 focus:outline-none focus:ring-2 focus:ring-amber-500 disabled:opacity-50"
+                                  disabled="{{recoveryBusy}}">
+                            {{recoveryButtonLabel}}
+                          </button>
+                        {{/if}}
+                      </div>
+                    </header>
+
+                    <dl class="grid grid-cols-2 sm:grid-cols-4 gap-px bg-neutral-200 dark:bg-neutral-800 border-b border-neutral-200 dark:border-neutral-800 text-sm">
+                      <div class="bg-white dark:bg-neutral-950 p-3">
+                        <dt class="text-xs text-neutral-500">Created</dt>
+                        <dd class="mt-1 text-neutral-800 dark:text-neutral-200">{{createdLabel}}</dd>
+                      </div>
+                      <div class="bg-white dark:bg-neutral-950 p-3">
+                        <dt class="text-xs text-neutral-500">Elapsed</dt>
+                        <dd class="mt-1 font-mono text-neutral-800 dark:text-neutral-200">{{elapsedLabel}}</dd>
+                      </div>
+                      <div class="bg-white dark:bg-neutral-950 p-3">
+                        <dt class="text-xs text-neutral-500">Events</dt>
+                        <dd class="mt-1 font-mono text-neutral-800 dark:text-neutral-200">{{eventCount}}</dd>
+                      </div>
+                      <div class="bg-white dark:bg-neutral-950 p-3">
+                        <dt class="text-xs text-neutral-500">Audit verdict</dt>
+                        <dd class="mt-1 font-mono text-neutral-800 dark:text-neutral-200">{{auditStatusLabel}}</dd>
+                      </div>
+                    </dl>
+
+                    {{#if failureMessage}}
+                      <div class="m-4 rounded-md border border-red-300/70 dark:border-red-900 bg-red-50 dark:bg-red-950/20 p-3"
+                           role="alert">
+                        <div class="text-sm font-medium text-red-900 dark:text-red-200">{{failureTitle}}</div>
+                        <div class="mt-1 text-sm text-red-800 dark:text-red-300">{{failureMessage}}</div>
+                        {{#if canResolveRecovery}}
+                          <div class="mt-2 text-xs text-red-700 dark:text-red-400">
+                            Verify the previous audit process group is no longer running. The dashboard will refuse to release the single-audit lease while that group still exists.
+                          </div>
+                        {{/if}}
+                      </div>
+                    {{/if}}
+
+                    <div class="p-4">
+                      <div class="flex items-center justify-between gap-3 mb-2">
+                        <h3 class="text-xs font-medium uppercase tracking-wide text-neutral-500">Live runner output</h3>
+                        {{#if isActive}}
+                          <span class="text-xs text-neutral-500" aria-live="polite">Receiving real process output…</span>
+                        {{/if}}
+                      </div>
+                      <ol id="auditEventLog"
+                          class="max-h-[32rem] overflow-y-auto rounded-md bg-neutral-950 p-3 font-mono text-[11px] leading-relaxed text-neutral-300 break-words"
+                          aria-label="Audit process output"
+                          aria-live="polite">
+                        {{#each selectedEvents}}
+                          <li class="{{eventClass}}">
+                            <span class="select-none text-neutral-600">{{sequence}}</span>
+                            <span>{{message}}</span>
+                          </li>
+                        {{else}}
+                          <li class="text-neutral-500">No process output has been emitted yet.</li>
+                        {{/each}}
+                      </ol>
+                    </div>
+                  </section>
+                {{/with}}
+              {{else}}
+                <section class="rounded-md border border-neutral-200 dark:border-neutral-800 p-8 text-center">
+                  <h2 class="font-medium text-neutral-900 dark:text-neutral-100">No audit selected</h2>
+                  <p class="mt-1 text-sm text-neutral-500">
+                    Start an audit or select a recent execution to inspect its real process output.
+                  </p>
+                </section>
+              {{/if}}
+
+              <section>
+                <h2 class="text-xs font-medium uppercase tracking-wide text-neutral-500 mb-3">Recent executions</h2>
+                {{#if hasExecutions}}
+                  <div class="rounded-md border border-neutral-200 dark:border-neutral-800 overflow-hidden">
+                    {{#each executions}}
+                      <button type="button"
+                              class="js-select-audit w-full min-h-12 px-3 py-2 flex items-center justify-between gap-4 border-b last:border-b-0 border-neutral-200 dark:border-neutral-800 text-left hover:bg-neutral-50 dark:hover:bg-neutral-900 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-indigo-500"
+                              data-execution-id="{{_id}}">
+                        <span class="min-w-0">
+                          <span class="block text-sm text-neutral-900 dark:text-neutral-100 truncate">
+                            {{request.profile}} · {{request.observerDriver}}
+                          </span>
+                          <span class="block mt-0.5 text-xs text-neutral-500">{{createdLabel}}</span>
+                        </span>
+                        <span class="{{statusClass}}">{{statusLabel}}</span>
+                      </button>
+                    {{/each}}
+                  </div>
+                {{else}}
+                  <div class="rounded-md border border-neutral-200 dark:border-neutral-800 p-6 text-sm text-neutral-500">
+                    No dashboard audit executions yet.
+                  </div>
+                {{/if}}
+              </section>
+            </div>
+          </div>
+        {{/unless}}
+      {{/unless}}
+    {{/unless}}
+
+    {{#if pageError}}
+      <div class="fixed bottom-4 right-4 left-4 sm:left-auto sm:max-w-md rounded-md border border-red-300 dark:border-red-900 bg-red-50 dark:bg-red-950 p-4 shadow-lg"
+           role="alert">
+        <div class="flex items-start justify-between gap-4">
+          <p class="text-sm text-red-900 dark:text-red-200">{{pageError}}</p>
+          <button id="dismissAuditError"
+                  type="button"
+                  aria-label="Dismiss audit error"
+                  class="shrink-0 rounded text-red-700 dark:text-red-300 focus:outline-none focus:ring-2 focus:ring-red-500">
+            ×
+          </button>
+        </div>
+      </div>
+    {{/if}}
+  </div>
+</template>

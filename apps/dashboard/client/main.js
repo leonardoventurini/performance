@@ -10,6 +10,7 @@ import '../imports/ui/pages/compare.js';
 import '../imports/ui/pages/trends.js';
 import '../imports/ui/pages/detail.js';
 import '../imports/ui/pages/scenario.js';
+import '../imports/ui/pages/audits.js';
 
 // Apply persisted theme before Blaze paints. Dark is the default.
 Meteor.startup(() => {
@@ -36,6 +37,13 @@ FlowRouter.route('/trends', {
   name: 'trends',
   action() {
     this.render('mainLayout', { content: 'trends' });
+  },
+});
+
+FlowRouter.route('/audits', {
+  name: 'audits',
+  action() {
+    this.render('mainLayout', { content: 'audits' });
   },
 });
 
