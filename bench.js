@@ -24,7 +24,18 @@ import config from './bench.config.js';
 import { resolveMeteorSource } from './meteor-source.js';
 import * as cli from './cli/index.js';
 
-const { runList, runBenchmark, runCompare, runPush, runBaseline, runClear, runBundleDelta, runAudit } = cli;
+const {
+  runList,
+  runBenchmark,
+  runCompare,
+  runPush,
+  runBaseline,
+  runClear,
+  runBundleDelta,
+  runAudit,
+  runReleaseAudit,
+  runReleaseAuditValidate,
+} = cli;
 
 // One shared schema for every subcommand — parseArgs is the single source of
 // truth for which flags exist. `multiple: true` for --env lets it be passed
@@ -60,6 +71,8 @@ const OPTIONS = {
   seed: { type: 'string' },
   'observer-driver': { type: 'string' },
   'allow-remote-mongo': { type: 'boolean' },
+  release: { type: 'string' },
+  manifest: { type: 'string' },
 };
 
 const { values, positionals } = parseArgs({
@@ -87,6 +100,10 @@ Usage:
   node bench.js audit [--profile smoke|extreme]
                             [--observer-driver changeStreams|oplog]
                                                          Verify reactive correctness under adversarial load
+  node bench.js release-audit --meteor-version <exact-release>
+                                                         Run the release conformance matrix
+  node bench.js release-audit-validate --manifest <manifest.json>
+                                                         Validate a sealed release artifact
 
 Dashboard:
   Default URL: ${config.dashboardUrl || 'ws://localhost:4000/websocket'}
@@ -130,6 +147,17 @@ switch (command) {
     break;
   case 'audit':
     runAudit({ values, config }).catch((err) => { console.error(err); process.exit(1); });
+    break;
+  case 'release-audit':
+    runReleaseAudit({ values, config }).catch((err) => { console.error(err); process.exit(1); });
+    break;
+  case 'release-audit-validate':
+    try {
+      runReleaseAuditValidate({ values });
+    } catch (err) {
+      console.error(err);
+      process.exit(1);
+    }
     break;
   default:
     printHelp();

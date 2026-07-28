@@ -85,6 +85,22 @@ audit profile="smoke" observer_driver="changeStreams" *args:
     shift 2
     node bench.js audit --profile "$profile" --observer-driver "$observer_driver" "$@"
 
+# Run the release-level, fail-closed conformance coordinator.
+release-audit release="3.5.1-beta.0" *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    release="$1"
+    shift
+    node bench.js release-audit --meteor-version "$release" "$@"
+
+# Qualify the release decision oracles with deterministic negative controls.
+release-audit-negative-controls:
+    node --test tests/unit/reliability/release-aggregate.test.js
+
+# Validate a sealed release manifest and every referenced case artifact.
+release-audit-validate manifest:
+    node bench.js release-audit-validate --manifest {{ quote(manifest) }}
+
 # Run a scenario against a pinned published Meteor release.
 bench-release scenario release *args:
     #!/usr/bin/env bash

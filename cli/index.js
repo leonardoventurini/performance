@@ -9,3 +9,5 @@ export { runCompare } from './compare.js';
 export { runPush, runBaseline, runClear } from './push.js';
 export { runBundleDelta } from './bundle-delta.js';
 export { runAudit } from './audit.js';
+export { runReleaseAudit } from './release-audit.js';
+export { runReleaseAuditValidate } from './release-audit-validate.js';
