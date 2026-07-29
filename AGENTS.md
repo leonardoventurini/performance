@@ -244,15 +244,17 @@ just dashboard
 ```
 
 `just dashboard` sets `BENCH_REPOSITORY_ROOT` to the current repository so the
-authenticated `/audits` control plane can launch the canonical root CLI.
+`/audits` control plane can launch the canonical root CLI.
 Starting the Meteor app directly leaves audit execution unavailable unless the
 server receives that variable explicitly. Dashboard audit requests are a
 strict subset of CLI inputs: never add browser-controlled environment maps,
 MongoDB URLs, paths, checkout locations, output locations, or raw arguments.
 Keep audit execution single-flight, backgrounded, process-group cancellable,
 and fail closed unless the correlated canonical result passes validation.
-Audit execution metadata and logs require connection authorization; never
-persist or publish the API key, child process IDs, repository paths, or
+Audit controls intentionally require no application-level API key. Anyone who
+can reach an audit-capable dashboard can start or cancel its single active
+audit, so keep that dashboard on a trusted local or otherwise access-controlled
+network. Never persist or publish child process IDs, repository paths, or
 credentialed database URLs.
 
 Tailwind source lives in `_tw/main.tailwind.css`; `client/main.css` is tracked
@@ -283,8 +285,8 @@ application.
   change.
 - Shared workload or task UI changes: run root tests, both Playwright
   scenarios against a running app, and the task app's Meteor tests.
-- Dashboard API changes: run dashboard Meteor tests and verify DDP
-  authentication, publication limits, direct-write denial, and date/key
+- Dashboard API changes: run dashboard Meteor tests and verify audit-control
+  access behavior, publication limits, direct-write denial, and date/key
   normalization.
 - Dashboard UI or Tailwind changes: regenerate CSS and perform browser
   verification across representative viewports and themes.

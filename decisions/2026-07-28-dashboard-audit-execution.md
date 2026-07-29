@@ -15,13 +15,13 @@ contracts rather than reimplementing the workload in a Meteor method.
 
 ## Decision
 
-The Meteor dashboard is the authenticated control plane; the root Node CLI
-remains the only audit executor.
+The Meteor dashboard is the local control plane; the root Node CLI remains the
+only audit executor.
 
 The `/audits` route:
 
-- authorizes the current DDP connection with the existing private
-  `benchApiKey`, retained only in browser memory;
+- exposes audit controls to every dashboard connection without a separate
+  application-level API key;
 - accepts only a strict profile, observer driver, server-allowlisted Meteor
   release, unsigned seed, and bounded tag;
 - creates one durable execution record protected by a unique sparse global
@@ -41,16 +41,15 @@ The dashboard server fails closed when the repository, Node 24 toolchain,
 writeable result directory, or POSIX process-group behavior is unavailable.
 `just dashboard` supplies the repository root for local execution.
 
-Connection authorization controls methods and publications. Revocation and
-expiry stop protected publications. The key, repository path, database URL,
-output path, process ID, and raw environment are never published or persisted
-in client-visible records.
+The dashboard deployment boundary controls access to methods and publications.
+The repository path, database URL, output path, process ID, and raw environment
+are never published or persisted in client-visible records.
 
 Cancellation sends `SIGTERM` to the complete process group, waits a bounded
 grace interval, and sends `SIGKILL` if the group remains. A dashboard restart
 marks an active execution interrupted but retains its lease and process ID.
-The lease is released only after an authenticated recovery action proves the
-old process group no longer exists.
+The lease is released only after a recovery action proves the old process group
+no longer exists.
 
 ## Rejected alternatives
 
@@ -83,6 +82,9 @@ old process group no longer exists.
 
 - Local operators can start, observe, cancel, and open evidence without leaving
   the dashboard.
+- Anyone who can reach an audit-capable dashboard can operate the audit
+  controls, so it must remain local or use trusted network/platform access
+  controls.
 - A hosted dashboard remains a valid evidence viewer even when execution is
   unavailable.
 - Only one dashboard audit can own the shared fixture at a time.
@@ -97,8 +99,8 @@ old process group no longer exists.
 
 - Root suite: 438 tests passed.
 - Dashboard server suite: 16 tests passed, including request isolation, result
-  correlation, actual-observer negative control, secret/path redaction,
-  symlink rejection, authorization revocation, protected-publication stop,
+  correlation, actual-observer negative control, sensitive path redaction,
+  symlink rejection, keyless method/publication access,
   concurrent lease reservation, and interrupted process-group recovery.
 - Live browser smoke audit: Meteor 3.5.1-beta.0 completed with passed evidence,
   real sequenced output, and a working run-detail link.
@@ -106,7 +108,6 @@ old process group no longer exists.
   exited, ports 3000 and 3001 were released, no child remained, and no cancelled
   result was imported.
 - Browser review covered desktop and narrow layouts, light and dark themes,
-  invalid and valid authorization, running, passed, cancelled, and executor
-  unavailable states.
+  running, passed, cancelled, and executor unavailable states.
 - Tailwind regeneration and consistency, JavaScript syntax, structural
   no-shell search, Just parsing, and whitespace validation passed.

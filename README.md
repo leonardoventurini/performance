@@ -84,11 +84,12 @@ Start the dashboard with access to the local audit runner:
 just dashboard
 ```
 
-Open `http://localhost:4000/audits`. The page requires the private
-`benchApiKey` from the dashboard settings before it can start or cancel an
-audit. The browser can select only the bounded profile, observer driver,
-configured Meteor release, seed, and tag; database targets and arbitrary CLI
-arguments remain server-controlled.
+Open `http://localhost:4000/audits`. Audit controls are available without a
+separate API key. The browser can select only the bounded profile, observer
+driver, configured Meteor release, seed, and tag; database targets and
+arbitrary CLI arguments remain server-controlled. Because anyone who can reach
+this page can start or cancel an audit, expose an audit-capable dashboard only
+on a trusted local or otherwise access-controlled network.
 
 The bounded `smoke` profile and `changeStreams` driver are the defaults.
 `extreme` must be selected explicitly. Oplog runs require a working

@@ -4,7 +4,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { spawn, spawnSync } from 'node:child_process';
-import { timingSafeEqual } from 'node:crypto';
 import {
   ACTIVE_AUDIT_STATUSES,
   buildAuditArgv,
@@ -23,12 +22,6 @@ import {
 
 /** One global lease prevents two audits from resetting the same fixture. */
 const ACTIVE_LEASE = 'dashboard-audit';
-/** API-key authorization lifetime for one DDP connection. */
-const AUTHORIZATION_TTL_MS = 30 * 60 * 1000;
-/** Maximum failed authorization attempts per connection and window. */
-const MAX_AUTH_ATTEMPTS = 5;
-/** Failed-authorization rolling window. */
-const AUTH_ATTEMPT_WINDOW_MS = 60 * 1000;
 /** Maximum persisted output events per execution. */
 const MAX_EVENT_COUNT = 500;
 /** Maximum characters retained from one process-output line. */
@@ -47,9 +40,6 @@ const MINIMUM_NODE_MAJOR = 24;
 const DEFAULT_ALLOWED_METEOR_VERSION = '3.5.1-beta.0';
 
 const ownedProcesses = new Map();
-const authorizedConnections = new Map();
-const authorizedPublications = new Map();
-const authorizationAttempts = new Map();
 let shuttingDown = false;
 
 /**
@@ -737,124 +727,6 @@ function buildExecutorEnvironment() {
 }
 
 /**
- * Authenticates one DDP connection without persisting the bearer secret.
- *
- * @param {object|null} connection Meteor method connection.
- * @param {string} apiKey Candidate API key.
- * @returns {boolean} True when authorized.
- */
-function authorizeConnection(connection, apiKey) {
-  const connectionId = connection?.id;
-  if (!connectionId) {
-    throw new Meteor.Error('audit-connection-required', 'A DDP connection is required.');
-  }
-  rateLimitAuthorization(connectionId);
-  const expectedKey = Meteor.settings?.benchApiKey;
-  if (!secureStringEqual(apiKey, expectedKey)) {
-    throw new Meteor.Error('unauthorized', 'The audit API key is invalid.');
-  }
-  authorizedConnections.set(connectionId, Date.now() + AUTHORIZATION_TTL_MS);
-  authorizationAttempts.delete(connectionId);
-  connection.onClose(() => {
-    revokeConnection(connectionId);
-  });
-  return true;
-}
-
-/**
- * Revokes one connection and stops every protected publication it owns.
- *
- * @param {string} connectionId DDP connection identifier.
- * @returns {boolean} Whether an authorization existed.
- */
-function revokeConnection(connectionId) {
-  const existed = authorizedConnections.delete(connectionId);
-  authorizationAttempts.delete(connectionId);
-  const publications = authorizedPublications.get(connectionId);
-  if (publications) {
-    for (const publication of [...publications]) publication.stop();
-  }
-  authorizedPublications.delete(connectionId);
-  return existed;
-}
-
-/**
- * Compares bearer secrets without revealing a matching prefix through timing.
- *
- * @param {unknown} candidate Untrusted candidate.
- * @param {unknown} expected Server-held secret.
- * @returns {boolean} Whether the secrets match.
- */
-function secureStringEqual(candidate, expected) {
-  if (typeof candidate !== 'string' || typeof expected !== 'string') {
-    return false;
-  }
-  const candidateBytes = Buffer.from(candidate);
-  const expectedBytes = Buffer.from(expected);
-  return candidateBytes.length === expectedBytes.length
-    && timingSafeEqual(candidateBytes, expectedBytes);
-}
-
-/**
- * Requires a current in-memory authorization for one DDP connection.
- *
- * @param {object|null} connection Meteor method/publication connection.
- */
-function requireAuthorizedConnection(connection) {
-  const expiry = authorizedConnections.get(connection?.id);
-  if (!expiry || expiry <= Date.now()) {
-    if (connection?.id) authorizedConnections.delete(connection.id);
-    throw new Meteor.Error(
-      'audit-authorization-required',
-      'Authorize this dashboard connection before managing audits.',
-    );
-  }
-  return expiry;
-}
-
-/**
- * Registers a protected publication for explicit revocation and TTL expiry.
- *
- * @param {object} publication Meteor publication context.
- * @param {number} expiry Authorization expiry timestamp.
- */
-function protectPublication(publication, expiry) {
-  const connectionId = publication.connection.id;
-  const publications = authorizedPublications.get(connectionId) || new Set();
-  publications.add(publication);
-  authorizedPublications.set(connectionId, publications);
-  const expiryTimer = Meteor.setTimeout(
-    () => publication.stop(),
-    Math.max(0, expiry - Date.now()),
-  );
-  publication.onStop(() => {
-    Meteor.clearTimeout(expiryTimer);
-    const current = authorizedPublications.get(connectionId);
-    current?.delete(publication);
-    if (current?.size === 0) authorizedPublications.delete(connectionId);
-  });
-}
-
-/**
- * Applies a bounded failed-authentication window per DDP connection.
- *
- * @param {string} connectionId DDP connection identifier.
- */
-function rateLimitAuthorization(connectionId) {
-  const now = Date.now();
-  const recent = (authorizationAttempts.get(connectionId) || [])
-    .filter((attemptedAt) => now - attemptedAt < AUTH_ATTEMPT_WINDOW_MS);
-  if (recent.length >= MAX_AUTH_ATTEMPTS) {
-    throw new Meteor.Error(
-      'audit-rate-limited',
-      'Too many authorization attempts. Wait one minute and try again.',
-    );
-  }
-  recent.push(now);
-  authorizationAttempts.set(connectionId, recent);
-}
-
-/**
  * Reconciles stale active records after a dashboard server restart.
  */
 async function reconcileInterruptedExecutions() {
@@ -1049,8 +921,6 @@ async function initializeAuditControlPlane() {
 export const auditControlPlaneReady = initializeAuditControlPlane();
 
 Meteor.publish('auditExecutions.recent', function publishAuditExecutions(limit = 20) {
-  const expiry = requireAuthorizedConnection(this.connection);
-  protectPublication(this, expiry);
   const boundedLimit = Number.isInteger(limit) ? Math.min(Math.max(limit, 1), 50) : 20;
   return AuditExecutions.find({}, {
     fields: {
@@ -1063,8 +933,6 @@ Meteor.publish('auditExecutions.recent', function publishAuditExecutions(limit =
 });
 
 Meteor.publish('auditEvents.forExecution', function publishAuditEvents(executionId) {
-  const expiry = requireAuthorizedConnection(this.connection);
-  protectPublication(this, expiry);
   if (typeof executionId !== 'string' || executionId.length > 40) {
     throw new Meteor.Error('audit-invalid-id', 'Audit execution ID is invalid.');
   }
@@ -1079,26 +947,15 @@ Meteor.methods({
     return getAuditExecutorCapability();
   },
 
-  'auditExecutions.authorize'(apiKey) {
-    return authorizeConnection(this.connection, apiKey);
-  },
-
-  'auditExecutions.revoke'() {
-    return revokeConnection(this.connection?.id);
-  },
-
   async 'auditExecutions.start'(request) {
-    requireAuthorizedConnection(this.connection);
     return await createAuditExecution(request);
   },
 
   async 'auditExecutions.cancel'(executionId) {
-    requireAuthorizedConnection(this.connection);
     return await cancelAuditExecution(executionId);
   },
 
   async 'auditExecutions.resolveInterrupted'(executionId) {
-    requireAuthorizedConnection(this.connection);
     return await resolveInterruptedExecution(executionId);
   },
 });

@@ -8,7 +8,7 @@ correctness or database-safety contracts.
 
 The direct rollout adds:
 
-- an authenticated `/audits` dashboard surface;
+- an `/audits` dashboard surface available to every dashboard connection;
 - a durable audit execution record with explicit lifecycle states;
 - background process execution of the canonical `bench.js audit` command;
 - bounded, real-time process output over a Meteor publication;
@@ -45,7 +45,8 @@ Assumptions:
   repository available two directories above or discoverable through an
   explicit `BENCH_REPOSITORY_ROOT`;
 - the selected `node` on the server path satisfies the root harness contract;
-- `Meteor.settings.benchApiKey` remains the operator authentication secret;
+- network access to an audit-capable dashboard is restricted to trusted
+  operators by its deployment boundary;
 - the audit's MongoDB target remains governed by the existing loopback-only
   default, and the UI never supplies `--allow-remote-mongo`.
 
@@ -99,8 +100,8 @@ from the client.
 
 Terminal states are monotonic. A server startup marks stale `queued`,
 `running`, or `cancelling` records as `interrupted`; it does not claim that an
-unknown process completed or was cancelled. An execution that had a process
-group retains the unique lease until an authenticated recovery action verifies
+  unknown process completed or was cancelled. An execution that had a process
+  group retains the unique lease until a recovery action verifies
 that the group no longer exists. The dashboard cannot start another audit
 while this recovery lease remains.
 
@@ -135,7 +136,7 @@ toward MongoDB's document limit.
 Only one non-terminal audit execution may exist per dashboard server. A unique
 sparse lease index reserves this invariant atomically before spawning.
 
-Cancellation is authenticated and idempotent:
+Cancellation is idempotent:
 
 1. atomically move `queued` or `running` to `cancelling`;
 2. signal the negative process-group ID with `SIGTERM`;
@@ -147,17 +148,15 @@ Cancellation is authenticated and idempotent:
 
 ### Dashboard behavior
 
-The browser first exchanges the existing API key for an in-memory authorization
-bound to its current DDP connection. The key remains only in the page's memory.
-Start, cancel, execution metadata, and event publications require that live
-connection authorization; reconnects must reauthorize. Failed authorization is
-rate-limited per connection. Locking the controls revokes the server-side
-authorization and stops its protected publications. Authorization expiry also
-stops existing protected publications.
+Start, cancel, recovery, execution metadata, and bounded event publications are
+available to every dashboard connection without an application-level API key.
+The deployment boundary is therefore the access boundary: an audit-capable
+dashboard must remain local or be protected by trusted network or platform
+access controls.
 
 The `/audits` page shows:
 
-- precise availability and authentication requirements;
+- precise executor availability and deployment-access requirements;
 - visible labels for every field;
 - profile and observer-driver explanations;
 - a single `Start audit` action with disabled and busy states;
@@ -176,10 +175,11 @@ unavailable, and interrupted states are part of verification.
 
 ## Risks and recovery
 
-- Unauthorized resource exhaustion:
-  require the configured API key for launch and cancellation, allow one active
-  run, and accept only bounded enums and strings. Rotate the key and stop the
-  dashboard server if abuse is suspected.
+- Untrusted resource exhaustion:
+  expose the audit-capable dashboard only through trusted deployment access,
+  allow one active run, and accept only bounded enums and strings. Stop the
+  dashboard server or remove its repository-root configuration if abuse is
+  suspected.
 - Shell or argument injection:
   never use a shell and reconstruct argv from server-side validation. Reject
   values outside the allowlist.
@@ -193,9 +193,9 @@ unavailable, and interrupted states are part of verification.
 - Result confusion across simultaneous requests:
   enforce single-flight execution and use a server-generated execution ID and
   output path.
-- Secret disclosure:
-  never persist or publish the API key, environment, MongoDB URL, filesystem
-  root, raw settings, or child PID.
+- Sensitive runtime disclosure:
+  never persist or publish the environment, MongoDB URL, filesystem root, raw
+  settings, or child PID.
 - Hosted dashboard without runner source:
   return `unavailable` with a concrete explanation. Viewing historical results
   remains functional.
@@ -218,9 +218,10 @@ Hard gates:
   non-passing evidence never becomes `passed`.
   Oracle: execution finalizer unit tests, including a mutation that changes the
   authoritative metric to `failed`.
-- Authentication: missing or incorrect connection authorization cannot start,
-  cancel, or subscribe to execution data.
-  Oracle: Meteor method and publication tests.
+- Access model: start, cancel, recovery, and bounded publications do not depend
+  on an application-level API key, while direct collection writes remain
+  denied.
+  Oracle: Meteor method and publication tests plus direct-write denial tests.
 - Non-blocking execution: the start method returns an execution ID before the
   child completes and progress remains publishable.
   Oracle: server integration test with a held child process.
@@ -247,7 +248,7 @@ the execution failed; it does not establish Meteor conformance.
 
 - [ ] Define validation and lifecycle primitives in a testable server module;
   verify with focused Meteor tests and negative inputs.
-- [ ] Add the server collection, publications, authenticated methods,
+- [ ] Add the server collection, publications, bounded methods,
   single-flight reservation, startup recovery, background spawn, bounded log
   streaming, cancellation, and result ingestion; verify lifecycle integration.
 - [ ] Add the `/audits` route, navigation, form, reactive execution panel, and
@@ -272,13 +273,14 @@ Local rollout:
 just dashboard
 ```
 
-Open `http://localhost:4000/audits`, provide the configured development API
-key, choose the bounded audit inputs, and start the audit. The page must receive
+Open `http://localhost:4000/audits`, choose the bounded audit inputs, and start
+the audit. The page must receive
 the execution record immediately, show real child output while the process is
 active, and link to the imported evidence after completion.
 
 Before a production deployment can execute audits, its runtime image must
 include the complete benchmark repository, a compatible Node and Meteor
-toolchain, MongoDB topology access, POSIX process-group support, and private
-`benchApiKey` settings. Without those prerequisites the page remains a
-read-only audit history with an explicit unavailable reason.
+toolchain, MongoDB topology access, POSIX process-group support, and a trusted
+deployment access boundary. Without the runtime prerequisites the page remains
+a read-only audit history with an explicit unavailable reason. Without a
+trusted access boundary, audit execution must not be exposed publicly.

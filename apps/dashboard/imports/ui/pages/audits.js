@@ -26,38 +26,21 @@ const CAPABILITY_MESSAGES = Object.freeze({
 });
 Template.audits.onCreated(function onAuditsCreated() {
   this.capability = new ReactiveVar(null);
-  this.authorized = new ReactiveVar(false);
-  this.authorizationBusy = new ReactiveVar(false);
   this.startBusy = new ReactiveVar(false);
   this.cancelBusy = new ReactiveVar(false);
   this.recoveryBusy = new ReactiveVar(false);
   this.pageError = new ReactiveVar('');
   this.selectedExecutionId = new ReactiveVar(null);
   this.clock = new ReactiveVar(Date.now());
-  this.apiKey = null;
-  this.authorizationInFlight = false;
 
   this.clockTimer = setInterval(() => this.clock.set(Date.now()), 1_000);
   refreshCapability(this);
 
   this.autorun(() => {
-    const connected = Meteor.status().connected;
-    if (!connected) {
-      this.authorized.set(false);
-      return;
-    }
-    if (this.apiKey && !this.authorized.get() && !this.authorizationInFlight) {
-      authorize(this, this.apiKey);
-    }
-  });
-
-  this.autorun(() => {
-    if (!this.authorized.get()) return;
     this.subscribe('auditExecutions.recent', 20);
   });
 
   this.autorun(() => {
-    if (!this.authorized.get()) return;
     const selectedExecutionId = this.selectedExecutionId.get();
     if (selectedExecutionId) {
       this.subscribe('auditEvents.forExecution', selectedExecutionId);
@@ -65,7 +48,7 @@ Template.audits.onCreated(function onAuditsCreated() {
   });
 
   this.autorun(() => {
-    if (!this.authorized.get() || this.selectedExecutionId.get()) return;
+    if (this.selectedExecutionId.get()) return;
     const execution = AuditExecutions.findOne({}, { sort: { createdAt: -1 } });
     if (execution) this.selectedExecutionId.set(execution._id);
   });
@@ -73,7 +56,6 @@ Template.audits.onCreated(function onAuditsCreated() {
 
 Template.audits.onDestroyed(function onAuditsDestroyed() {
   clearInterval(this.clockTimer);
-  this.apiKey = null;
 });
 
 Template.audits.helpers({
@@ -97,17 +79,6 @@ Template.audits.helpers({
     const reasonCode = Template.instance().capability.get()?.reasonCode;
     return CAPABILITY_MESSAGES[reasonCode]
       || 'The local audit executor is unavailable.';
-  },
-  isAuthorized() {
-    return Template.instance().authorized.get();
-  },
-  authorizationBusy() {
-    return Template.instance().authorizationBusy.get();
-  },
-  authorizationButtonLabel() {
-    return Template.instance().authorizationBusy.get()
-      ? 'Authorizing…'
-      : 'Unlock audit controls';
   },
   allowedMeteorVersions() {
     return Template.instance().capability.get()?.allowedMeteorVersions || [];
@@ -193,26 +164,6 @@ Template.audits.helpers({
 });
 
 Template.audits.events({
-  async 'submit #auditAuthorizationForm'(event, instance) {
-    event.preventDefault();
-    const apiKey = event.currentTarget.elements.apiKey.value;
-    instance.apiKey = apiKey;
-    await authorize(instance, apiKey);
-    event.currentTarget.reset();
-  },
-
-  async 'click #lockAuditControls'(event, instance) {
-    event.preventDefault();
-    try {
-      await Meteor.callAsync('auditExecutions.revoke');
-    } catch (error) {
-      instance.pageError.set(error.reason || error.message);
-    }
-    instance.apiKey = null;
-    instance.authorized.set(false);
-    instance.selectedExecutionId.set(null);
-  },
-
   async 'submit #auditLaunchForm'(event, instance) {
     event.preventDefault();
     instance.startBusy.set(true);
@@ -277,30 +228,6 @@ Template.audits.events({
     instance.pageError.set('');
   },
 });
-
-/**
- * Authorizes one live DDP connection and enables protected subscriptions.
- *
- * @param {Blaze.TemplateInstance} instance Template instance.
- * @param {string} apiKey Ephemeral bearer key.
- */
-async function authorize(instance, apiKey) {
-  if (instance.authorizationInFlight) return;
-  instance.authorizationInFlight = true;
-  instance.authorizationBusy.set(true);
-  instance.pageError.set('');
-  try {
-    await Meteor.callAsync('auditExecutions.authorize', apiKey);
-    instance.authorized.set(true);
-  } catch (error) {
-    instance.apiKey = null;
-    instance.authorized.set(false);
-    instance.pageError.set(error.reason || error.message);
-  } finally {
-    instance.authorizationInFlight = false;
-    instance.authorizationBusy.set(false);
-  }
-}
 
 /**
  * Refreshes sanitized server executor capability.

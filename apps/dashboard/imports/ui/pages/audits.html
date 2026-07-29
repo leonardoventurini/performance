@@ -32,47 +32,9 @@
           </p>
         </section>
       {{else}}
-        {{#unless isAuthorized}}
-          <section class="rounded-md border border-neutral-200 dark:border-neutral-800 p-5 max-w-xl">
-            <h2 class="font-medium text-neutral-950 dark:text-neutral-100">Authorize audit controls</h2>
-            <p class="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
-              The key stays in this browser tab and is not written to MongoDB or browser storage.
-            </p>
-            <form id="auditAuthorizationForm" class="mt-4">
-              <label for="auditApiKey"
-                     class="block text-xs font-medium text-neutral-700 dark:text-neutral-300">
-                Dashboard API key
-              </label>
-              <div class="mt-1.5 flex flex-col sm:flex-row gap-2">
-                <input id="auditApiKey"
-                       name="apiKey"
-                       type="password"
-                       required
-                       autocomplete="off"
-                       aria-describedby="auditAuthorizationHelp"
-                       class="min-h-11 flex-1 rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 text-sm text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-indigo-500">
-                <button type="submit"
-                        disabled="{{authorizationBusy}}"
-                        class="min-h-11 rounded-md bg-indigo-600 hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50 px-4 text-sm font-medium text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 dark:focus:ring-offset-neutral-950 transition">
-                  {{authorizationButtonLabel}}
-                </button>
-              </div>
-              <p id="auditAuthorizationHelp" class="mt-2 text-xs text-neutral-500">
-                Use the private <span class="font-mono">benchApiKey</span> configured for this dashboard server.
-              </p>
-            </form>
-          </section>
-        {{else}}
           <div class="grid grid-cols-1 xl:grid-cols-[22rem_minmax(0,1fr)] gap-6 items-start">
             <section class="rounded-md border border-neutral-200 dark:border-neutral-800 p-5">
-              <div class="flex items-center justify-between gap-3">
-                <h2 class="font-medium text-neutral-950 dark:text-neutral-100">New audit</h2>
-                <button id="lockAuditControls"
-                        type="button"
-                        class="text-xs text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 rounded">
-                  Lock controls
-                </button>
-              </div>
+              <h2 class="font-medium text-neutral-950 dark:text-neutral-100">New audit</h2>
 
               <form id="auditLaunchForm" class="mt-4 space-y-4">
                 <div>
@@ -282,7 +244,6 @@
               </section>
             </div>
           </div>
-        {{/unless}}
       {{/unless}}
     {{/unless}}
 

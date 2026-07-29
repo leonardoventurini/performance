@@ -110,63 +110,30 @@ describe("dashboard", function () {
       }
     });
 
-    it("authorizes, revokes, and then denies the same DDP connection", async function () {
+    it("exposes bounded audit controls and publications without connection authorization", async function () {
       await import("../server/audit-control-plane");
       const handlers = Meteor.server.method_handlers;
       const publications = Meteor.server.publish_handlers;
-      const connection = {
-        id: `audit-auth-${Date.now()}`,
-        onClose() {},
-      };
-      const context = { connection };
-      let publicationStopped = false;
-      let publicationOnStop = () => {};
-      const publicationContext = {
-        connection,
-        onStop(callback) {
-          publicationOnStop = callback;
-        },
-        stop() {
-          publicationStopped = true;
-          publicationOnStop();
-        },
-      };
-      const previousKey = Meteor.settings.benchApiKey;
-      Meteor.settings.benchApiKey = "dashboard-test-key";
-      try {
-        assert.strictEqual(
-          handlers["auditExecutions.authorize"].apply(
-            context,
-            ["dashboard-test-key"],
-          ),
-          true,
-        );
-        publications["auditExecutions.recent"].apply(
-          publicationContext,
-          [1],
-        );
-        assert.strictEqual(
-          handlers["auditExecutions.revoke"].apply(context, []),
-          true,
-        );
-        assert.strictEqual(publicationStopped, true);
-        await assert.rejects(
-          handlers["auditExecutions.start"].apply(context, [{
-            profile: "smoke",
-            observerDriver: "changeStreams",
-            meteorVersion: "3.5.1-beta.0",
-            seed: "",
-            tag: "",
-          }]),
-          /Authorize this dashboard connection/,
-        );
-      } finally {
-        if (previousKey === undefined) {
-          delete Meteor.settings.benchApiKey;
-        } else {
-          Meteor.settings.benchApiKey = previousKey;
-        }
-      }
+      const executionCursor = publications["auditExecutions.recent"].apply({}, [1]);
+      const eventCursor = publications["auditEvents.forExecution"].apply(
+        {},
+        ["public-execution"],
+      );
+
+      assert.strictEqual(typeof executionCursor.fetch, "function");
+      assert.strictEqual(typeof eventCursor.fetch, "function");
+      assert.strictEqual(handlers["auditExecutions.authorize"], undefined);
+      assert.strictEqual(handlers["auditExecutions.revoke"], undefined);
+      await assert.rejects(
+        handlers["auditExecutions.start"].apply({}, [{
+          profile: "unbounded",
+          observerDriver: "changeStreams",
+          meteorVersion: "3.5.1-beta.0",
+          seed: "",
+          tag: "",
+        }]),
+        /Audit profile must be smoke or extreme/,
+      );
     });
 
     it("enforces one durable active lease under concurrent inserts", async function () {
@@ -213,13 +180,7 @@ describe("dashboard", function () {
       await auditControlPlaneReady;
 
       const handlers = Meteor.server.method_handlers;
-      const connection = {
-        id: `audit-recovery-${Date.now()}`,
-        onClose() {},
-      };
-      const context = { connection };
-      const previousKey = Meteor.settings.benchApiKey;
-      Meteor.settings.benchApiKey = "dashboard-recovery-key";
+      const context = {};
       const executionId = `recovery-${Date.now().toString(36)}`;
       const child = childProcess.spawn(
         process.execPath,
@@ -241,10 +202,6 @@ describe("dashboard", function () {
           request: {},
           createdAt: new Date(),
         });
-        handlers["auditExecutions.authorize"].apply(
-          context,
-          ["dashboard-recovery-key"],
-        );
         await assert.rejects(
           handlers["auditExecutions.resolveInterrupted"].apply(
             context,
@@ -276,12 +233,6 @@ describe("dashboard", function () {
           // The expected path already stopped the isolated test process group.
         }
         await AuditExecutions.removeAsync(executionId);
-        handlers["auditExecutions.revoke"].apply(context, []);
-        if (previousKey === undefined) {
-          delete Meteor.settings.benchApiKey;
-        } else {
-          Meteor.settings.benchApiKey = previousKey;
-        }
       }
     });
   }
