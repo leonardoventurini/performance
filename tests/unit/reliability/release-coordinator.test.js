@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, test } from 'node:test';
 import { coordinateReleaseAudit } from '../../../reliability/release-audit/coordinator.js';
+import { validateReleaseAuditArtifact } from '../../../cli/release-audit-validate.js';
 
 const directories = [];
 const DIGEST = 'a'.repeat(64);
@@ -49,6 +50,10 @@ describe('release audit coordinator', () => {
     assert.equal(result.manifest.status, 'incomplete');
     assert.equal(result.releaseExecution.state, 'incomplete');
     assert.equal(fs.existsSync(path.join(result.artifactRoot, 'manifest.json')), true);
+    assert.equal(
+      validateReleaseAuditArtifact(path.join(result.artifactRoot, 'manifest.json')).status,
+      'incomplete',
+    );
     const events = fs.readFileSync(
       path.join(result.artifactRoot, 'progress.ndjson'),
       'utf8',
@@ -57,6 +62,14 @@ describe('release audit coordinator', () => {
     assert.deepEqual(
       events.map(({ sequence }) => sequence),
       [1, 2, 3, 4],
+    );
+    const manifestPath = path.join(result.artifactRoot, 'manifest.json');
+    const forged = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    forged.status = 'conformant';
+    fs.writeFileSync(manifestPath, `${JSON.stringify(forged, null, 2)}\n`);
+    assert.throws(
+      () => validateReleaseAuditArtifact(manifestPath),
+      /terminal decision|canonical aggregate/u,
     );
   });
 });

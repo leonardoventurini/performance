@@ -5,6 +5,7 @@ import {
   contractDigest,
   validateAuditCaseResult,
   validateCaseCoordinate,
+  validateReleaseIdentity,
 } from '../../../reliability/contracts/index.js';
 import {
   RELEASE_CAPABILITY_CONTRACT_DIGEST,
@@ -29,11 +30,11 @@ function validCase() {
     release: {
       requested: '3.5.1-beta.0',
       actual: '3.5.1-beta.0',
-      sourceRevision: 'METEOR@3.5.1-beta.0',
+      sourceRevision: 'release:3.5.1-beta.0',
       fixtureRelease: 'METEOR@3.5.1-beta.0',
       packageVersionsDigest: SHA,
       settingsDigest: SHA,
-      harnessRevision: 'abc123',
+      harnessRevision: 'c'.repeat(40),
       harnessDirty: false,
       executionEnvironment: 'node-24-test',
     },
@@ -98,6 +99,24 @@ test('coordinate contract rejects duplicate observer drivers and unbounded seeds
   assert.throws(
     () => validateCaseCoordinate({ ...coordinate, seed: 0x1_0000_0000 }),
     /unsigned 32-bit/,
+  );
+});
+
+test('release and MongoDB sentinels cannot enter conformance evidence', () => {
+  const identity = validCase().release;
+  assert.throws(
+    () => validateReleaseIdentity({ ...identity, sourceRevision: 'unknown' }),
+    /must not be unknown/u,
+  );
+  assert.throws(
+    () => validateReleaseIdentity({ ...identity, fixtureRelease: 'METEOR@3.5.0' }),
+    /must exactly match/u,
+  );
+  const unavailableMongo = validCase();
+  unavailableMongo.mongo.serverVersion = 'unavailable';
+  assert.throws(
+    () => validateAuditCaseResult(unavailableMongo),
+    /exact numeric version/u,
   );
 });
 

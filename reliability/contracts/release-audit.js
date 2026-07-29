@@ -3,6 +3,10 @@ const DIGEST_PATTERN = /^[a-f0-9]{64}$/;
 const MAX_REASON_COUNT = 32;
 const MAX_REASON_LENGTH = 256;
 const MAX_COLLECTION_LENGTH = 10_000;
+const FORBIDDEN_IDENTITY_VALUES = new Set(['unknown', 'system', 'unavailable']);
+const GIT_REVISION_PATTERN = /^[a-f0-9]{40,64}$/u;
+const RELEASE_SOURCE_PATTERN = /^release:[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/u;
+const VERSION_PATTERN = /^\d+\.\d+(?:\.\d+)?(?:[-+][a-zA-Z0-9.-]+)?$/u;
 
 export const RELEASE_AUDIT_STATUSES = Object.freeze([
   'conformant',
@@ -118,6 +122,22 @@ export function validateReleaseIdentity(value, path = 'release') {
   for (const key of ['requested', 'actual', 'sourceRevision', 'fixtureRelease',
     'harnessRevision', 'executionEnvironment']) {
     string(value[key], `${path}.${key}`, { max: 256 });
+    if (FORBIDDEN_IDENTITY_VALUES.has(value[key].toLowerCase())) {
+      fail(`${path}.${key}`, 'must not be unknown or unavailable');
+    }
+  }
+  if (value.requested !== value.actual) {
+    fail(`${path}.actual`, 'must exactly match the requested release');
+  }
+  if (value.fixtureRelease !== `METEOR@${value.requested}`) {
+    fail(`${path}.fixtureRelease`, 'must exactly match the requested release');
+  }
+  if (!GIT_REVISION_PATTERN.test(value.harnessRevision)) {
+    fail(`${path}.harnessRevision`, 'must be an exact Git revision');
+  }
+  if (!(GIT_REVISION_PATTERN.test(value.sourceRevision)
+    || value.sourceRevision === `release:${value.requested}`)) {
+    fail(`${path}.sourceRevision`, 'must identify the exact requested source');
   }
   digest(value.packageVersionsDigest, `${path}.packageVersionsDigest`);
   digest(value.settingsDigest, `${path}.settingsDigest`);
@@ -203,7 +223,7 @@ export function coordinateKey(value) {
   ].join('|');
 }
 
-function validateMongoIdentity(value, path) {
+function validateMongoIdentity(value, path, { allowUnavailable = false } = {}) {
   object(value, path, [
     'serverVersion', 'featureCompatibilityVersion', 'topology', 'topologyName', 'members',
   ]);
@@ -211,6 +231,21 @@ function validateMongoIdentity(value, path) {
   string(value.featureCompatibilityVersion, `${path}.featureCompatibilityVersion`, { max: 64 });
   enumeration(value.topology, `${path}.topology`, MONGO_TOPOLOGIES);
   string(value.topologyName, `${path}.topologyName`, { max: 128 });
+  const unavailableIdentity = value.serverVersion === 'unavailable'
+    && value.featureCompatibilityVersion === 'unavailable'
+    && value.topologyName === 'unavailable'
+    && Array.isArray(value.members)
+    && value.members.length === 0;
+  if (allowUnavailable && unavailableIdentity) return structuredClone(value);
+  if (!VERSION_PATTERN.test(value.serverVersion)) {
+    fail(`${path}.serverVersion`, 'must be an exact numeric version');
+  }
+  if (!VERSION_PATTERN.test(value.featureCompatibilityVersion)) {
+    fail(`${path}.featureCompatibilityVersion`, 'must be an exact numeric version');
+  }
+  if (FORBIDDEN_IDENTITY_VALUES.has(value.topologyName.toLowerCase())) {
+    fail(`${path}.topologyName`, 'must not be unavailable');
+  }
   const members = boundedArray(value.members, `${path}.members`, (member, memberPath) => {
     object(member, memberPath, ['id', 'role']);
     identifier(member.id, `${memberPath}.id`);
@@ -220,6 +255,10 @@ function validateMongoIdentity(value, path) {
   }, { max: 128 });
   if (new Set(members.map(({ id }) => id)).size !== members.length) {
     fail(`${path}.members`, 'contains duplicate identifiers');
+  }
+  if (value.topology === 'replica_set'
+    && (!members.some(({ role }) => role === 'primary') || members.length === 0)) {
+    fail(`${path}.members`, 'must attest a replica-set primary');
   }
   return structuredClone(value);
 }
@@ -286,7 +325,9 @@ export function validateAuditCaseResult(value, path = 'caseResult') {
   identifier(value.attemptId, `${path}.attemptId`);
   enumeration(value.status, `${path}.status`, AUDIT_CASE_STATUSES);
   validateReleaseIdentity(value.release, `${path}.release`);
-  validateMongoIdentity(value.mongo, `${path}.mongo`);
+  validateMongoIdentity(value.mongo, `${path}.mongo`, {
+    allowUnavailable: value.status === 'incomplete',
+  });
   const observers = boundedArray(value.observerEvidence, `${path}.observerEvidence`,
     validateObserverEvidence, { max: 1_000 });
   if (new Set(observers.map(({ cursorId }) => cursorId)).size !== observers.length) {

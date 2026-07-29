@@ -267,9 +267,19 @@ export const RELEASE_CASE_CONTRACTS = Object.freeze(Object.fromEntries(
         : 'polling';
       fallbackFrom = capability.id === 'fallback.configured_order' ? undefined : 'changeStreams';
     }
+    const requiredOracleProducers = capability.expectation === 'fallback_required'
+      ? ['mongodb', 'ddp_client', 'meteor_probe']
+      : caseId.startsWith('recovery.')
+        ? ['mongodb', 'ddp_client', 'meteor_probe', 'fault_controller']
+        : caseId.startsWith('transport.') || caseId.startsWith('session.')
+          ? ['mongodb', 'ddp_client', 'meteor_probe']
+          : ['mongodb', 'ddp_client', 'meteor_probe'];
     return [caseId, Object.freeze({
       caseId,
       expectation: capability.expectation,
+      requiredOracleProducers: Object.freeze(requiredOracleProducers),
+      requiresObserverEvidence: true,
+      requiresTransportIdentity: caseId.startsWith('transport.') || caseId.startsWith('session.'),
       ...(capability.id === 'fallback.change_stream_unavailable'
         ? {
           expectedDriverByTopology: Object.freeze({

@@ -22,11 +22,11 @@ function release(overrides = {}) {
   return {
     requested: '3.5.1-beta.0',
     actual: '3.5.1-beta.0',
-    sourceRevision: 'METEOR@3.5.1-beta.0',
+    sourceRevision: 'release:3.5.1-beta.0',
     fixtureRelease: 'METEOR@3.5.1-beta.0',
     packageVersionsDigest: SHA,
     settingsDigest: SHA,
-    harnessRevision: 'abc123',
+    harnessRevision: 'c'.repeat(40),
     harnessDirty: false,
     executionEnvironment: 'node-24-test',
     ...overrides,
@@ -78,6 +78,25 @@ function caseResult(coordinate, attemptId = 'attempt-1') {
         passed: true,
         failures: [],
       },
+      {
+        oracleId: 'transport-identity',
+        producer: 'meteor_probe',
+        digest: contractDigest({ transport: coordinate.transport }),
+        assertions: 1,
+        passed: true,
+        failures: [],
+      },
+      ...(coordinate.faultId ? [{
+        oracleId: 'fault-witness',
+        producer: 'fault_controller',
+        digest: contractDigest({
+          activationEvidenceDigest: SHA,
+          restorationEvidenceDigest: SHA,
+        }),
+        assertions: 2,
+        passed: true,
+        failures: [],
+      }] : []),
     ],
     ...(coordinate.faultId ? {
       faultWitness: {
@@ -105,19 +124,19 @@ function controls() {
 
 function aggregationInput() {
   const matrix = resolveReleaseAuditMatrix(SCOPE);
+  const recoveryState = {
+    runDocumentsRemoved: true,
+    topologyRestored: true,
+    profilerRestored: true,
+    networkRestored: true,
+  };
   return {
     ...SCOPE,
     release: release(),
     caseResults: matrix.coordinates.map((coordinate) => caseResult(coordinate)),
     negativeControls: controls(),
     negativeControlContractDigest: NEGATIVE_CONTROL_CONTRACT_DIGEST,
-    recovery: {
-      runDocumentsRemoved: true,
-      topologyRestored: true,
-      profilerRestored: true,
-      networkRestored: true,
-      digest: SHA,
-    },
+    recovery: { ...recoveryState, digest: contractDigest(recoveryState) },
     progress: {
       firstSequence: 1,
       lastSequence: 100,
@@ -233,4 +252,30 @@ test('negative-control, recovery, and progress gates fail closed', () => {
   const invalidProgress = aggregationInput();
   invalidProgress.progress.lastSequence = 0;
   assert.throws(() => aggregateReleaseAudit(invalidProgress), /positive safe integer/);
+});
+
+test('one self-asserted oracle cannot satisfy an ordinary capability', () => {
+  const input = aggregationInput();
+  const eventInsert = input.caseResults.find(
+    ({ coordinate }) => coordinate.caseId === 'event.insert',
+  );
+  eventInsert.oracles = [eventInsert.oracles[0]];
+  const manifest = aggregateReleaseAudit(input);
+  assert.equal(manifest.status, 'incomplete');
+  assert.deepEqual(
+    manifest.capabilities.find(({ id }) => id === 'event.insert').reasons,
+    ['oracle_producer_missing:ddp_client'],
+  );
+});
+
+test('fault evidence must be linked to an independent controller oracle', () => {
+  const input = aggregationInput();
+  const recoveryCase = input.caseResults.find(({ coordinate }) => coordinate.faultId);
+  recoveryCase.oracles.find(({ producer }) => producer === 'fault_controller').digest = SHA;
+  const manifest = aggregateReleaseAudit(input);
+  assert.equal(manifest.status, 'incomplete');
+  assert.deepEqual(
+    manifest.capabilities.find(({ id }) => id === recoveryCase.coordinate.caseId).reasons,
+    ['fault_witness_oracle_mismatch'],
+  );
 });

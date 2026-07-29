@@ -155,7 +155,13 @@ export async function coordinateReleaseAudit({
         });
       }
       if (!result) {
-        continue;
+        result = incompleteCase({
+          coordinate,
+          release: releaseIdentity,
+          mongo: unavailableMongoIdentity(coordinate.topology),
+          attemptId,
+          reason: 'case_executor_returned_no_evidence',
+        });
       }
       caseResults.push(result);
       for (const nextState of [

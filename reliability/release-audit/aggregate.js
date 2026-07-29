@@ -41,6 +41,30 @@ function caseEvidenceStatus(result, contract) {
   if (result.oracles.some(({ passed }) => !passed)) {
     return { status: 'incomplete', reasons: ['case_status_oracle_mismatch'] };
   }
+  const producers = new Set(result.oracles.map(({ producer }) => producer));
+  const missingProducer = contract?.requiredOracleProducers
+    ?.find((producer) => !producers.has(producer));
+  if (missingProducer) {
+    return { status: 'incomplete', reasons: [`oracle_producer_missing:${missingProducer}`] };
+  }
+  if (contract?.requiresObserverEvidence) {
+    if (result.observerEvidence.length === 0) {
+      return { status: 'incomplete', reasons: ['observer_evidence_missing'] };
+    }
+    if (result.observerEvidence.some((evidence) => (
+      !same(evidence.requestedOrder, result.coordinate.observerOrder)
+      || (contract.expectation !== 'fallback_required'
+        && evidence.actualDriver !== result.coordinate.observerOrder[0])
+    ))) {
+      return { status: 'failed', reasons: ['observer_identity_mismatch'] };
+    }
+  }
+  if (contract?.requiresTransportIdentity
+    && !result.oracles.some(({ oracleId, producer }) => (
+      oracleId === 'transport-identity' && producer === 'meteor_probe'
+    ))) {
+    return { status: 'incomplete', reasons: ['transport_identity_missing'] };
+  }
   if (result.coordinate.faultId) {
     if (!result.faultWitness
       || result.faultWitness.faultId !== result.coordinate.faultId) {
@@ -48,6 +72,14 @@ function caseEvidenceStatus(result, contract) {
     }
     if (!result.faultWitness.restored) {
       return { status: 'incomplete', reasons: ['fault_restoration_unverified'] };
+    }
+    const faultOracle = result.oracles.find(({ producer }) => producer === 'fault_controller');
+    const expectedFaultDigest = contractDigest({
+      activationEvidenceDigest: result.faultWitness.activationEvidenceDigest,
+      restorationEvidenceDigest: result.faultWitness.restorationEvidenceDigest,
+    });
+    if (!faultOracle || faultOracle.digest !== expectedFaultDigest) {
+      return { status: 'incomplete', reasons: ['fault_witness_oracle_mismatch'] };
     }
   }
   if (contract?.expectation === 'fallback_required') {
@@ -70,7 +102,6 @@ function caseEvidenceStatus(result, contract) {
     if (!exactFallback) {
       return { status: 'failed', reasons: ['fallback_driver_mismatch'] };
     }
-    const producers = new Set(result.oracles.map(({ producer }) => producer));
     if (!producers.has('mongodb') || !producers.has('ddp_client')) {
       return { status: 'incomplete', reasons: ['fallback_content_oracle_missing'] };
     }
@@ -111,7 +142,14 @@ function negativeControlsComplete(results, suppliedDigest) {
 }
 
 function recoveryComplete(recovery) {
-  return recovery.runDocumentsRemoved
+  const evidence = {
+    runDocumentsRemoved: recovery.runDocumentsRemoved,
+    topologyRestored: recovery.topologyRestored,
+    profilerRestored: recovery.profilerRestored,
+    networkRestored: recovery.networkRestored,
+  };
+  return recovery.digest === contractDigest(evidence)
+    && recovery.runDocumentsRemoved
     && recovery.topologyRestored
     && recovery.profilerRestored
     && recovery.networkRestored;
