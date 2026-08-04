@@ -1,0 +1,2366 @@
+{
+  "schemaVersion": 1,
+  "contractId": "meteor-3.5-release-conformance-v1",
+  "reviewedAt": "2026-07-27",
+  "capabilities": [
+    {
+      "id": "observer.default_order.change_streams_first",
+      "expectation": "supported",
+      "requiredCases": [
+        "observer.default_order.change_streams_first"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://docs.meteor.com/performance/change-streams-observer-driver",
+      "rationale": "Required observer or publication semantic in the Meteor 3.5 release claim."
+    },
+    {
+      "id": "observer.explicit_order.change_streams_first",
+      "expectation": "supported",
+      "requiredCases": [
+        "observer.explicit_order.change_streams_first"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://docs.meteor.com/performance/change-streams-observer-driver",
+      "rationale": "Required observer or publication semantic in the Meteor 3.5 release claim."
+    },
+    {
+      "id": "observer.unordered_cursor.selected",
+      "expectation": "supported",
+      "requiredCases": [
+        "observer.unordered_cursor.selected"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://docs.meteor.com/performance/change-streams-observer-driver",
+      "rationale": "Required observer or publication semantic in the Meteor 3.5 release claim."
+    },
+    {
+      "id": "snapshot.empty",
+      "expectation": "supported",
+      "requiredCases": [
+        "snapshot.empty"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://docs.meteor.com/performance/change-streams-observer-driver",
+      "rationale": "Required observer or publication semantic in the Meteor 3.5 release claim."
+    },
+    {
+      "id": "snapshot.non_empty",
+      "expectation": "supported",
+      "requiredCases": [
+        "snapshot.non_empty"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://docs.meteor.com/performance/change-streams-observer-driver",
+      "rationale": "Required observer or publication semantic in the Meteor 3.5 release claim."
+    },
+    {
+      "id": "event.insert",
+      "expectation": "supported",
+      "requiredCases": [
+        "event.insert"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://docs.meteor.com/performance/change-streams-observer-driver",
+      "rationale": "Required observer or publication semantic in the Meteor 3.5 release claim."
+    },
+    {
+      "id": "event.update.set",
+      "expectation": "supported",
+      "requiredCases": [
+        "event.update.set"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://docs.meteor.com/performance/change-streams-observer-driver",
+      "rationale": "Required observer or publication semantic in the Meteor 3.5 release claim."
+    },
+    {
+      "id": "event.update.unset",
+      "expectation": "supported",
+      "requiredCases": [
+        "event.update.unset"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://docs.meteor.com/performance/change-streams-observer-driver",
+      "rationale": "Required observer or publication semantic in the Meteor 3.5 release claim."
+    },
+    {
+      "id": "event.update.increment",
+      "expectation": "supported",
+      "requiredCases": [
+        "event.update.increment"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://docs.meteor.com/performance/change-streams-observer-driver",
+      "rationale": "Required observer or publication semantic in the Meteor 3.5 release claim."
+    },
+    {
+      "id": "event.update.array",
+      "expectation": "supported",
+      "requiredCases": [
+        "event.update.array"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://docs.meteor.com/performance/change-streams-observer-driver",
+      "rationale": "Required observer or publication semantic in the Meteor 3.5 release claim."
+    },
+    {
+      "id": "event.replace",
+      "expectation": "supported",
+      "requiredCases": [
+        "event.replace"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://docs.meteor.com/performance/change-streams-observer-driver",
+      "rationale": "Required observer or publication semantic in the Meteor 3.5 release claim."
+    },
+    {
+      "id": "event.delete",
+      "expectation": "supported",
+      "requiredCases": [
+        "event.delete"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://docs.meteor.com/performance/change-streams-observer-driver",
+      "rationale": "Required observer or publication semantic in the Meteor 3.5 release claim."
+    },
+    {
+      "id": "selector.remains_matching",
+      "expectation": "supported",
+      "requiredCases": [
+        "selector.remains_matching"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://docs.meteor.com/performance/change-streams-observer-driver",
+      "rationale": "Required observer or publication semantic in the Meteor 3.5 release claim."
+    },
+    {
+      "id": "selector.enters_result",
+      "expectation": "supported",
+      "requiredCases": [
+        "selector.enters_result"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://docs.meteor.com/performance/change-streams-observer-driver",
+      "rationale": "Required observer or publication semantic in the Meteor 3.5 release claim."
+    },
+    {
+      "id": "selector.leaves_result",
+      "expectation": "supported",
+      "requiredCases": [
+        "selector.leaves_result"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://docs.meteor.com/performance/change-streams-observer-driver",
+      "rationale": "Required observer or publication semantic in the Meteor 3.5 release claim."
+    },
+    {
+      "id": "selector.irrelevant_update_suppressed",
+      "expectation": "supported",
+      "requiredCases": [
+        "selector.irrelevant_update_suppressed"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://docs.meteor.com/performance/change-streams-observer-driver",
+      "rationale": "Required observer or publication semantic in the Meteor 3.5 release claim."
+    },
+    {
+      "id": "projection.field_added",
+      "expectation": "supported",
+      "requiredCases": [
+        "projection.field_added"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://docs.meteor.com/performance/change-streams-observer-driver",
+      "rationale": "Required observer or publication semantic in the Meteor 3.5 release claim."
+    },
+    {
+      "id": "projection.field_changed",
+      "expectation": "supported",
+      "requiredCases": [
+        "projection.field_changed"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://docs.meteor.com/performance/change-streams-observer-driver",
+      "rationale": "Required observer or publication semantic in the Meteor 3.5 release claim."
+    },
+    {
+      "id": "projection.field_removed",
+      "expectation": "supported",
+      "requiredCases": [
+        "projection.field_removed"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://docs.meteor.com/performance/change-streams-observer-driver",
+      "rationale": "Required observer or publication semantic in the Meteor 3.5 release claim."
+    },
+    {
+      "id": "projection.nested_field_changed",
+      "expectation": "supported",
+      "requiredCases": [
+        "projection.nested_field_changed"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://docs.meteor.com/performance/change-streams-observer-driver",
+      "rationale": "Required observer or publication semantic in the Meteor 3.5 release claim."
+    },
+    {
+      "id": "projection.object_id_preserved",
+      "expectation": "supported",
+      "requiredCases": [
+        "projection.object_id_preserved"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://docs.meteor.com/performance/change-streams-observer-driver",
+      "rationale": "Required observer or publication semantic in the Meteor 3.5 release claim."
+    },
+    {
+      "id": "publication.multiple_projections_merge",
+      "expectation": "supported",
+      "requiredCases": [
+        "publication.multiple_projections_merge"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://docs.meteor.com/performance/change-streams-observer-driver",
+      "rationale": "Required observer or publication semantic in the Meteor 3.5 release claim."
+    },
+    {
+      "id": "observer.identical_queries_share_multiplexer",
+      "expectation": "supported",
+      "requiredCases": [
+        "observer.identical_queries_share_multiplexer"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://docs.meteor.com/performance/change-streams-observer-driver",
+      "rationale": "Required observer or publication semantic in the Meteor 3.5 release claim."
+    },
+    {
+      "id": "observer.distinct_queries_isolated",
+      "expectation": "supported",
+      "requiredCases": [
+        "observer.distinct_queries_isolated"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://docs.meteor.com/performance/change-streams-observer-driver",
+      "rationale": "Required observer or publication semantic in the Meteor 3.5 release claim."
+    },
+    {
+      "id": "observer.stop_releases_handle",
+      "expectation": "supported",
+      "requiredCases": [
+        "observer.stop_releases_handle"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://docs.meteor.com/performance/change-streams-observer-driver",
+      "rationale": "Required observer or publication semantic in the Meteor 3.5 release claim."
+    },
+    {
+      "id": "publication.ready_snapshot_consistent",
+      "expectation": "supported",
+      "requiredCases": [
+        "publication.ready_snapshot_consistent"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://docs.meteor.com/performance/change-streams-observer-driver",
+      "rationale": "Required observer or publication semantic in the Meteor 3.5 release claim."
+    },
+    {
+      "id": "write_fence.normal_read_your_writes",
+      "expectation": "supported",
+      "requiredCases": [
+        "write_fence.normal_read_your_writes"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://docs.meteor.com/performance/change-streams-observer-driver",
+      "rationale": "Required observer or publication semantic in the Meteor 3.5 release claim."
+    },
+    {
+      "id": "write_fence.catchup_timeout_eventual_convergence",
+      "expectation": "supported",
+      "requiredCases": [
+        "write_fence.catchup_timeout_eventual_convergence"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://docs.meteor.com/performance/change-streams-observer-driver",
+      "rationale": "Required observer or publication semantic in the Meteor 3.5 release claim."
+    },
+    {
+      "id": "fallback.ordered_observer",
+      "expectation": "fallback_required",
+      "requiredCases": [
+        "fallback.ordered_observer"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://docs.meteor.com/performance/change-streams-observer-driver",
+      "rationale": "Ordered observers must select polling and preserve content integrity."
+    },
+    {
+      "id": "fallback.skip",
+      "expectation": "fallback_required",
+      "requiredCases": [
+        "fallback.skip"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://docs.meteor.com/performance/change-streams-observer-driver",
+      "rationale": "The skip query shape must select polling and preserve content integrity."
+    },
+    {
+      "id": "fallback.limit",
+      "expectation": "fallback_required",
+      "requiredCases": [
+        "fallback.limit"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://docs.meteor.com/performance/change-streams-observer-driver",
+      "rationale": "The limit query shape must select polling and preserve content integrity."
+    },
+    {
+      "id": "fallback.unsupported_selector",
+      "expectation": "fallback_required",
+      "requiredCases": [
+        "fallback.unsupported_selector"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://docs.meteor.com/performance/change-streams-observer-driver",
+      "rationale": "The unsupported_selector query shape must select polling and preserve content integrity."
+    },
+    {
+      "id": "fallback.change_stream_unavailable",
+      "expectation": "fallback_required",
+      "requiredCases": [
+        "fallback.change_stream_unavailable"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        },
+        {
+          "topologies": [
+            "standalone"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://docs.meteor.com/performance/change-streams-observer-driver",
+      "rationale": "Unavailable Change Streams select oplog on a replica set and polling on standalone."
+    },
+    {
+      "id": "fallback.configured_order",
+      "expectation": "fallback_required",
+      "requiredCases": [
+        "fallback.configured_order"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "oplog",
+              "changeStreams",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://docs.meteor.com/performance/change-streams-observer-driver",
+      "rationale": "The selected driver must honor the exact configured preference order."
+    },
+    {
+      "id": "data.ascii_and_empty_strings",
+      "expectation": "supported",
+      "requiredCases": [
+        "data.ascii_and_empty_strings"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "specs/2026-07-27-meteor-3.5-reliability-conformance-audit.md",
+      "rationale": "Required deterministic BSON/EJSON integrity case."
+    },
+    {
+      "id": "data.unicode_composed_decomposed",
+      "expectation": "supported",
+      "requiredCases": [
+        "data.unicode_composed_decomposed"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "specs/2026-07-27-meteor-3.5-reliability-conformance-audit.md",
+      "rationale": "Required deterministic BSON/EJSON integrity case."
+    },
+    {
+      "id": "data.right_to_left_text",
+      "expectation": "supported",
+      "requiredCases": [
+        "data.right_to_left_text"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "specs/2026-07-27-meteor-3.5-reliability-conformance-audit.md",
+      "rationale": "Required deterministic BSON/EJSON integrity case."
+    },
+    {
+      "id": "data.emoji_surrogate_boundaries",
+      "expectation": "supported",
+      "requiredCases": [
+        "data.emoji_surrogate_boundaries"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "specs/2026-07-27-meteor-3.5-reliability-conformance-audit.md",
+      "rationale": "Required deterministic BSON/EJSON integrity case."
+    },
+    {
+      "id": "data.ejson_scalars",
+      "expectation": "supported",
+      "requiredCases": [
+        "data.ejson_scalars"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "specs/2026-07-27-meteor-3.5-reliability-conformance-audit.md",
+      "rationale": "Required deterministic BSON/EJSON integrity case."
+    },
+    {
+      "id": "data.dates",
+      "expectation": "supported",
+      "requiredCases": [
+        "data.dates"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "specs/2026-07-27-meteor-3.5-reliability-conformance-audit.md",
+      "rationale": "Required deterministic BSON/EJSON integrity case."
+    },
+    {
+      "id": "data.object_ids",
+      "expectation": "supported",
+      "requiredCases": [
+        "data.object_ids"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "specs/2026-07-27-meteor-3.5-reliability-conformance-audit.md",
+      "rationale": "Required deterministic BSON/EJSON integrity case."
+    },
+    {
+      "id": "data.binary",
+      "expectation": "supported",
+      "requiredCases": [
+        "data.binary"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "specs/2026-07-27-meteor-3.5-reliability-conformance-audit.md",
+      "rationale": "Required deterministic BSON/EJSON integrity case."
+    },
+    {
+      "id": "data.object_shapes",
+      "expectation": "supported",
+      "requiredCases": [
+        "data.object_shapes"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "specs/2026-07-27-meteor-3.5-reliability-conformance-audit.md",
+      "rationale": "Required deterministic BSON/EJSON integrity case."
+    },
+    {
+      "id": "data.array_shapes",
+      "expectation": "supported",
+      "requiredCases": [
+        "data.array_shapes"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "specs/2026-07-27-meteor-3.5-reliability-conformance-audit.md",
+      "rationale": "Required deterministic BSON/EJSON integrity case."
+    },
+    {
+      "id": "data.compressible_payload",
+      "expectation": "supported",
+      "requiredCases": [
+        "data.compressible_payload"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "specs/2026-07-27-meteor-3.5-reliability-conformance-audit.md",
+      "rationale": "Required deterministic BSON/EJSON integrity case."
+    },
+    {
+      "id": "data.seeded_incompressible_payload",
+      "expectation": "supported",
+      "requiredCases": [
+        "data.seeded_incompressible_payload"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "specs/2026-07-27-meteor-3.5-reliability-conformance-audit.md",
+      "rationale": "Required deterministic BSON/EJSON integrity case."
+    },
+    {
+      "id": "data.near_bson_ceiling",
+      "expectation": "supported",
+      "requiredCases": [
+        "data.near_bson_ceiling"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "specs/2026-07-27-meteor-3.5-reliability-conformance-audit.md",
+      "rationale": "Required deterministic BSON/EJSON integrity case."
+    },
+    {
+      "id": "data.field_removal_no_stale_residue",
+      "expectation": "supported",
+      "requiredCases": [
+        "data.field_removal_no_stale_residue"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "specs/2026-07-27-meteor-3.5-reliability-conformance-audit.md",
+      "rationale": "Required deterministic BSON/EJSON integrity case."
+    },
+    {
+      "id": "data.replacement_no_stale_residue",
+      "expectation": "supported",
+      "requiredCases": [
+        "data.replacement_no_stale_residue"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "specs/2026-07-27-meteor-3.5-reliability-conformance-audit.md",
+      "rationale": "Required deterministic BSON/EJSON integrity case."
+    },
+    {
+      "id": "data.concurrent_distinct_fields",
+      "expectation": "supported",
+      "requiredCases": [
+        "data.concurrent_distinct_fields"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "specs/2026-07-27-meteor-3.5-reliability-conformance-audit.md",
+      "rationale": "Required deterministic BSON/EJSON integrity case."
+    },
+    {
+      "id": "data.hot_key",
+      "expectation": "supported",
+      "requiredCases": [
+        "data.hot_key"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "specs/2026-07-27-meteor-3.5-reliability-conformance-audit.md",
+      "rationale": "Required deterministic BSON/EJSON integrity case."
+    },
+    {
+      "id": "data.identical_projected_state",
+      "expectation": "supported",
+      "requiredCases": [
+        "data.identical_projected_state"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "specs/2026-07-27-meteor-3.5-reliability-conformance-audit.md",
+      "rationale": "Required deterministic BSON/EJSON integrity case."
+    },
+    {
+      "id": "transport.connection_negotiation",
+      "expectation": "supported",
+      "requiredCases": [
+        "transport.connection_negotiation"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs",
+            "uws"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://docs.meteor.com/cli/environment-variables#ddp-transport",
+      "rationale": "Required transport-integrity behavior over every claimed DDP transport."
+    },
+    {
+      "id": "transport.publication_readiness",
+      "expectation": "supported",
+      "requiredCases": [
+        "transport.publication_readiness"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs",
+            "uws"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://docs.meteor.com/cli/environment-variables#ddp-transport",
+      "rationale": "Required transport-integrity behavior over every claimed DDP transport."
+    },
+    {
+      "id": "transport.event_delivery",
+      "expectation": "supported",
+      "requiredCases": [
+        "transport.event_delivery"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs",
+            "uws"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://docs.meteor.com/cli/environment-variables#ddp-transport",
+      "rationale": "Required transport-integrity behavior over every claimed DDP transport."
+    },
+    {
+      "id": "transport.frame_message_byte_evidence",
+      "expectation": "supported",
+      "requiredCases": [
+        "transport.frame_message_byte_evidence"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs",
+            "uws"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://docs.meteor.com/cli/environment-variables#ddp-transport",
+      "rationale": "Required transport-integrity behavior over every claimed DDP transport."
+    },
+    {
+      "id": "transport.ejson_round_trip",
+      "expectation": "supported",
+      "requiredCases": [
+        "transport.ejson_round_trip"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs",
+            "uws"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://docs.meteor.com/cli/environment-variables#ddp-transport",
+      "rationale": "Required transport-integrity behavior over every claimed DDP transport."
+    },
+    {
+      "id": "transport.payload_512_kib",
+      "expectation": "supported",
+      "requiredCases": [
+        "transport.payload_512_kib"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs",
+            "uws"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://docs.meteor.com/cli/environment-variables#ddp-transport",
+      "rationale": "Required transport-integrity behavior over every claimed DDP transport."
+    },
+    {
+      "id": "transport.payload_near_ceiling",
+      "expectation": "supported",
+      "requiredCases": [
+        "transport.payload_near_ceiling"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs",
+            "uws"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://docs.meteor.com/cli/environment-variables#ddp-transport",
+      "rationale": "Required transport-integrity behavior over every claimed DDP transport."
+    },
+    {
+      "id": "transport.raw_socket_fragmentation",
+      "expectation": "supported",
+      "requiredCases": [
+        "transport.raw_socket_fragmentation"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs",
+            "uws"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://docs.meteor.com/cli/environment-variables#ddp-transport",
+      "rationale": "Required transport-integrity behavior over every claimed DDP transport."
+    },
+    {
+      "id": "transport.slow_consumer_convergence",
+      "expectation": "supported",
+      "requiredCases": [
+        "transport.slow_consumer_convergence"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs",
+            "uws"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://docs.meteor.com/cli/environment-variables#ddp-transport",
+      "rationale": "Required transport-integrity behavior over every claimed DDP transport."
+    },
+    {
+      "id": "transport.abrupt_socket_loss",
+      "expectation": "supported",
+      "requiredCases": [
+        "transport.abrupt_socket_loss"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs",
+            "uws"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://docs.meteor.com/cli/environment-variables#ddp-transport",
+      "rationale": "Required transport-integrity behavior over every claimed DDP transport."
+    },
+    {
+      "id": "transport.concurrent_subscriber_fanout",
+      "expectation": "supported",
+      "requiredCases": [
+        "transport.concurrent_subscriber_fanout"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs",
+            "uws"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://docs.meteor.com/cli/environment-variables#ddp-transport",
+      "rationale": "Required transport-integrity behavior over every claimed DDP transport."
+    },
+    {
+      "id": "transport.bounded_reconnect_storm",
+      "expectation": "supported",
+      "requiredCases": [
+        "transport.bounded_reconnect_storm"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs",
+            "uws"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://docs.meteor.com/cli/environment-variables#ddp-transport",
+      "rationale": "Required transport-integrity behavior over every claimed DDP transport."
+    },
+    {
+      "id": "transport.clean_client_shutdown",
+      "expectation": "supported",
+      "requiredCases": [
+        "transport.clean_client_shutdown"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs",
+            "uws"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://docs.meteor.com/cli/environment-variables#ddp-transport",
+      "rationale": "Required transport-integrity behavior over every claimed DDP transport."
+    },
+    {
+      "id": "transport.clean_server_shutdown",
+      "expectation": "supported",
+      "requiredCases": [
+        "transport.clean_server_shutdown"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs",
+            "uws"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://docs.meteor.com/cli/environment-variables#ddp-transport",
+      "rationale": "Required transport-integrity behavior over every claimed DDP transport."
+    },
+    {
+      "id": "session.resume.within_grace_period",
+      "expectation": "supported",
+      "requiredCases": [
+        "session.resume.within_grace_period"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs",
+            "uws"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://docs.meteor.com/api/meteor.html#reconnection",
+      "rationale": "Required DDP session-resumption or fresh-session recovery behavior."
+    },
+    {
+      "id": "session.resume.subscription_preserved",
+      "expectation": "supported",
+      "requiredCases": [
+        "session.resume.subscription_preserved"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs",
+            "uws"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://docs.meteor.com/api/meteor.html#reconnection",
+      "rationale": "Required DDP session-resumption or fresh-session recovery behavior."
+    },
+    {
+      "id": "session.resume.inflight_method_replayed",
+      "expectation": "supported",
+      "requiredCases": [
+        "session.resume.inflight_method_replayed"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs",
+            "uws"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://docs.meteor.com/api/meteor.html#reconnection",
+      "rationale": "Required DDP session-resumption or fresh-session recovery behavior."
+    },
+    {
+      "id": "session.resume.auth_context_preserved",
+      "expectation": "supported",
+      "requiredCases": [
+        "session.resume.auth_context_preserved"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs",
+            "uws"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://docs.meteor.com/api/meteor.html#reconnection",
+      "rationale": "Required DDP session-resumption or fresh-session recovery behavior."
+    },
+    {
+      "id": "session.resume.grace_expired",
+      "expectation": "supported",
+      "requiredCases": [
+        "session.resume.grace_expired"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs",
+            "uws"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://docs.meteor.com/api/meteor.html#reconnection",
+      "rationale": "Required DDP session-resumption or fresh-session recovery behavior."
+    },
+    {
+      "id": "session.resume.queue_boundary",
+      "expectation": "supported",
+      "requiredCases": [
+        "session.resume.queue_boundary"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs",
+            "uws"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://docs.meteor.com/api/meteor.html#reconnection",
+      "rationale": "Required DDP session-resumption or fresh-session recovery behavior."
+    },
+    {
+      "id": "session.resume.hot_code_push",
+      "expectation": "supported",
+      "requiredCases": [
+        "session.resume.hot_code_push"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs",
+            "uws"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://docs.meteor.com/api/meteor.html#reconnection",
+      "rationale": "Required DDP session-resumption or fresh-session recovery behavior."
+    },
+    {
+      "id": "session.resume.sticky_instance",
+      "expectation": "supported",
+      "requiredCases": [
+        "session.resume.sticky_instance"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs",
+            "uws"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://docs.meteor.com/api/meteor.html#reconnection",
+      "rationale": "Required DDP session-resumption or fresh-session recovery behavior."
+    },
+    {
+      "id": "session.resume.non_sticky_instance",
+      "expectation": "supported",
+      "requiredCases": [
+        "session.resume.non_sticky_instance"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs",
+            "uws"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://docs.meteor.com/api/meteor.html#reconnection",
+      "rationale": "Required DDP session-resumption or fresh-session recovery behavior."
+    },
+    {
+      "id": "session.resume.concurrent_storm",
+      "expectation": "supported",
+      "requiredCases": [
+        "session.resume.concurrent_storm"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs",
+            "uws"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://docs.meteor.com/api/meteor.html#reconnection",
+      "rationale": "Required DDP session-resumption or fresh-session recovery behavior."
+    },
+    {
+      "id": "recovery.change_stream_unexpected_close",
+      "expectation": "supported",
+      "requiredCases": [
+        "recovery.change_stream_unexpected_close"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://www.mongodb.com/docs/manual/administration/change-streams-production-recommendations/",
+      "rationale": "Required witnessed Change Stream or topology recovery behavior."
+    },
+    {
+      "id": "recovery.change_stream_recoverable_error",
+      "expectation": "supported",
+      "requiredCases": [
+        "recovery.change_stream_recoverable_error"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://www.mongodb.com/docs/manual/administration/change-streams-production-recommendations/",
+      "rationale": "Required witnessed Change Stream or topology recovery behavior."
+    },
+    {
+      "id": "recovery.change_stream_repeated_restart",
+      "expectation": "supported",
+      "requiredCases": [
+        "recovery.change_stream_repeated_restart"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://www.mongodb.com/docs/manual/administration/change-streams-production-recommendations/",
+      "rationale": "Required witnessed Change Stream or topology recovery behavior."
+    },
+    {
+      "id": "recovery.mongodb_primary_step_down",
+      "expectation": "supported",
+      "requiredCases": [
+        "recovery.mongodb_primary_step_down"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://www.mongodb.com/docs/manual/administration/change-streams-production-recommendations/",
+      "rationale": "Required witnessed Change Stream or topology recovery behavior."
+    },
+    {
+      "id": "recovery.replica_set_election",
+      "expectation": "supported",
+      "requiredCases": [
+        "recovery.replica_set_election"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://www.mongodb.com/docs/manual/administration/change-streams-production-recommendations/",
+      "rationale": "Required witnessed Change Stream or topology recovery behavior."
+    },
+    {
+      "id": "recovery.temporary_meteor_mongo_interruption",
+      "expectation": "supported",
+      "requiredCases": [
+        "recovery.temporary_meteor_mongo_interruption"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://www.mongodb.com/docs/manual/administration/change-streams-production-recommendations/",
+      "rationale": "Required witnessed Change Stream or topology recovery behavior."
+    },
+    {
+      "id": "recovery.writes_continue",
+      "expectation": "supported",
+      "requiredCases": [
+        "recovery.writes_continue"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://www.mongodb.com/docs/manual/administration/change-streams-production-recommendations/",
+      "rationale": "Required witnessed Change Stream or topology recovery behavior."
+    },
+    {
+      "id": "recovery.ddp_client_disconnected",
+      "expectation": "supported",
+      "requiredCases": [
+        "recovery.ddp_client_disconnected"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://www.mongodb.com/docs/manual/administration/change-streams-production-recommendations/",
+      "rationale": "Required witnessed Change Stream or topology recovery behavior."
+    },
+    {
+      "id": "recovery.startup_snapshot_concurrent_writes",
+      "expectation": "supported",
+      "requiredCases": [
+        "recovery.startup_snapshot_concurrent_writes"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://www.mongodb.com/docs/manual/administration/change-streams-production-recommendations/",
+      "rationale": "Required witnessed Change Stream or topology recovery behavior."
+    },
+    {
+      "id": "recovery.watch_setup_concurrent_writes",
+      "expectation": "supported",
+      "requiredCases": [
+        "recovery.watch_setup_concurrent_writes"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://www.mongodb.com/docs/manual/administration/change-streams-production-recommendations/",
+      "rationale": "Required witnessed Change Stream or topology recovery behavior."
+    },
+    {
+      "id": "recovery.stream_restart_concurrent_writes",
+      "expectation": "supported",
+      "requiredCases": [
+        "recovery.stream_restart_concurrent_writes"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://www.mongodb.com/docs/manual/administration/change-streams-production-recommendations/",
+      "rationale": "Required witnessed Change Stream or topology recovery behavior."
+    },
+    {
+      "id": "recovery.catchup_timeout_eventual_convergence",
+      "expectation": "supported",
+      "requiredCases": [
+        "recovery.catchup_timeout_eventual_convergence"
+      ],
+      "applicability": [
+        {
+          "topologies": [
+            "replica_set"
+          ],
+          "transports": [
+            "sockjs"
+          ],
+          "observerOrders": [
+            [
+              "changeStreams",
+              "oplog",
+              "polling"
+            ]
+          ]
+        }
+      ],
+      "source": "https://www.mongodb.com/docs/manual/administration/change-streams-production-recommendations/",
+      "rationale": "Required witnessed Change Stream or topology recovery behavior."
+    },
+    {
+      "id": "mongodb.collection_rename_drop_invalidate",
+      "expectation": "out_of_scope",
+      "requiredCases": [],
+      "applicability": [],
+      "source": "specs/2026-07-27-meteor-3.5-reliability-conformance-audit.md",
+      "rationale": "Collection lifecycle and invalidate events are outside the declared Meteor publication surface."
+    },
+    {
+      "id": "mongodb.database_drop",
+      "expectation": "out_of_scope",
+      "requiredCases": [],
+      "applicability": [],
+      "source": "specs/2026-07-27-meteor-3.5-reliability-conformance-audit.md",
+      "rationale": "Database-drop behavior is outside the declared Meteor publication surface."
+    },
+    {
+      "id": "mongodb.expanded_events",
+      "expectation": "out_of_scope",
+      "requiredCases": [],
+      "applicability": [],
+      "source": "specs/2026-07-27-meteor-3.5-reliability-conformance-audit.md",
+      "rationale": "Expanded Change Stream events are not exposed by the declared Meteor publication surface."
+    },
+    {
+      "id": "mongodb.change_stream_pre_images",
+      "expectation": "out_of_scope",
+      "requiredCases": [],
+      "applicability": [],
+      "source": "specs/2026-07-27-meteor-3.5-reliability-conformance-audit.md",
+      "rationale": "Change Stream pre-images are not exposed by the declared Meteor publication surface."
+    }
+  ]
+}

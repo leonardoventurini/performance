@@ -1,0 +1,131 @@
+{
+  "schemaVersion": 1,
+  "controls": [
+    {
+      "schemaVersion": 1,
+      "id": "ddp_changed_event_dropped",
+      "targetOracleFamily": "event_present",
+      "mutation": {
+        "kind": "drop_event"
+      },
+      "expectedReason": "ddp_event_missing"
+    },
+    {
+      "schemaVersion": 1,
+      "id": "logical_event_duplicated",
+      "targetOracleFamily": "event_present",
+      "mutation": {
+        "kind": "duplicate_event"
+      },
+      "expectedReason": "logical_event_duplicate"
+    },
+    {
+      "schemaVersion": 1,
+      "id": "revision_reordered",
+      "targetOracleFamily": "revision_monotonic",
+      "mutation": {
+        "kind": "reorder_revision"
+      },
+      "expectedReason": "revision_not_monotonic"
+    },
+    {
+      "schemaVersion": 1,
+      "id": "payload_byte_altered",
+      "targetOracleFamily": "snapshot_exact",
+      "mutation": {
+        "kind": "alter_payload_byte"
+      },
+      "expectedReason": "content_digest_mismatch"
+    },
+    {
+      "schemaVersion": 1,
+      "id": "removed_field_retained",
+      "targetOracleFamily": "field_absent",
+      "mutation": {
+        "kind": "retain_removed_field"
+      },
+      "expectedReason": "stale_field_retained"
+    },
+    {
+      "schemaVersion": 1,
+      "id": "configured_observer_substituted",
+      "targetOracleFamily": "observer_identity",
+      "mutation": {
+        "kind": "substitute_observer"
+      },
+      "expectedReason": "observer_identity_mismatch"
+    },
+    {
+      "schemaVersion": 1,
+      "id": "fallback_record_suppressed",
+      "targetOracleFamily": "fallback_identity",
+      "mutation": {
+        "kind": "suppress_fallback_record"
+      },
+      "expectedReason": "fallback_evidence_missing"
+    },
+    {
+      "schemaVersion": 1,
+      "id": "new_session_claimed_resumed",
+      "targetOracleFamily": "session_identity",
+      "mutation": {
+        "kind": "substitute_session"
+      },
+      "expectedReason": "session_identity_mismatch"
+    },
+    {
+      "schemaVersion": 1,
+      "id": "idempotent_effect_duplicated",
+      "targetOracleFamily": "snapshot_exact",
+      "mutation": {
+        "kind": "duplicate_idempotent_effect"
+      },
+      "expectedReason": "idempotency_violation"
+    },
+    {
+      "schemaVersion": 1,
+      "id": "fault_witness_omitted",
+      "targetOracleFamily": "fault_witness",
+      "mutation": {
+        "kind": "omit_fault_witness"
+      },
+      "expectedReason": "fault_witness_missing"
+    },
+    {
+      "schemaVersion": 1,
+      "id": "release_identity_omitted",
+      "targetOracleFamily": "release_identity",
+      "mutation": {
+        "kind": "omit_release_identity"
+      },
+      "expectedReason": "release_identity_missing"
+    },
+    {
+      "schemaVersion": 1,
+      "id": "nonzero_process_passing_json",
+      "targetOracleFamily": "workload_process",
+      "mutation": {
+        "kind": "set_workload_exit_nonzero"
+      },
+      "expectedReason": "workload_process_failed"
+    },
+    {
+      "schemaVersion": 1,
+      "id": "required_case_removed",
+      "targetOracleFamily": "required_coordinate",
+      "mutation": {
+        "kind": "remove_required_case"
+      },
+      "expectedReason": "required_coordinate_missing"
+    },
+    {
+      "schemaVersion": 1,
+      "id": "restoration_failed",
+      "targetOracleFamily": "cleanup_complete",
+      "mutation": {
+        "kind": "fail_restoration"
+      },
+      "expectedReason": "recovery_incomplete"
+    }
+  ]
+}

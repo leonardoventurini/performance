@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "id": "meteor-3.5-release-conformance-v1",
+  "reviewedAt": "2026-07-27",
+  "primitiveCatalogVersion": "change-stream-primitives-v1",
+  "oracleCatalogVersion": "change-stream-oracles-v1",
+  "interpreterVersion": "change-stream-interpreter-v1",
+  "files": {
+    "profiles": "profiles.json",
+    "capabilities": "capabilities.json",
+    "cases": "cases/*.json",
+    "negativeControls": "negative-controls.json"
+  },
+  "safetyBounds": {
+    "maximumCatalogFiles": 128,
+    "maximumCases": 128,
+    "maximumStepsPerCase": 24,
+    "maximumDocuments": 120,
+    "maximumSubscribers": 12,
+    "maximumPayloadBytes": 15728640,
+    "maximumEvidenceEntries": 10000,
+    "maximumStepTimeoutMs": 30000,
+    "maximumCaseTimeoutMs": 180000,
+    "maximumRetries": 1,
+    "maximumJsonDepth": 32,
+    "maximumFileBytes": 131072
+  },
+  "allowedCollections": [
+    "reliabilityDocuments"
+  ],
+  "allowedPublications": [
+    "reliability.documents"
+  ]
+}

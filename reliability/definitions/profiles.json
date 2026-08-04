@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "profiles": [
+    {
+      "id": "smoke",
+      "title": "Bounded release smoke audit",
+      "parameters": {
+        "subscribers": 3,
+        "documents": 12,
+        "mutations": 4,
+        "payloadBytes": 65536,
+        "burstSize": 8,
+        "timeoutMs": 30000,
+        "seed": 1729
+      }
+    },
+    {
+      "id": "extreme",
+      "title": "Bounded release stress audit",
+      "parameters": {
+        "subscribers": 12,
+        "documents": 120,
+        "mutations": 12,
+        "payloadBytes": 524288,
+        "burstSize": 120,
+        "timeoutMs": 30000,
+        "seed": 65537
+      }
+    }
+  ]
+}
