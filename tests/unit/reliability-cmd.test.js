@@ -1,13 +1,14 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildAuditRunValues } from '../../cli/audit.js';
+import { buildAuditRunValues, runAudit } from '../../cli/audit.js';
 
 describe('reliability command', () => {
   test('defaults to the bounded change-stream smoke profile', () => {
     assert.deepEqual(buildAuditRunValues({}), {
-      scenario: 'change-stream-audit-smoke',
-      env: ['METEOR_REACTIVITY_ORDER=changeStreams'],
-      scriptArgs: ['--observer-driver', 'changeStreams'],
+      profile: 'smoke',
+      observerDriver: 'changeStreams',
+      observerOrder: ['changeStreams', 'oplog', 'polling'],
+      seed: 42,
     });
   });
 
@@ -19,19 +20,75 @@ describe('reliability command', () => {
       env: ['MONGO_OPLOG_URL=mongodb://localhost:3001/local'],
       'allow-remote-mongo': true,
     });
-    assert.equal(values.scenario, 'change-stream-audit-extreme');
-    assert.deepEqual(values.env, [
-      'MONGO_OPLOG_URL=mongodb://localhost:3001/local',
-      'METEOR_REACTIVITY_ORDER=oplog',
-    ]);
-    assert.deepEqual(values.scriptArgs, [
-      '--observer-driver', 'oplog',
-      '--seed', '73', '--allow-remote-mongo',
-    ]);
+    assert.equal(values.profile, 'extreme');
+    assert.equal(values.observerDriver, 'oplog');
+    assert.deepEqual(values.observerOrder, ['oplog', 'changeStreams', 'polling']);
+    assert.equal(values.seed, 73);
+    assert.deepEqual(values.env, ['MONGO_OPLOG_URL=mongodb://localhost:3001/local']);
+    assert.equal(values['allow-remote-mongo'], true);
   });
 
   test('rejects unknown profiles and observer drivers', () => {
     assert.throws(() => buildAuditRunValues({ profile: 'huge' }), /Unknown audit profile/);
     assert.throws(() => buildAuditRunValues({ 'observer-driver': 'polling' }), /Unknown observer driver/);
   });
+});
+
+test('audit compiles catalog cases and persists the canonical result envelope', async () => {
+  const written = [];
+  const definition = {
+    id: 'event.insert',
+    applicability: [{
+      topologies: ['replica_set'],
+      transports: ['sockjs'],
+      observerOrders: [['changeStreams', 'oplog', 'polling']],
+    }],
+    steps: [],
+  };
+  const catalog = {
+    contract: { id: 'contract-v1' },
+    digest: 'a'.repeat(64),
+    cases: [definition],
+    casesById: new Map([[definition.id, definition]]),
+  };
+  const executeCase = async ({ coordinate, attemptId }) => ({
+    coordinate,
+    attemptId,
+    status: 'passed',
+    reasons: [],
+  });
+  executeCase.finalize = async () => ({
+    negativeControls: [{
+      controlId: 'control-1', expectedReason: 'detected', actualReason: 'detected',
+      detected: true, evidenceDigest: 'b'.repeat(64),
+    }],
+    recovery: {
+      runDocumentsRemoved: true, topologyRestored: true,
+      profilerRestored: true, networkRestored: true, digest: 'c'.repeat(64),
+    },
+  });
+  const result = await runAudit({
+    values: { output: 'result.json', tag: 'test-audit' },
+    config: {
+      apps: { 'tasks-3.x': { path: '/fixture' } },
+      results: { dir: 'results', history: 'history' },
+    },
+    dependencies: {
+      resolveMeteorSource: () => ({ version: '3.5.1-beta.0', sha: 'release:3.5.1-beta.0' }),
+      loadCatalog: () => catalog,
+      attestReleaseIdentity: () => ({
+        requested: '3.5.1-beta.0', actual: '3.5.1-beta.0', harnessDirty: false,
+      }),
+      createExecutor: () => executeCase,
+      writeResult: (value, output) => written.push({ kind: 'result', value, output }),
+      appendToHistory: (value, output) => written.push({ kind: 'history', value, output }),
+    },
+  });
+  assert.equal(result.metrics.change_stream_audit.status, 'passed');
+  assert.equal(result.metrics.change_stream_audit.executed_cases, 1);
+  assert.equal(result.scenario, 'change-stream-audit-smoke');
+  assert.deepEqual(written.map(({ kind, output }) => ({ kind, output })), [
+    { kind: 'result', output: 'result.json' },
+    { kind: 'history', output: 'history' },
+  ]);
 });

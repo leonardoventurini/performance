@@ -40,11 +40,6 @@ import {
   stopCollectors,
 } from '../runner/collectors.js';
 import { buildResult } from '../reporters/json-reporter.js';
-import {
-  createIncompleteAuditMetric,
-  finalizeAuditEvidence,
-  resolveAuditMongoTarget,
-} from '../reliability/audit-evidence.js';
 
 const HERE = import.meta.dirname;
 const SCRIPT_TIMEOUT_MS = 300_000;
@@ -54,14 +49,7 @@ export async function runScriptDriver({ scenario, scenarioName, app, appName, so
   const configuredBenchMongoUri = env.BENCH_MONGO_URL || process.env.BENCH_MONGO_URL;
   const configuredMeteorMongoUri = env.MONGO_URL || process.env.MONGO_URL;
   const fallbackMongoUri = `mongodb://127.0.0.1:${config.appPort + 1}/meteor`;
-  const mongoUri = metricName === 'change_stream_audit'
-    ? resolveAuditMongoTarget({
-      benchMongoUri: configuredBenchMongoUri,
-      meteorMongoUri: configuredMeteorMongoUri,
-      fallbackMongoUri,
-      allowRemote: extraScriptArgs.includes('--allow-remote-mongo'),
-    })
-    : configuredBenchMongoUri
+  const mongoUri = configuredBenchMongoUri
     || configuredMeteorMongoUri
     || fallbackMongoUri;
   const meteorEnv = configuredBenchMongoUri && !configuredMeteorMongoUri
@@ -135,13 +123,6 @@ export async function runScriptDriver({ scenario, scenarioName, app, appName, so
       console.error(`Could not parse script metrics JSON from last stdout line: ${err.message}. Last line was: ${jsonLine.slice(0, 200)}`);
     }
   }
-  if (metricName === 'change_stream_audit' && Object.keys(scriptMetrics).length === 0) {
-    scriptMetrics = createIncompleteAuditMetric({
-      requestedDriver: meteorEnv.METEOR_REACTIVITY_ORDER || null,
-      scriptFailed: Boolean(scriptError),
-    });
-  }
-
   const collectorResults = await stopCollectors(collectors);
   await stopMeteorApp(meteorProc);
   collectorResults.push(...await stopCollectors({ ...collectors, procs: [] }));
@@ -161,17 +142,8 @@ export async function runScriptDriver({ scenario, scenarioName, app, appName, so
     collectorResults,
     wallClockMs,
   });
-  if (scenario.strict && metricName !== 'change_stream_audit' && Object.keys(scriptMetrics).length === 0) {
+  if (scenario.strict && Object.keys(scriptMetrics).length === 0) {
     throw new Error(`Strict script scenario "${scenarioName}" produced no metrics`);
-  }
-  if (metricName === 'change_stream_audit') {
-    finalizeAuditEvidence({
-      audit: result.metrics.change_stream_audit,
-      meteor: result.meteor,
-      runtime: result.runtime,
-      metrics: result.metrics,
-      scriptFailed: Boolean(scriptError),
-    });
   }
     return result;
   } finally {
