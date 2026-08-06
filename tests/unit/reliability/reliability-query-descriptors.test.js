@@ -14,18 +14,23 @@ test('legacy subscriptions remain scoped to the requested run', () => {
 });
 
 test('declarative subscriptions force run and case scope', () => {
-  assert.deepEqual(buildReliabilityCursorPlans({
+  const [plan] = buildReliabilityCursorPlans({
     runId: 'run-1',
     caseExecutionId: 'case-1',
     queryId: 'selector_included',
-  }), [{
-    selector: {
-      runId: 'run-1',
-      caseExecutionId: 'case-1',
-      included: true,
-    },
-    options: {},
-  }]);
+  });
+  assert.deepEqual(plan.selector, {
+    runId: 'run-1',
+    caseExecutionId: 'case-1',
+    included: true,
+  });
+  assert.deepEqual(plan.options._auditObserverScope, {
+    runId: 'run-1',
+    caseExecutionId: 'case-1',
+    queryId: 'selector_included',
+    cursorOrdinal: 0,
+    cursorFingerprint: 'cursor-dd875d2e',
+  });
 });
 
 test('subscriptions cannot inject selectors or MongoDB options', () => {

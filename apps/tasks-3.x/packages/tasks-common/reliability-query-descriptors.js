@@ -2,6 +2,8 @@ const MAX_AUDIT_ID_LENGTH = 128;
 
 const IDENTIFIER_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
 
+export const AUDIT_CURSOR_SCOPE_OPTION = '_auditObserverScope';
+
 const QUERY_BUILDERS = Object.freeze({
   unordered: ({ scope }) => [{ selector: scope, options: {} }],
   selector_included: ({ scope }) => [{
@@ -59,6 +61,16 @@ function rejectUnknownKeys(value, allowedKeys) {
   }
 }
 
+function cursorFingerprint(queryId, cursorOrdinal, selector, options) {
+  const input = JSON.stringify({ queryId, cursorOrdinal, selector, options });
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < input.length; index += 1) {
+    hash ^= input.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return `cursor-${(hash >>> 0).toString(16).padStart(8, '0')}`;
+}
+
 /**
  * Validates a publication request and normalizes the legacy run-only form.
  * The object form is deliberately closed so callers cannot inject MongoDB
@@ -105,8 +117,20 @@ export function buildReliabilityCursorPlans(request) {
       caseExecutionId: normalized.caseExecutionId,
     });
   const plans = QUERY_BUILDERS[normalized.queryId]({ scope });
-  return Object.freeze(plans.map(({ selector, options }) => Object.freeze({
-    selector: Object.freeze(selector),
-    options: Object.freeze(options),
-  })));
+  return Object.freeze(plans.map(({ selector, options }, cursorOrdinal) => {
+    const taggedOptions = normalized.legacy ? options : {
+      ...options,
+      [AUDIT_CURSOR_SCOPE_OPTION]: Object.freeze({
+        runId: normalized.runId,
+        caseExecutionId: normalized.caseExecutionId,
+        queryId: normalized.queryId,
+        cursorOrdinal,
+        cursorFingerprint: cursorFingerprint(normalized.queryId, cursorOrdinal, selector, options),
+      }),
+    };
+    return Object.freeze({
+      selector: Object.freeze(selector),
+      options: Object.freeze(taggedOptions),
+    });
+  }));
 }
