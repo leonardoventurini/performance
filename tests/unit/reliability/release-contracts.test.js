@@ -99,6 +99,19 @@ test('case contract rejects unknown fields, statuses, and non-finite diagnostics
   assert.throws(() => validateAuditCaseResult(unattested), /compiledPlanDigest is required/);
 });
 
+test('historical schema v2 remains readable but cannot carry v3 attestations', () => {
+  const historical = validCase();
+  historical.schemaVersion = 2;
+  for (const key of [
+    'contractId', 'contractDigest', 'caseDefinitionDigest', 'compiledPlanDigest',
+    'interpreterVersion', 'resolvedParameters', 'stepLedgerDigest', 'evidenceLedgerDigests',
+  ]) delete historical[key];
+  assert.equal(validateAuditCaseResult(historical).schemaVersion, 2);
+  assert.throws(() => validateAuditCaseResult({
+    ...historical, contractId: 'forged-v3-field',
+  }), /schema version 2 cannot contain declarative attestations/);
+});
+
 test('coordinate contract rejects duplicate observer drivers and unbounded seeds', () => {
   const coordinate = validCase().coordinate;
   assert.throws(

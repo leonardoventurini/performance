@@ -2,7 +2,10 @@
 
 ## Status
 
-Proposed implementation specification for one direct rollout.
+Implemented in the direct rollout on `feat/reliability`. Root and application
+contract suites plus representative live event and recovery coordinates are
+verified; the final full live smoke execution remains a release-evidence gate,
+not a prerequisite for loading or compiling the catalog.
 
 This specification refines the execution architecture in
 `2026-07-27-meteor-3.5-reliability-conformance-audit.md`. It does not weaken
@@ -781,50 +784,50 @@ profile, seed, contract digest, and artifact paths.
 
 ## Direct-rollout execution checklist
 
-- [ ] Define JSDoc types and strict validators for case definitions, profiles,
+- [x] Define JSDoc types and strict validators for case definitions, profiles,
   negative controls, value references, safe selector/update ASTs, compiled
   plans, ledgers, and result schema v3 in `reliability/contracts/`; verify all
   unknown, unsafe, recursive, and unbounded inputs fail before side effects.
-- [ ] Add the data-only JSON catalog under `reliability/definitions/`; migrate
+- [x] Add the data-only JSON catalog under `reliability/definitions/`; migrate
   every capability and source/rationale without changing its expectation, and
   require every supported/fallback case to resolve exactly once.
-- [ ] Implement catalog canonicalization, duplicate-key-safe loading, complete
+- [x] Implement catalog canonicalization, duplicate-key-safe loading, complete
   graph validation, deterministic compilation, applicability intersection,
   reference resolution, global bounds, run-scope insertion, and plan digests;
   prove fixed inputs compile identically across processes.
-- [ ] Implement the closed primitive and oracle catalogs with explicit version
+- [x] Implement the closed primitive and oracle catalogs with explicit version
   identifiers; add bidirectional coverage tests so declarations and trusted
   implementations cannot drift.
-- [ ] Split expected-model, MongoDB, DDP-client, Meteor-probe, and
+- [x] Split expected-model, MongoDB, DDP-client, Meteor-probe, and
   fault-controller evidence adapters; prohibit canonicalizer imports across
   trust boundaries and verify independent canonical fixtures.
-- [ ] Implement isolated case interpretation, append-only step/evidence
+- [x] Implement isolated case interpretation, append-only step/evidence
   ledgers, deadline and idempotency rules, mandatory cleanup, fault restoration,
   and state-machine journaling; inject failure at every step boundary.
-- [ ] Express all supported observer, CRUD, selector, projection, multiplexer,
+- [x] Express all supported observer, CRUD, selector, projection, multiplexer,
   publication, data-shape, transport, session, fallback, and recovery cases as
   definitions using the closed primitives. Implement any missing primitive
   before authoring a definition that references it.
-- [ ] Convert smoke and extreme profiles to bounded declarative data and make
+- [x] Convert smoke and extreme profiles to bounded declarative data and make
   both `audit` and `release-audit` compile exact plans from the same catalog;
   preserve existing CLI inputs, remote-target guards, result envelope, and
   dashboard-safe argument subset.
-- [ ] Replace prefix-derived `RELEASE_CASE_CONTRACTS`, `executeCase.supports`,
+- [x] Replace prefix-derived `RELEASE_CASE_CONTRACTS`, `executeCase.supports`,
   cached transport-wide execution, and `buildBoundedCrudCaseResult` with
   explicit compiled evidence contracts and one artifact per coordinate; make
   every preflight-unavailable coordinate persist as incomplete.
-- [ ] Convert all required negative controls to declarative sealed-evidence
+- [x] Convert all required negative controls to declarative sealed-evidence
   mutations evaluated through the real oracle and aggregation path; establish
   sensitivity for every hard-gate oracle family.
-- [ ] Upgrade case and manifest persistence with contract, definition, plan,
+- [x] Upgrade case and manifest persistence with contract, definition, plan,
   interpreter, and ledger digests; reject mixed or unattested semantics while
   retaining readers for historical schema-v2 artifacts.
-- [ ] Run old/new operation-specific parity for the seven bounded CRUD cases,
+- [x] Run old/new operation-specific parity for the seven bounded CRUD cases,
   then delete `tests/reliability-change-streams.js`,
   `reliability/operation-matrix.js`, `reliability/cases/bounded-crud.js`, and
   the imperative release executor only after the compiled path passes all
   parity and sensitivity gates.
-- [ ] Update README, repository guidance, CLI help, result fixtures, dashboard
+- [x] Update README, repository guidance, CLI help, result fixtures, dashboard
   consumers, contract tests, and the release-conformance spec so declarative
   catalogs are the sole case-authoring authority and unknown/missing cases fail
   closed.

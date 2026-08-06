@@ -331,9 +331,12 @@ export function validateAuditCaseResult(value, path = 'caseResult') {
   ], [
     'schemaVersion', 'coordinate', 'attemptId', 'status', 'release', 'mongo',
     'observerEvidence', 'oracles', 'diagnostics', 'reasons',
-    ...(value.status === 'incomplete' ? [] : attestationKeys),
+    ...(value.schemaVersion === 3 && value.status !== 'incomplete' ? attestationKeys : []),
   ]);
-  if (value.schemaVersion !== 3) fail(`${path}.schemaVersion`, 'must equal 3');
+  if (![2, 3].includes(value.schemaVersion)) fail(`${path}.schemaVersion`, 'must equal 2 or 3');
+  if (value.schemaVersion === 2 && attestationKeys.some((key) => Object.hasOwn(value, key))) {
+    fail(path, 'schema version 2 cannot contain declarative attestations');
+  }
   if (attestationKeys.some((key) => Object.hasOwn(value, key))) {
     for (const key of attestationKeys) {
       if (!Object.hasOwn(value, key)) fail(`${path}.${key}`, 'is required when attestation evidence is present');

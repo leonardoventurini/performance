@@ -24,9 +24,12 @@ The `audit` subcommand is a correctness path, not a performance scenario. It
 uses the same process, collector, and result envelope, but
 `metrics.change_stream_audit.status` is authoritative and any non-passing
 status must produce a nonzero CLI exit after the evidence file is persisted.
-`reliability/` owns its deterministic data generator, operation/capability
-registry, and correctness aggregation. The task fixture exposes only the
-run-scoped `reliability.documents` publication for this flow.
+`reliability/definitions/` is the sole case, profile, capability, and
+negative-control authoring authority. `reliability/declarative/` validates and
+compiles it; `reliability/runtime/` interprets only closed trusted primitives
+against an owned replica set, two Meteor instances, and the audit proxy. The
+task fixture exposes only the run-scoped `reliability.documents` publication
+and ownership-attested audit methods for this flow.
 
 Preserve the result contract consumed by tests and the dashboard:
 `timestamp`, `tag`, `meteor`, `runtime`, `scenario`, `app`, `wall_clock_ms`,
@@ -149,8 +152,9 @@ node bench.js audit \
 
 - `smoke` is the bounded default; `extreme` requires explicit selection.
 - The audit writes only to `reliabilityDocuments` and scopes every mutation
-  and cleanup by a unique `runId`.
-- Non-loopback MongoDB targets require `--allow-remote-mongo`.
+  and cleanup by unique `runId` and `caseExecutionId` values.
+- Audit topology is executor-owned and loopback-only. Operator MongoDB URLs
+  are never audit targets.
 - The requested observer must match both the startup probe and per-cursor
   fallback evidence.
 - Supported operation capabilities require serialized delivery evidence.

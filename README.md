@@ -68,14 +68,15 @@ node bench.js run --scenario <scenario-name> --app <app-name>
 
 ### Run a Change-Stream Audit
 
-The reliability flow writes deterministic, oversized adversarial documents
-directly to MongoDB and verifies that every DDP subscriber converges on the
-same final state:
+The reliability flow compiles validated JSON case definitions into a closed
+primitive interpreter. It provisions an owned three-member replica set, two
+Meteor instances, and a loopback DDP proxy; writes deterministic adversarial
+documents directly to MongoDB; and verifies independent MongoDB, DDP,
+observer, transport, fault, and cleanup evidence:
 
 ```bash
 just audit
 just audit extreme changeStreams
-just audit smoke oplog --env MONGO_OPLOG_URL=mongodb://127.0.0.1:3001/local
 ```
 
 Start the dashboard with access to the local audit runner:
@@ -92,15 +93,17 @@ this page can start or cancel an audit, expose an audit-capable dashboard only
 on a trusted local or otherwise access-controlled network.
 
 The bounded `smoke` profile and `changeStreams` driver are the defaults.
-`extreme` must be selected explicitly. Oplog runs require a working
-`MONGO_OPLOG_URL`; the run fails if Meteor falls back to a different observer
-driver. Non-loopback MongoDB targets are rejected unless
-`--allow-remote-mongo` is passed explicitly.
+`extreme` must be selected explicitly. The executor never uses an
+operator-supplied MongoDB target: every audit owns its loopback topology and
+attests teardown before it can pass. The `oplog` observer input remains
+accepted for explicit-order diagnostics, but it cannot produce a passing
+change-stream conformance result unless the declarative catalog contains the
+complete required coordinate set for that order.
 
-Synthetic data is generated locally from a seed. No model or network call is
-made during the workload, which keeps runs reproducible and avoids including
-generated payloads in result files. Results use the normal output/history
-contract and appear in the dashboard after `bench.js push`.
+Synthetic data is generated locally from a seed. No model or external network
+call is made during the workload. Results retain the normal output/history
+contract; `metrics.change_stream_audit` includes the catalog digest, case
+outcomes, negative-control results, and restoration evidence.
 
 ### Compare Results
 
