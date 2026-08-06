@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
   extractAuditScope,
+  validateAuditFaultRequest,
   validateAuditMonitorRequest,
 } from '../../../apps/tasks-3.x/packages/bench-monitors/audit-observer-contract.js';
 import {
@@ -26,6 +27,22 @@ test('observer correlation extracts only valid run and case identifiers', () => 
     runId: '../escape', caseExecutionId: 'case-1', queryId: 'unordered',
     cursorOrdinal: 0, cursorFingerprint: 'cursor-deadbeef',
   } } }), null);
+});
+
+test('fault control accepts only owned closed primitives', () => {
+  const request = {
+    runId: 'run-1', caseExecutionId: 'case-1', ownershipToken: 'secret',
+    controller: 'stream_restart', operation: 'activate', faultId: 'fault-1',
+  };
+  assert.deepEqual(validateAuditFaultRequest(request, {
+    runId: 'run-1', ownershipToken: 'secret',
+  }, ['stream_restart']), {
+    runId: 'run-1', caseExecutionId: 'case-1', controller: 'stream_restart',
+    operation: 'activate', faultId: 'fault-1',
+  });
+  assert.throws(() => validateAuditFaultRequest({ ...request, controller: 'shell' }, {
+    runId: 'run-1', ownershipToken: 'secret',
+  }, ['stream_restart']), /unknown audit fault controller/);
 });
 
 test('server-owned cursor plans carry distinct closed correlation tags', () => {

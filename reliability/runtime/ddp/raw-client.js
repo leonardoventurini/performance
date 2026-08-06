@@ -47,7 +47,7 @@ function addListener(socket, event, listener) {
 }
 
 function redactLedgerMessage(message) {
-  if (message?.msg !== 'method' || message.method !== 'audit.monitorSnapshot') return message;
+  if (message?.msg !== 'method' || !message.method?.startsWith('audit.')) return message;
   return {
     ...message,
     params: message.params?.map((parameter) => (

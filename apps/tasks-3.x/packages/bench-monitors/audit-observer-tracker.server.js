@@ -1,7 +1,7 @@
 import { Meteor } from 'meteor/meteor';
 import { MongoInternals } from 'meteor/mongo';
 
-import { extractAuditScope, validateAuditMonitorRequest } from './audit-observer-contract';
+import { extractAuditScope, validateAuditFaultRequest, validateAuditMonitorRequest } from './audit-observer-contract';
 
 const MAX_AUDIT_OBSERVATIONS = 10_000;
 const DRIVER_NAMES = Object.freeze({
@@ -12,9 +12,34 @@ const DRIVER_NAMES = Object.freeze({
 
 const observations = [];
 const multiplexerIdentities = new WeakMap();
+const driversByCase = new Map();
+const activeFaults = new Map();
 let sequence = 0;
 let multiplexerSequence = 0;
 let patched = false;
+const INTERNAL_FAULT_CONTROLLERS = Object.freeze([
+  'change_stream_recoverable_error',
+  'change_stream_repeated_restart',
+  'change_stream_unexpected_close',
+  'stream_restart',
+  'writes_continue_during_recovery',
+]);
+
+function caseDrivers(caseExecutionId) {
+  const drivers = driversByCase.get(caseExecutionId);
+  if (!drivers || drivers.size === 0) throw new Error('audit fault has no correlated observer driver');
+  return [...drivers];
+}
+
+async function waitForStreams(caseExecutionId) {
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    const streams = caseDrivers(caseExecutionId).map((driver) => driver?._sharedStream);
+    if (streams.every((stream) => stream?._changeStream && !stream._restarting)) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error('audit change stream did not recover');
+}
 
 function multiplexerIdentity(multiplexer) {
   if (!multiplexer || typeof multiplexer !== 'object') return 'unavailable';
@@ -41,6 +66,9 @@ export function initAuditObserverTracker() {
     const handle = await original(...args);
     const scope = extractAuditScope(args[0]);
     if (scope?.runId === process.env.AUDIT_RUN_ID) {
+      const drivers = driversByCase.get(scope.caseExecutionId) || new Set();
+      if (handle?._multiplexer?._observeDriver) drivers.add(handle._multiplexer._observeDriver);
+      driversByCase.set(scope.caseExecutionId, drivers);
       const className = handle?._multiplexer?._observeDriver?.constructor?.name;
       observations.push(Object.freeze({
         sequence: ++sequence,
@@ -68,6 +96,37 @@ export function initAuditObserverTracker() {
         runId === filter.runId
         && (filter.caseExecutionId === null || caseExecutionId === filter.caseExecutionId)
       ));
+    },
+    async 'audit.faultControl'(request) {
+      const fault = validateAuditFaultRequest(request, {
+        runId: process.env.AUDIT_RUN_ID,
+        ownershipToken: process.env.AUDIT_OWNERSHIP_TOKEN,
+      }, INTERNAL_FAULT_CONTROLLERS);
+      const key = `${fault.caseExecutionId}:${fault.faultId}`;
+      const drivers = caseDrivers(fault.caseExecutionId);
+      const streams = [...new Set(drivers.map((driver) => driver?._sharedStream).filter(Boolean))];
+      if (streams.length === 0) throw new Error('audit fault requires an active shared change stream');
+      if (fault.operation === 'activate') {
+        if (activeFaults.has(key)) throw new Error('audit fault is already active');
+        if (fault.controller === 'change_stream_unexpected_close') {
+          for (const stream of streams) stream._changeStream?.emit('close');
+        } else if (fault.controller === 'stream_restart') {
+          await Promise.all(streams.map((stream) => stream._restart()));
+        } else if (fault.controller === 'change_stream_repeated_restart') {
+          await Promise.all(streams.map(async (stream) => { await stream._restart(); await stream._restart(); }));
+        } else {
+          const error = new Error(`declarative audit fault: ${fault.controller}`);
+          error.code = 91;
+          for (const stream of streams) stream._changeStream?.emit('error', error);
+        }
+        activeFaults.set(key, { ...fault, activatedAt: Date.now() });
+        return { activated: true, restored: false, controller: fault.controller, faultId: fault.faultId };
+      }
+      const active = activeFaults.get(key);
+      if (!active || active.controller !== fault.controller) throw new Error('audit fault was not activated by this process');
+      await waitForStreams(fault.caseExecutionId);
+      activeFaults.delete(key);
+      return { activated: true, restored: true, controller: fault.controller, faultId: fault.faultId };
     },
   });
 }

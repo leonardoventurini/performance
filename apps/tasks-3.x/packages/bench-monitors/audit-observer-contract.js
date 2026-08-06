@@ -43,3 +43,28 @@ export function validateAuditMonitorRequest(value, expected) {
   }
   return Object.freeze({ runId: value.runId, caseExecutionId });
 }
+
+/** Validates an ownership-attested request for one closed in-process fault primitive. */
+export function validateAuditFaultRequest(value, expected, controllers) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError('audit fault request must be an object');
+  }
+  const allowed = ['runId', 'caseExecutionId', 'ownershipToken', 'controller', 'operation', 'faultId'];
+  const unknown = Object.keys(value).filter((key) => !allowed.includes(key));
+  if (unknown.length > 0) throw new TypeError(`unknown audit fault fields: ${unknown.sort().join(', ')}`);
+  validateAuditMonitorRequest({
+    runId: value.runId,
+    caseExecutionId: value.caseExecutionId,
+    ownershipToken: value.ownershipToken,
+  }, expected);
+  if (!controllers.includes(value.controller)) throw new TypeError('unknown audit fault controller');
+  if (!['activate', 'restore'].includes(value.operation)) throw new TypeError('unknown audit fault operation');
+  if (!identifier(value.faultId)) throw new TypeError('faultId must be a valid audit identifier');
+  return Object.freeze({
+    runId: value.runId,
+    caseExecutionId: value.caseExecutionId,
+    controller: value.controller,
+    operation: value.operation,
+    faultId: value.faultId,
+  });
+}
