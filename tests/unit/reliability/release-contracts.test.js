@@ -17,7 +17,15 @@ const SHA = 'a'.repeat(64);
 
 function validCase() {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
+    contractId: 'change-stream-v1',
+    contractDigest: SHA,
+    caseDefinitionDigest: SHA,
+    compiledPlanDigest: SHA,
+    interpreterVersion: 'declarative-audit-v1',
+    resolvedParameters: { subscribers: 1 },
+    stepLedgerDigest: SHA,
+    evidenceLedgerDigests: { mongodb: SHA },
     coordinate: {
       caseId: 'event.insert',
       transport: 'sockjs',
@@ -85,6 +93,9 @@ test('case contract rejects unknown fields, statuses, and non-finite diagnostics
   const nonFinite = validCase();
   nonFinite.diagnostics.resources.cpu = Number.POSITIVE_INFINITY;
   assert.throws(() => validateAuditCaseResult(nonFinite), /must be finite/);
+  const unattested = validCase();
+  delete unattested.compiledPlanDigest;
+  assert.throws(() => validateAuditCaseResult(unattested), /compiledPlanDigest is required/);
 });
 
 test('coordinate contract rejects duplicate observer drivers and unbounded seeds', () => {

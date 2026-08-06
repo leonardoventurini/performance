@@ -2,6 +2,7 @@ import { MongoClient } from 'mongodb';
 
 import { contractDigest } from '../contracts/digest.js';
 import { validateAuditCaseResult } from '../contracts/release-audit.js';
+import { DECLARATIVE_AUDIT_INTERPRETER_VERSION } from '../declarative/compiler.js';
 import { attestMongoIdentity } from '../release-audit/identity.js';
 import { evaluateDeclarativeOracles } from '../oracles/evaluator.js';
 import { buildDeclarativeFixture, createDatabaseAdapter } from './adapters/database.js';
@@ -56,6 +57,18 @@ function faultArtifact(definition, execution) {
   };
 }
 
+function evidenceLedgerDigests(execution) {
+  const entries = new Map();
+  for (const [stepId, provenance] of Object.entries(execution.evidence.provenance)) {
+    for (const [ledger, producer] of Object.entries(provenance)) {
+      const values = entries.get(producer) || [];
+      values.push({ stepId, ledger, value: execution.evidence.outputs[stepId]?.[ledger] });
+      entries.set(producer, values);
+    }
+  }
+  return Object.fromEntries([...entries].map(([producer, values]) => [producer, contractDigest(values)]));
+}
+
 /** Executes one compiled coordinate against a running owned environment. */
 export async function runDeclarativeCase({
   environment, definition, plan, release, attemptId, mongoClientClass = MongoClient,
@@ -98,7 +111,7 @@ export async function runDeclarativeCase({
   });
   const interpreter = new DeclarativeCaseInterpreter({
     registry: createDeclarativePrimitiveRegistry(),
-    interpreterVersion: 'declarative-audit-v1',
+    interpreterVersion: DECLARATIVE_AUDIT_INTERPRETER_VERSION,
   });
   let execution;
   try {
@@ -128,7 +141,15 @@ export async function runDeclarativeCase({
     ...evaluation.results.filter(({ passed }) => !passed).map(({ reason }) => reason),
   ].slice(0, 32);
   return validateAuditCaseResult({
-    schemaVersion: 2,
+    schemaVersion: 3,
+    contractId: plan.contractId,
+    contractDigest: plan.contractDigest,
+    caseDefinitionDigest: plan.caseDefinitionDigest,
+    compiledPlanDigest: plan.digest,
+    interpreterVersion: execution.evidence.interpreterVersion,
+    resolvedParameters: plan.resolvedParameters,
+    stepLedgerDigest: contractDigest(execution.evidence.stepLedger),
+    evidenceLedgerDigests: evidenceLedgerDigests(execution),
     coordinate: plan.coordinate,
     attemptId,
     status: evaluation.status,

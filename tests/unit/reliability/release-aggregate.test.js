@@ -40,7 +40,15 @@ function caseResult(coordinate, attemptId = 'attempt-1') {
     || 'changeStreams';
   const fallback = contract?.expectation === 'fallback_required';
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
+    contractId: 'change-stream-v1',
+    contractDigest: SHA,
+    caseDefinitionDigest: SHA,
+    compiledPlanDigest: SHA,
+    interpreterVersion: 'declarative-audit-v1',
+    resolvedParameters: { subscribers: 1 },
+    stepLedgerDigest: SHA,
+    evidenceLedgerDigests: { mongodb: SHA, ddp_client: SHA, meteor_probe: SHA },
     coordinate,
     attemptId,
     status: 'passed',

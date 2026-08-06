@@ -6,7 +6,7 @@ import {
 } from '../contracts/declarative-audit.js';
 import { contractDigest } from '../contracts/digest.js';
 
-export const DECLARATIVE_AUDIT_INTERPRETER_VERSION = 'declarative-audit-v1';
+export const DECLARATIVE_AUDIT_INTERPRETER_VERSION = 'change-stream-interpreter-v1';
 
 function includesOrder(orders, expected) {
   return orders.some((order) => contractDigest(order) === contractDigest(expected));

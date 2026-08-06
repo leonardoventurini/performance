@@ -313,14 +313,39 @@ function validateFaultWitness(value, path) {
 
 /** Validates a persisted case artifact and rejects all unknown fields. */
 export function validateAuditCaseResult(value, path = 'caseResult') {
+  const attestationKeys = [
+    'contractId', 'contractDigest', 'caseDefinitionDigest', 'compiledPlanDigest',
+    'interpreterVersion', 'resolvedParameters', 'stepLedgerDigest', 'evidenceLedgerDigests',
+  ];
   object(value, path, [
     'schemaVersion', 'coordinate', 'attemptId', 'status', 'release', 'mongo',
     'observerEvidence', 'oracles', 'faultWitness', 'diagnostics', 'reasons',
+    ...attestationKeys,
   ], [
     'schemaVersion', 'coordinate', 'attemptId', 'status', 'release', 'mongo',
     'observerEvidence', 'oracles', 'diagnostics', 'reasons',
+    ...(value.status === 'incomplete' ? [] : attestationKeys),
   ]);
-  if (value.schemaVersion !== 2) fail(`${path}.schemaVersion`, 'must equal 2');
+  if (value.schemaVersion !== 3) fail(`${path}.schemaVersion`, 'must equal 3');
+  if (attestationKeys.some((key) => Object.hasOwn(value, key))) {
+    for (const key of attestationKeys) {
+      if (!Object.hasOwn(value, key)) fail(`${path}.${key}`, 'is required when attestation evidence is present');
+    }
+    identifier(value.contractId, `${path}.contractId`);
+    for (const key of ['contractDigest', 'caseDefinitionDigest', 'compiledPlanDigest', 'stepLedgerDigest']) {
+      digest(value[key], `${path}.${key}`);
+    }
+    identifier(value.interpreterVersion, `${path}.interpreterVersion`);
+    object(value.resolvedParameters, `${path}.resolvedParameters`, Object.keys(value.resolvedParameters), []);
+    object(value.evidenceLedgerDigests, `${path}.evidenceLedgerDigests`, ORACLE_PRODUCERS, []);
+    if (Object.keys(value.evidenceLedgerDigests).length === 0) {
+      fail(`${path}.evidenceLedgerDigests`, 'must not be empty');
+    }
+    for (const [producer, evidenceDigest] of Object.entries(value.evidenceLedgerDigests)) {
+      enumeration(producer, `${path}.evidenceLedgerDigests.${producer}`, ORACLE_PRODUCERS);
+      digest(evidenceDigest, `${path}.evidenceLedgerDigests.${producer}`);
+    }
+  }
   validateCaseCoordinate(value.coordinate, `${path}.coordinate`);
   identifier(value.attemptId, `${path}.attemptId`);
   enumeration(value.status, `${path}.status`, AUDIT_CASE_STATUSES);

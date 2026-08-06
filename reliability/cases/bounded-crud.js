@@ -63,7 +63,19 @@ export function buildBoundedCrudCaseResult({
   ];
 
   return validateAuditCaseResult({
-    schemaVersion: 2,
+    schemaVersion: 3,
+    contractId: 'legacy-bounded-crud',
+    contractDigest: contractDigest({ adapter: 'legacy-bounded-crud' }),
+    caseDefinitionDigest: contractDigest({ caseId: coordinate.caseId, operationId }),
+    compiledPlanDigest: contractDigest({ coordinate, operationId }),
+    interpreterVersion: 'legacy-bounded-crud-v1',
+    resolvedParameters: {},
+    stepLedgerDigest: contractDigest({ operationId, status: audit.status }),
+    evidenceLedgerDigests: {
+      mongodb: contractDigest(evidence.mongo_final_state_digest),
+      ddp_client: contractDigest(subscriberDigests),
+      meteor_probe: contractDigest(driverMetric),
+    },
     coordinate,
     attemptId,
     status: passed ? 'passed' : 'failed',

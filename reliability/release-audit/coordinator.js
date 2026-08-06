@@ -36,7 +36,7 @@ function defaultRecoveryEvidence() {
 
 function incompleteCase({ coordinate, release, mongo, attemptId, reason }) {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     coordinate,
     attemptId,
     status: 'incomplete',
