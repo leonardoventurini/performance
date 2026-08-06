@@ -103,6 +103,28 @@ test('does not implicitly replay subscriptions on resumed or fresh connections',
   assert.equal(third.sent.filter(({ msg }) => msg === 'sub').length, 0);
 });
 
+test('unsubscribe waits for nosub and fresh sessions discard stale local state', async () => {
+  const { client, sockets } = fixture();
+  const first = await establish(client, sockets);
+  const subscriptionPromise = client.subscribe('reliability.documents', ['run-a']);
+  const subscriptionId = first.sent.at(-1).id;
+  first.receive({ msg: 'ready', subs: [subscriptionId] });
+  const subscription = await subscriptionPromise;
+  const unsubscribe = client.unsubscribe(subscription.id);
+  assert.deepEqual(first.sent.at(-1), { msg: 'unsub', id: subscription.id });
+  first.receive({ msg: 'nosub', id: subscription.id });
+  await unsubscribe;
+
+  first.receive({ msg: 'added', collection: 'items', id: 'one', fields: { value: 1 } });
+  first.terminate();
+  const reconnect = client.resume();
+  const second = sockets[1];
+  second.open();
+  second.receive({ msg: 'connected', session: 'new-session' });
+  await reconnect;
+  assert.deepEqual(client.snapshot('items'), []);
+});
+
 test('merges DDP fields, applies cleared fields, and removes documents', async () => {
   const { client, sockets } = fixture();
   const socket = await establish(client, sockets);

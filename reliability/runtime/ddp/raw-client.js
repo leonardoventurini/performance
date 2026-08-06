@@ -85,6 +85,7 @@ export class RawDdpClient {
     this.ledgerEntries = [];
     this.collections = new Map();
     this.pendingMessages = new Set();
+    this.subscriptions = new Map();
   }
 
   /** Returns an immutable copy of the bounded wire ledger. */
@@ -159,7 +160,19 @@ export class RawDdpClient {
     this.#send({ msg: 'sub', id, name, params });
     const message = await ready;
     if (message.msg === 'nosub') throw new Error(`subscription ${name} failed`);
-    return immutable({ id, name, params });
+    const subscription = immutable({ id, name, params });
+    this.subscriptions.set(id, subscription);
+    return subscription;
+  }
+
+  /** Stops one exact subscription and waits until the server acknowledges it. */
+  async unsubscribe(id) {
+    this.#assertConnected();
+    if (!this.subscriptions.has(id)) throw new Error(`subscription ${id} is not active`);
+    const stopped = this.#waitFor((message) => message.msg === 'nosub' && message.id === id);
+    this.#send({ msg: 'unsub', id });
+    await stopped;
+    this.subscriptions.delete(id);
   }
 
   /** Sends a method invocation and resolves with its matching result. */
@@ -236,6 +249,10 @@ export class RawDdpClient {
       const classification = requestedSessionId === null
         ? 'initial'
         : message.session === requestedSessionId ? 'resumed' : 'fresh';
+      if (classification === 'fresh') {
+        this.collections.clear();
+        this.subscriptions.clear();
+      }
       this.sessionId = message.session;
       if (classification === 'fresh') this.receivedCount = 1;
       this.state = RAW_DDP_STATES.CONNECTED;
