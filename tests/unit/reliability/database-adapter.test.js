@@ -55,3 +55,35 @@ test('cleanup proves no run-scoped documents remain', async () => {
     cleanup: true, provenance: { cleanup: 'mongodb' },
   });
 });
+
+test('replacement mutations preserve audit scope without retaining stale fields', async () => {
+  const store = collection();
+  const fixture = { documents: [{
+    _id: 'run:0', runId: 'run', caseExecutionId: 'case', sequence: 0,
+    revision: 0, payload: 'payload', ephemeral: 'stale', projected: 'stale',
+  }] };
+  const adapter = createDatabaseAdapter({ collection: store, fixture });
+  const resolve = (value) => value;
+  await adapter.write({
+    step: {
+      operation: 'insert_one', selector: { index: 0 }, mutation: { kind: 'fixture_document' },
+      expectedTransition: { kind: 'insert' },
+    },
+    resolve,
+  });
+  const output = await adapter.write({
+    step: {
+      operation: 'replace_one', selector: { index: 0 },
+      mutation: { kind: 'generated_document', generator: 'replacement_no_stale_residue-v1' },
+      expectedTransition: { kind: 'replace' },
+    },
+    resolve,
+  });
+
+  const replacement = store.documents.get('run:0');
+  assert.equal(replacement.runId, 'run');
+  assert.equal(replacement.caseExecutionId, 'case');
+  assert.equal(replacement.retained, 'new');
+  assert.equal(Object.hasOwn(replacement, 'ephemeral'), false);
+  assert.deepEqual(output.expectedState, [replacement]);
+});

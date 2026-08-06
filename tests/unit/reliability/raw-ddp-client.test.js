@@ -15,6 +15,7 @@ class FakeSocket extends EventEmitter {
   terminate() { this.emit('close'); }
   open() { this.emit('open'); }
   receive(message) { this.emit('message', JSON.stringify(message)); }
+  receiveRaw(raw) { this.emit('message', raw); }
 }
 
 function fixture(maximumLedgerEntries = 100) {
@@ -134,6 +135,14 @@ test('merges DDP fields, applies cleared fields, and removes documents', async (
   assert.throws(() => { client.snapshot('items')[0].keep = 4; }, TypeError);
   socket.receive({ msg: 'removed', collection: 'items', id: 'one' });
   assert.deepEqual(client.snapshot('items'), []);
+});
+
+test('decodes Meteor ObjectID values into canonical binary identity', async () => {
+  const { client, sockets } = fixture();
+  const socket = await establish(client, sockets);
+  socket.receiveRaw('{"msg":"added","collection":"items","id":"one","fields":{"objectId":{"$type":"oid","$value":"000000000000000000000001"}}}');
+  const [{ objectId }] = client.snapshot('items');
+  assert.equal(objectId.toHexString(), '000000000000000000000001');
 });
 
 test('uses stable operation IDs and resolves matching method results', async () => {

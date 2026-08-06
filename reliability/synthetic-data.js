@@ -38,13 +38,34 @@ export function structureDigest(value) {
 }
 
 function canonicalize(value) {
-  if (Array.isArray(value)) return value.map(canonicalize);
-  if (value && typeof value === 'object') {
-    return Object.fromEntries(
-      Object.keys(value).sort().map((key) => [key, canonicalize(value[key])]),
-    );
+  if (value === null) return ['null'];
+  if (value === undefined) return ['undefined'];
+  if (typeof value === 'string') return ['string', value];
+  if (typeof value === 'boolean') return ['boolean', value];
+  if (typeof value === 'number') {
+    if (Number.isNaN(value)) return ['number', 'nan'];
+    if (value === Infinity) return ['number', 'positive_infinity'];
+    if (value === -Infinity) return ['number', 'negative_infinity'];
+    if (Object.is(value, -0)) return ['number', 'negative_zero'];
+    return ['number', String(value)];
   }
-  return value;
+  if (typeof value === 'bigint') return ['bigint', value.toString()];
+  if (Array.isArray(value)) return ['array', value.map(canonicalize)];
+  if (value && typeof value === 'object') {
+    if (value instanceof Date) return ['date', value.toISOString()];
+    if (ArrayBuffer.isView(value)) {
+      return ['binary', 0, Buffer.from(value.buffer, value.byteOffset, value.byteLength).toString('base64')];
+    }
+    if (value._bsontype === 'ObjectId' && typeof value.toHexString === 'function') {
+      return ['object_id', value.toHexString()];
+    }
+    if (value._bsontype === 'Binary' && ArrayBuffer.isView(value.buffer)) {
+      const bytes = value.buffer.subarray(0, value.position);
+      return ['binary', value.sub_type, Buffer.from(bytes).toString('base64')];
+    }
+    return ['object', Object.keys(value).sort().map((key) => [key, canonicalize(value[key])])];
+  }
+  return [typeof value, String(value)];
 }
 
 export function documentDigest(value) {

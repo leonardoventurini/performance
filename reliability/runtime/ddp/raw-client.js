@@ -1,7 +1,17 @@
 import EJSON from 'ejson';
+import { ObjectId } from 'mongodb';
+
+import { immutableClone } from '../immutable.js';
 
 const DDP_VERSION = '1';
 const IGNORED_RESUMPTION_MESSAGES = new Set(['ping', 'pong']);
+
+EJSON.addType('oid', (hex) => {
+  if (typeof hex !== 'string' || !/^[a-f0-9]{24}$/iu.test(hex)) {
+    throw new TypeError('DDP ObjectID payload is invalid');
+  }
+  return new ObjectId(hex);
+});
 
 /** States exposed by the raw DDP client. */
 export const RAW_DDP_STATES = Object.freeze({
@@ -27,15 +37,7 @@ function deferred() {
 }
 
 function immutable(value) {
-  const clone = structuredClone(value);
-  const freeze = (entry) => {
-    if (entry && typeof entry === 'object' && !Object.isFrozen(entry)) {
-      Object.freeze(entry);
-      for (const child of Object.values(entry)) freeze(child);
-    }
-    return entry;
-  };
-  return freeze(clone);
+  return immutableClone(value);
 }
 
 function normalizeIncoming(event) {

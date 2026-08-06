@@ -35,6 +35,16 @@ function hasSealedQuietWindow(execution, producer) {
 
 const equality = ({ expected, observed }) => isDeepStrictEqual(observed, expected);
 
+function fallbackIdentity({ expected, observed, execution }) {
+  if (!expected || expected.kind !== 'fallback' || !observed || observed.kind !== 'fallback') return false;
+  const expectedTarget = typeof expected.to === 'string'
+    ? expected.to
+    : expected.to?.[execution.evidence.coordinate.topology];
+  return observed.from === expected.from
+    && observed.to === expectedTarget
+    && (!expected.reasonRequired || observed.reasonRequired === true);
+}
+
 /** Closed oracle catalog. Each family compares independently produced evidence. */
 export const DECLARATIVE_ORACLE_HANDLERS = Object.freeze({
   snapshot_exact: ({ expected, observed }) => (
@@ -51,7 +61,7 @@ export const DECLARATIVE_ORACLE_HANDLERS = Object.freeze({
   revision_monotonic: ({ observed }) => Array.isArray(observed) && observed.every((value, index) => index === 0 || value > observed[index - 1]),
   field_absent: ({ expected, observed }) => observed && typeof observed === 'object' && !Object.hasOwn(observed, expected),
   observer_identity: equality,
-  fallback_identity: equality,
+  fallback_identity: fallbackIdentity,
   transport_identity: equality,
   session_identity: equality,
   fault_witness: equality,

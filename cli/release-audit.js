@@ -48,8 +48,10 @@ export function createReleaseCaseExecutor({
     .map((entry) => String(entry).split(/=(.*)/su).slice(0, 2))
     .filter(([key]) => key));
 
+  const environmentKey = (coordinate) => `${coordinate.transport}|${coordinate.observerOrder.join(',')}`;
+
   const environmentFor = async (coordinate) => {
-    const key = `${coordinate.transport}|${coordinate.observerOrder.join(',')}`;
+    const key = environmentKey(coordinate);
     let environment = environments.get(key);
     if (!environment) {
       environment = await environmentFactory({
@@ -63,6 +65,15 @@ export function createReleaseCaseExecutor({
     return environment;
   };
 
+  const retireEnvironment = async (coordinate, environment) => {
+    const key = environmentKey(coordinate);
+    if (environments.get(key) === environment) environments.delete(key);
+    const restoration = await environment.stop();
+    if (restoration?.restored !== true) {
+      throw new Error('audit environment could not be restored after an executor failure');
+    }
+  };
+
   const executeCase = async ({ coordinate, attemptId }) => {
     const definition = catalog.casesById.get(coordinate.caseId);
     if (!definition) throw new Error(`required declarative case ${coordinate.caseId} is missing`);
@@ -70,10 +81,20 @@ export function createReleaseCaseExecutor({
       catalog, caseId: coordinate.caseId, profileId, coordinate,
     });
     const environment = await environmentFor(coordinate);
-    const result = await runCase({
-      environment, definition, plan, release: releaseIdentity, attemptId,
-      captureExecution: (record) => executionRecords.push(record),
-    });
+    let result;
+    try {
+      result = await runCase({
+        environment, definition, plan, release: releaseIdentity, attemptId,
+        captureExecution: (record) => executionRecords.push(record),
+      });
+    } catch (error) {
+      try {
+        await retireEnvironment(coordinate, environment);
+      } catch (restorationError) {
+        throw new AggregateError([error, restorationError], 'case execution and environment restoration failed');
+      }
+      throw error;
+    }
     caseOutcomes.push(result);
     return result;
   };

@@ -174,7 +174,10 @@
     "observer": {
       "kind": "fallback",
       "from": "changeStreams",
-      "to": "polling",
+      "to": {
+        "replica_set": "oplog",
+        "standalone": "polling"
+      },
       "reasonRequired": true
     },
     "transportIdentity": "diagnostic",
@@ -182,7 +185,7 @@
     "ledgers": [
       "mongodb_snapshot",
       "ddp_snapshot",
-      "observer_selection"
+      "fallback_selection"
     ]
   },
   "oracles": [
@@ -229,14 +232,17 @@
         "value": {
           "kind": "fallback",
           "from": "changeStreams",
-          "to": "polling",
+          "to": {
+            "replica_set": "oplog",
+            "standalone": "polling"
+          },
           "reasonRequired": true
         }
       },
       "observed": {
         "producer": "meteor_probe",
         "stepId": "subscribe",
-        "ledger": "observer_selection"
+        "ledger": "fallback_selection"
       },
       "failureReason": "fallback_evidence_missing",
       "gate": "hard"

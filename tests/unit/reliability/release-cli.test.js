@@ -58,3 +58,44 @@ test('release finalization maps recovery dimensions independently', async () => 
   assert.equal(recovery.profilerRestored, true);
   assert.equal(recovery.networkRestored, true);
 });
+
+test('release executor retires a poisoned environment before the next coordinate', async () => {
+  let environmentCount = 0;
+  let invocationCount = 0;
+  const stopped = [];
+  const executeCase = createReleaseCaseExecutor({
+    values: {}, source: {}, appPath: '/app', releaseIdentity: {},
+    environmentFactory: async () => {
+      environmentCount += 1;
+      const identity = environmentCount;
+      return {
+        async stop() {
+          stopped.push(identity);
+          return {
+            restored: true,
+            recovery: {
+              runDocumentsRemoved: true, topologyRestored: true,
+              profilerRestored: true, networkRestored: true,
+            },
+          };
+        },
+      };
+    },
+    runCase: async () => {
+      invocationCount += 1;
+      if (invocationCount === 1) throw new Error('poisoned transport');
+      return { status: 'passed' };
+    },
+  });
+  const coordinate = {
+    caseId: 'event.insert', transport: 'sockjs', topology: 'replica_set', seed: 1,
+    observerOrder: ['changeStreams', 'oplog', 'polling'],
+  };
+
+  await assert.rejects(() => executeCase({ coordinate, attemptId: 'attempt-1' }), /poisoned transport/u);
+  await executeCase({ coordinate, attemptId: 'attempt-2' });
+  assert.equal(environmentCount, 2);
+  assert.deepEqual(stopped, [1]);
+  await executeCase.finalize();
+  assert.deepEqual(stopped, [1, 2]);
+});

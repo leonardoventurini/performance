@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { DeclarativeCaseInterpreter, validatePlanPrimitiveCoverage } from '../../../reliability/runtime/interpreter.js';
-import { evaluateDeclarativeOracles } from '../../../reliability/oracles/evaluator.js';
+import { DECLARATIVE_ORACLE_HANDLERS, evaluateDeclarativeOracles } from '../../../reliability/oracles/evaluator.js';
 
 const plan = Object.freeze({
   contractDigest: 'a'.repeat(64),
@@ -43,6 +43,42 @@ test('interpreter executes only registered steps, resolves values, and always cl
   assert.equal(execution.evidence.outputs.cleanup.cleanup, true);
   assert.match(execution.evidence.digest, /^[a-f0-9]{64}$/);
   assert.throws(() => { execution.evidence.outputs.cleanup.cleanup = false; }, TypeError);
+});
+
+test('interpreter seals binary evidence without attempting to freeze typed-array elements', async () => {
+  const events = [];
+  const producerBytes = new Uint8Array([1, 2, 3]);
+  const binaryRegistry = registry(events);
+  binaryRegistry.steps.snapshot = async () => ({
+    snapshot: [{ _id: '1', payload: producerBytes }],
+    provenance: { snapshot: 'mongodb' },
+  });
+  const interpreter = new DeclarativeCaseInterpreter({ registry: binaryRegistry, interpreterVersion: 'test-v1' });
+  const execution = await interpreter.execute({ plan, definition: { cleanup: {} }, runId: 'run-1', fixture: {} });
+
+  assert.equal(execution.status, 'passed');
+  assert.deepEqual([...execution.evidence.outputs.snapshot.snapshot[0].payload], [1, 2, 3]);
+  assert.equal(Object.isFrozen(execution.evidence.outputs.snapshot), true);
+  producerBytes[0] = 99;
+  assert.deepEqual([...execution.evidence.outputs.snapshot.snapshot[0].payload], [1, 2, 3]);
+});
+
+test('fallback oracle binds observed source, topology target, and reason presence', () => {
+  const execution = { evidence: { coordinate: { topology: 'replica_set' } } };
+  const expected = {
+    kind: 'fallback', from: 'changeStreams',
+    to: { replica_set: 'oplog', standalone: 'polling' }, reasonRequired: true,
+  };
+  assert.equal(DECLARATIVE_ORACLE_HANDLERS.fallback_identity({
+    expected,
+    observed: { kind: 'fallback', from: 'changeStreams', to: 'oplog', reasonRequired: true },
+    execution,
+  }), true);
+  assert.equal(DECLARATIVE_ORACLE_HANDLERS.fallback_identity({
+    expected,
+    observed: { kind: 'fallback', from: 'changeStreams', to: 'polling', reasonRequired: true },
+    execution,
+  }), false);
 });
 
 test('primitive coverage fails before the first side effect', () => {

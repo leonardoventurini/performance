@@ -191,14 +191,14 @@ function refRecord(value, path) {
 const STEP_KINDS = ['subscribe', 'mongo_write', 'wait', 'barrier', 'client_lifecycle', 'fault', 'snapshot', 'seal_evidence'];
 function query(value, path) {
   record(value, path, ['kind', 'selector', 'sort', 'skip', 'limit', 'fields', 'projections', 'operator'], ['kind']);
-  oneOf(value.kind, `${path}.kind`, ['unordered', 'ordered', 'windowed', 'selector', 'projection', 'multiple_projections', 'unsupported_selector']);
+  oneOf(value.kind, `${path}.kind`, ['unordered', 'ordered', 'windowed', 'selector', 'projection', 'multiple_projections', 'unsupported_selector', 'change_stream_unavailable']);
   if (value.selector !== undefined) selector(value.selector, `${path}.selector`);
   if (value.sort !== undefined) list(value.sort, `${path}.sort`, (entry, entryPath) => { record(entry, entryPath, ['field', 'direction']); id(entry.field, `${entryPath}.field`); oneOf(entry.direction, `${entryPath}.direction`, ['ascending', 'descending']); return entry; }, 8, true);
   if (value.skip !== undefined) literalOrValueRef(value.skip, `${path}.skip`);
   if (value.limit !== undefined) literalOrValueRef(value.limit, `${path}.limit`);
   if (value.fields !== undefined) list(value.fields, `${path}.fields`, (field, fieldPath) => id(field, fieldPath), 64, true);
   if (value.projections !== undefined) list(value.projections, `${path}.projections`, (fields, fieldsPath) => list(fields, fieldsPath, (field, fieldPath) => id(field, fieldPath), 64, true), 16, true);
-  if (value.operator !== undefined) oneOf(value.operator, `${path}.operator`, ['near']);
+  if (value.operator !== undefined) oneOf(value.operator, `${path}.operator`, ['json_schema']);
   if (value.kind === 'ordered' && value.sort === undefined) fail(`${path}.sort`, 'is required');
   if (value.kind === 'windowed' && value.limit === undefined && value.skip === undefined) fail(`${path}`, 'requires skip or limit');
   if (value.kind === 'selector' && value.selector === undefined) fail(`${path}.selector`, 'is required');

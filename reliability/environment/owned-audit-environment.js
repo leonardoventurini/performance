@@ -7,6 +7,12 @@ import { AuditProxy } from './audit-proxy.js';
 import { OwnedMeteorCluster } from './owned-meteor-cluster.js';
 import { OwnedReplicaSet } from './owned-replica-set.js';
 
+function ownedOplogUrl(mongoUrl) {
+  const result = mongoUrl.replace(/\/meteor(?=\?|$)/u, '/local');
+  if (result === mongoUrl) throw new Error('Owned audit MongoDB URL does not name the meteor database');
+  return result;
+}
+
 /** Resolves mongod from the fixture's active Meteor dev bundle. */
 export function resolveMeteorMongod(source, appPath, execute = execFileSync) {
   const nodePath = execute(source.meteorCmd, ['node', '-p', 'process.execPath'], {
@@ -56,7 +62,10 @@ export class OwnedAuditEnvironment {
         meteorCommand: this.source.meteorCmd,
         meteorArgsPrefix: this.source.releaseArg ? [this.source.releaseArg] : [],
         mongoUrl: this.replicaSet.uri,
-        environment: this.environment,
+        environment: {
+          ...this.environment,
+          MONGO_OPLOG_URL: ownedOplogUrl(this.replicaSet.uri),
+        },
       });
       this.proxy = await this.factories.createProxy({
         auditId: this.auditId,

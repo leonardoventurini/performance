@@ -76,7 +76,7 @@
       "kind": "subscribe",
       "query": {
         "kind": "unsupported_selector",
-        "operator": "near"
+        "operator": "json_schema"
       },
       "onFailure": "incomplete_case",
       "clients": {
@@ -182,7 +182,7 @@
     "ledgers": [
       "mongodb_snapshot",
       "ddp_snapshot",
-      "observer_selection"
+      "fallback_selection"
     ]
   },
   "oracles": [
@@ -236,7 +236,7 @@
       "observed": {
         "producer": "meteor_probe",
         "stepId": "subscribe",
-        "ledger": "observer_selection"
+        "ledger": "fallback_selection"
       },
       "failureReason": "fallback_evidence_missing",
       "gate": "hard"

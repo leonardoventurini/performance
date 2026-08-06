@@ -112,7 +112,10 @@ export function initAuditObserverTracker() {
     const observedChecks = Object.fromEntries(Object.entries(driverChecks).map(([driver, check]) => [
       driver,
       async () => {
-        const result = await check();
+        const result = driver === 'changeStreams'
+          && context.scope?.queryId === 'change_stream_unavailable'
+          ? { available: false, reason: 'closed audit primitive forced Change Stream unavailability' }
+          : await check();
         attempts.push(Object.freeze({
           driver,
           available: result?.available === true,
@@ -127,7 +130,7 @@ export function initAuditObserverTracker() {
   };
   mongo._observeChanges = async function (...args) {
     const scope = extractAuditScope(args[0]);
-    const context = {};
+    const context = { scope };
     const handle = scope?.runId === process.env.AUDIT_RUN_ID
       ? await selectionContexts.run(context, () => original(...args))
       : await original(...args);

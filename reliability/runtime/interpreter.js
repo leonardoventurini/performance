@@ -1,4 +1,5 @@
 import { contractDigest } from '../contracts/digest.js';
+import { immutableClone } from './immutable.js';
 
 const STEP_KINDS = Object.freeze([
   'subscribe', 'mongo_write', 'wait', 'barrier', 'client_lifecycle', 'fault',
@@ -7,15 +8,7 @@ const STEP_KINDS = Object.freeze([
 const ABORT_SETTLEMENT_TIMEOUT_MS = 250;
 
 function immutable(value) {
-  const result = structuredClone(value);
-  const freeze = (entry) => {
-    if (entry && typeof entry === 'object' && !Object.isFrozen(entry)) {
-      Object.freeze(entry);
-      for (const child of Object.values(entry)) freeze(child);
-    }
-    return entry;
-  };
-  return freeze(result);
+  return immutableClone(value);
 }
 
 function timeoutSignal(milliseconds, parentSignal) {

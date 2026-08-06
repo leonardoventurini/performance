@@ -1,5 +1,6 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
+import { Binary, ObjectId } from 'mongodb';
 import {
   MAX_PAYLOAD_BYTES,
   buildSyntheticDocument,
@@ -26,6 +27,44 @@ describe('reliability synthetic data', () => {
     assert.notEqual(
       buildSyntheticDocument({ ...base, revision: 0 }).payloadDigest,
       buildSyntheticDocument({ ...base, revision: 1 }).payloadDigest,
+    );
+  });
+
+  test('canonicalizes BSON and DDP extended values to the same digest', () => {
+    const bytes = Uint8Array.from([1, 2, 3]);
+    assert.equal(
+      documentDigest({ value: new Binary(bytes) }),
+      documentDigest({ value: bytes }),
+    );
+    const objectId = new ObjectId('000000000000000000000001');
+    assert.equal(
+      documentDigest({ value: objectId }),
+      documentDigest({ value: new ObjectId(objectId.toHexString()) }),
+    );
+    assert.notEqual(
+      documentDigest({ value: new Date(0) }),
+      documentDigest({ value: new Date(1) }),
+    );
+  });
+
+  test('canonical type nodes cannot collide with user-authored lookalike objects', () => {
+    const bytes = Uint8Array.from([1, 2, 3]);
+    assert.notEqual(
+      documentDigest({ value: new Date(0) }),
+      documentDigest({ value: { $date: new Date(0).toISOString() } }),
+    );
+    assert.notEqual(
+      documentDigest({ value: bytes }),
+      documentDigest({ value: { $binary: Buffer.from(bytes).toString('base64') } }),
+    );
+    const objectId = new ObjectId('000000000000000000000001');
+    assert.notEqual(
+      documentDigest({ value: objectId }),
+      documentDigest({ value: { buffer: Uint8Array.from(objectId.id) } }),
+    );
+    assert.notEqual(
+      documentDigest({ value: new Binary(bytes, 0) }),
+      documentDigest({ value: new Binary(bytes, 1) }),
     );
   });
 

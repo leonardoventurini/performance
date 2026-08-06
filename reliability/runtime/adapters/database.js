@@ -165,10 +165,17 @@ export function createDatabaseAdapter({ collection, fixture }) {
         transitioned.revision = Number(transitioned.revision || 0) + 1;
         expected.set(id, transitioned);
       } else if (step.operation === 'replace_one') {
-        const replacement = { ...fixtureDocument, ...generatedFields(
-          step.mutation.generator || 'replacement-document-v1',
-          { seed: 0, payloadBytes: Buffer.byteLength(fixtureDocument.payload || '') },
-        ), revision: Number(expected.get(id)?.revision || 0) + 1 };
+        const replacement = {
+          _id: fixtureDocument._id,
+          runId: fixtureDocument.runId,
+          caseExecutionId: fixtureDocument.caseExecutionId,
+          sequence: fixtureDocument.sequence,
+          ...generatedFields(
+            step.mutation.generator || 'replacement-document-v1',
+            { seed: 0, payloadBytes: Buffer.byteLength(fixtureDocument.payload || '') },
+          ),
+          revision: Number(expected.get(id)?.revision || 0) + 1,
+        };
         await collection.replaceOne({ _id: fixtureDocument._id }, replacement);
         expected.set(id, replacement);
       } else if (step.operation === 'delete_one') {

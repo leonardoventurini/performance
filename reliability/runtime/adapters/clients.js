@@ -15,12 +15,17 @@ function delay(milliseconds) {
 /** Resolves a validated declarative query into the fixture's closed descriptor. */
 export function resolveReliabilityQueryId(query) {
   if (query.kind === 'unordered') return 'unordered';
-  if (query.kind === 'ordered') return 'ordered_sequence';
+  if (query.kind === 'ordered') {
+    throw new Error('ordered observer evidence requires a dedicated server-side observe primitive');
+  }
   if (query.kind === 'multiple_projections') return 'multiple_projections';
   if (query.kind === 'projection') return 'projection_conformance';
-  if (query.kind === 'unsupported_selector') return 'unsupported_near';
+  if (query.kind === 'unsupported_selector') return 'unsupported_json_schema';
+  if (query.kind === 'change_stream_unavailable') return 'change_stream_unavailable';
   if (query.kind === 'windowed' && query.limit !== undefined) return 'limit_one';
-  if (query.kind === 'windowed' && query.skip !== undefined) return 'skip_one';
+  if (query.kind === 'windowed' && query.skip !== undefined) {
+    throw new Error('skip fallback evidence requires a query-scoped expected-model primitive');
+  }
   if (query.kind === 'selector' && query.selector.field === 'included') return 'selector_included';
   if (query.kind === 'selector' && query.selector.field === 'cohort') return 'selector_secondary_cohort';
   throw new Error(`query ${query.kind} has no closed fixture descriptor`);
@@ -111,13 +116,28 @@ export function createClientAdapter({
       if (signal?.aborted) throw signal.reason;
       const actualDrivers = [...new Set(observerEvidence.map(({ actualDriver }) => actualDriver))];
       if (actualDrivers.length !== 1) throw new Error('audit cursors selected inconsistent observer drivers');
+      const fallbackEvidence = observerEvidence.filter(({ fallbackFrom, fallbackReason }) => (
+        typeof fallbackFrom === 'string' && typeof fallbackReason === 'string' && fallbackReason.length > 0
+      ));
+      const fallbackSources = [...new Set(fallbackEvidence.map(({ fallbackFrom }) => fallbackFrom))];
+      const fallbackSelection = fallbackEvidence.length === observerEvidence.length
+        && fallbackSources.length === 1
+        ? {
+          kind: 'fallback',
+          from: fallbackSources[0],
+          to: actualDrivers[0],
+          reasonRequired: true,
+        }
+        : null;
       return {
         observer_selection: actualDrivers[0],
         observerEvidence,
+        ...(fallbackSelection ? { fallback_selection: fallbackSelection } : {}),
         transport_identity: transport,
         provenance: {
           observer_selection: 'meteor_probe',
           observerEvidence: 'meteor_probe',
+          ...(fallbackSelection ? { fallback_selection: 'meteor_probe' } : {}),
           transport_identity: 'meteor_probe',
         },
       };

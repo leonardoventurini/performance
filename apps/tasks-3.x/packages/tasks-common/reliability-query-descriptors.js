@@ -34,10 +34,11 @@ const QUERY_BUILDERS = Object.freeze({
     selector: scope,
     options: { sort: { sequence: 1 }, skip: 1 },
   }],
-  unsupported_near: ({ scope }) => [{
-    selector: { ...scope, location: { $near: [0, 0] } },
+  unsupported_json_schema: ({ scope }) => [{
+    selector: { ...scope, $jsonSchema: { bsonType: 'object', required: ['runId', 'caseExecutionId'] } },
     options: {},
   }],
+  change_stream_unavailable: ({ scope }) => [{ selector: scope, options: {} }],
 });
 
 export const RELIABILITY_QUERY_IDS = Object.freeze(Object.keys(QUERY_BUILDERS));
