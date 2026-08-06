@@ -222,6 +222,7 @@ export class OwnedMeteorCluster {
       await this.#spawnInstance(instance);
     }
     await Promise.all(this.instances.map((instance) => waitForReadiness(instance, this)));
+    for (const instance of this.instances) this.#writeOwnershipMarker(instance);
   }
 
   async #spawnInstance(instance) {
@@ -247,19 +248,30 @@ export class OwnedMeteorCluster {
     instance.stderr = '';
     child.stdout?.on('data', (chunk) => { instance.stdout = appendBounded(instance.stdout, chunk); });
     child.stderr?.on('data', (chunk) => { instance.stderr = appendBounded(instance.stderr, chunk); });
-    const liveIdentity = this.inspectProcess(child.pid);
-    if (!liveIdentity || liveIdentity.pid !== child.pid || typeof liveIdentity.argv !== 'string' || liveIdentity.argv.length === 0) {
+    this.#writeOwnershipMarker(instance);
+  }
+
+  #writeOwnershipMarker(instance) {
+    const liveIdentity = this.inspectProcess(instance.child.pid);
+    if (!liveIdentity || liveIdentity.pid !== instance.child.pid || typeof liveIdentity.argv !== 'string' || liveIdentity.argv.length === 0) {
       throw new Error('Managed Meteor process identity was unavailable after spawn');
     }
+    const launchArgv = [
+      this.meteorCommand,
+      ...this.meteorArgsPrefix,
+      'run',
+      '--port',
+      `127.0.0.1:${instance.port}`,
+    ];
     const marker = {
       auditId: this.auditId,
       ownerId: this.ownerId,
       ownershipToken: this.token,
       instanceId: instance.id,
       generation: instance.generation,
-      pid: child.pid,
+      pid: instance.child.pid,
       argv: liveIdentity.argv,
-      launchArgv: [this.meteorCommand, ...args],
+      launchArgv,
       workspace: instance.workspace,
     };
     fs.writeFileSync(instance.markerPath, `${JSON.stringify(marker)}\n`, { mode: 0o600, flag: 'w' });
@@ -325,6 +337,7 @@ export class OwnedMeteorCluster {
     }
     await this.#spawnInstance(instance);
     await waitForReadiness(instance, this);
+    this.#writeOwnershipMarker(instance);
     return Object.freeze({ id: instance.id, generation: instance.generation });
   }
 
