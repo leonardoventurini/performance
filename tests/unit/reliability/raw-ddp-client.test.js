@@ -125,6 +125,17 @@ test('uses stable operation IDs and resolves matching method results', async () 
   assert.deepEqual(await call, { echoed: true });
 });
 
+test('redacts audit ownership tokens from the immutable wire ledger', async () => {
+  const { client, sockets } = fixture();
+  const socket = await establish(client, sockets);
+  const call = client.call('audit.monitorSnapshot', [{ runId: 'run-1', ownershipToken: 'secret' }]);
+  assert.equal(socket.sent.at(-1).params[0].ownershipToken, 'secret');
+  const outgoing = client.ledger().find(({ message }) => message.method === 'audit.monitorSnapshot');
+  assert.equal(outgoing.message.params[0].ownershipToken, '[redacted]');
+  socket.receive({ msg: 'result', id: 'method-1', result: [] });
+  await call;
+});
+
 test('keeps an immutable bounded ledger and exposes explicit close state', async () => {
   const { client, sockets } = fixture(2);
   const socket = await establish(client, sockets);

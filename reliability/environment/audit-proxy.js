@@ -6,6 +6,7 @@ import WebSocket, { WebSocketServer } from 'ws';
 const MAX_LEDGER_ENTRIES = 100_000;
 const BACKEND_HEADER = 'x-audit-backend';
 const CONNECTION_HEADER = 'x-audit-connection';
+const CONNECTION_ID = /^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$/u;
 
 function validateBackends(backends) {
   if (!Array.isArray(backends) || backends.length < 2 || backends.length > 8) {
@@ -144,9 +145,10 @@ export class AuditProxy {
       method: request.method,
       headers: { ...request.headers, host: target.host },
     }, (upstreamResponse) => {
+      const upstreamCookies = upstreamResponse.headers['set-cookie'] || [];
       response.writeHead(upstreamResponse.statusCode, {
         ...upstreamResponse.headers,
-        'set-cookie': [`audit_backend=${encodeURIComponent(backend.id)}; Path=/; HttpOnly; SameSite=Strict`],
+        'set-cookie': [...upstreamCookies, `audit_backend=${encodeURIComponent(backend.id)}; Path=/; HttpOnly; SameSite=Strict`],
         [BACKEND_HEADER]: backend.id,
       });
       upstreamResponse.pipe(response);
@@ -163,7 +165,13 @@ export class AuditProxy {
 
   handleWebSocket(request, downstream) {
     const backend = this.chooseBackend(request);
-    const connectionId = request.headers[CONNECTION_HEADER] || crypto.randomUUID();
+    const requestedConnectionId = request.headers[CONNECTION_HEADER];
+    const connectionId = requestedConnectionId || crypto.randomUUID();
+    if (!CONNECTION_ID.test(connectionId) || this.connections.has(connectionId)) {
+      this.record('websocket_rejected', { reason: 'invalid_or_duplicate_connection_id' });
+      downstream.close(1008, 'invalid audit connection identity');
+      return;
+    }
     const target = new URL(request.url, backend.webSocketUrl);
     const upstream = new WebSocket(target, {
       headers: {

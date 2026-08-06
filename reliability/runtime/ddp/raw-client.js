@@ -46,6 +46,18 @@ function addListener(socket, event, listener) {
   else socket[`on${event}`] = listener;
 }
 
+function redactLedgerMessage(message) {
+  if (message?.msg !== 'method' || message.method !== 'audit.monitorSnapshot') return message;
+  return {
+    ...message,
+    params: message.params?.map((parameter) => (
+      parameter && typeof parameter === 'object'
+        ? { ...parameter, ownershipToken: '[redacted]' }
+        : parameter
+    )),
+  };
+}
+
 /**
  * Minimal DDP v1 client whose wire state is explicit and suitable for audit evidence.
  * Lifecycle timing and reconnect policy intentionally belong to the caller.
@@ -192,7 +204,7 @@ export class RawDdpClient {
       connectionAttempt: this.connectionAttempt,
       direction,
       byteLength: Buffer.byteLength(raw),
-      message,
+      message: redactLedgerMessage(message),
     });
     this.ledgerEntries.push(entry);
     if (this.ledgerEntries.length > this.maximumLedgerEntries) this.ledgerEntries.shift();

@@ -9,8 +9,11 @@ import {
   validateRoutePolicy,
 } from '../../../reliability/environment/audit-proxy.js';
 
-async function backend(id) {
-  const server = http.createServer((_request, response) => response.end(id));
+async function backend(id, { cookies = [] } = {}) {
+  const server = http.createServer((_request, response) => {
+    if (cookies.length > 0) response.setHeader('set-cookie', cookies);
+    response.end(id);
+  });
   const sockets = new WebSocketServer({ noServer: true });
   server.on('upgrade', (request, socket, head) => sockets.handleUpgrade(request, socket, head, (ws) => {
     ws.on('message', (data, binary) => ws.send(data, { binary }));
@@ -53,7 +56,7 @@ test('route policy is closed and forced targets must be owned', () => {
 });
 
 test('proxy performs sticky HTTP routing and records the actual backend', async () => {
-  const first = await backend('one');
+  const first = await backend('one', { cookies: ['session=preserved; Path=/'] });
   const second = await backend('two');
   const proxy = await new AuditProxy({
     auditId: 'audit-1', backends: [proxyBackend(first), proxyBackend(second)],
@@ -61,6 +64,10 @@ test('proxy performs sticky HTTP routing and records the actual backend', async 
   try {
     const initial = await request(proxy.port);
     assert.equal(initial.body, 'one');
+    assert.deepEqual(initial.response.headers['set-cookie'], [
+      'session=preserved; Path=/',
+      'audit_backend=one; Path=/; HttpOnly; SameSite=Strict',
+    ]);
     const sticky = await request(proxy.port, { cookie: 'audit_backend=one' });
     assert.equal(sticky.body, 'one');
     assert.ok(proxy.snapshotLedger().some((entry) => (
@@ -91,6 +98,11 @@ test('proxy attributes websocket routing and refuses foreign fault targets', asy
     socket.send('hello');
     assert.equal(await echoed, 'hello');
     assert.equal(proxy.connections.get(connectionId).backendId, 'two');
+    const duplicate = new WebSocket(`ws://127.0.0.1:${proxy.port}/websocket`, {
+      headers: { 'x-audit-connection': connectionId },
+    });
+    const duplicateClose = await new Promise((resolve) => duplicate.once('close', (code) => resolve(code)));
+    assert.equal(duplicateClose, 1008);
     assert.throws(() => proxy.dropConnection('foreign'), /not owned/u);
     proxy.dropConnection(connectionId);
     await new Promise((resolve) => socket.once('close', resolve));
