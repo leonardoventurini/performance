@@ -176,6 +176,7 @@ export class OwnedReplicaSet {
     this.started = false;
     this.markerWritten = false;
     this.forcedShutdowns = 0;
+    this.suspended = false;
   }
 
   static async create({ auditId, mongodPath, mongoClient, spawnProcess }) {
@@ -343,6 +344,28 @@ export class OwnedReplicaSet {
     await this.awaitHealthy();
   }
 
+  /** Suspends every owned member to create a bounded total database interruption. */
+  suspendAll() {
+    if (this.suspended) throw new Error('Managed replica set is already suspended');
+    this.assertLiveOwnership();
+    for (const { child } of this.members) child.kill('SIGSTOP');
+    this.suspended = true;
+  }
+
+  /** Restores every member suspended by this exact owner and verifies recovery. */
+  async resumeAll() {
+    if (!this.suspended) throw new Error('Managed replica set is not suspended');
+    this.readAndValidateOwnership();
+    for (const { child } of this.members) {
+      if (child.exitCode !== null || child.signalCode !== null) {
+        throw new Error('Managed replica-set member exited while suspended');
+      }
+      child.kill('SIGCONT');
+    }
+    this.suspended = false;
+    await this.awaitHealthy();
+  }
+
   async stop() {
     const errors = [];
     if (!fs.existsSync(this.rootPath) && this.members.length === 0) {
@@ -356,6 +379,12 @@ export class OwnedReplicaSet {
       } catch (error) {
         throw new AggregateError([error], 'Refusing to stop MongoDB processes without ownership');
       }
+    }
+    if (this.suspended) {
+      for (const { child } of this.members) {
+        if (child.exitCode === null && child.signalCode === null) child.kill('SIGCONT');
+      }
+      this.suspended = false;
     }
     for (const { child } of this.members) {
       if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');

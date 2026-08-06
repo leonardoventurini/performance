@@ -68,3 +68,36 @@ test('managed replica set refuses roots outside its temporary namespace', () => 
     rootPath: path.parse(process.cwd()).root,
   }), /outside the owned temporary namespace/u);
 });
+
+test('database interruption targets only live marker-attested members', async () => {
+  const signals = [];
+  const replicaSet = new OwnedReplicaSet({
+    auditId: 'audit-1',
+    mongodPath: '/bin/false',
+    rootPath: path.join(os.tmpdir(), 'meteor-audit-rs-test-interruption'),
+  });
+  replicaSet.members = [0, 1, 2].map((index) => ({
+    index,
+    port: 37_017 + index,
+    args: [],
+    child: {
+      pid: 100 + index,
+      exitCode: null,
+      signalCode: null,
+      kill(signal) { signals.push([index, signal]); },
+    },
+  }));
+  replicaSet.assertLiveOwnership = () => ({});
+  replicaSet.readAndValidateOwnership = () => ({});
+  replicaSet.awaitHealthy = async () => {};
+
+  replicaSet.suspendAll();
+  assert.equal(replicaSet.suspended, true);
+  await replicaSet.resumeAll();
+  assert.equal(replicaSet.suspended, false);
+  assert.deepEqual(signals, [
+    [0, 'SIGSTOP'], [1, 'SIGSTOP'], [2, 'SIGSTOP'],
+    [0, 'SIGCONT'], [1, 'SIGCONT'], [2, 'SIGCONT'],
+  ]);
+  await assert.rejects(() => replicaSet.resumeAll(), /not suspended/);
+});
