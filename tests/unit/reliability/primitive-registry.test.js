@@ -33,7 +33,7 @@ test('seal evidence delegates quiescence to the trusted adapter and returns its 
               sealed: true,
               producers: ['mongodb'],
               cutoff: { sequence: 11 },
-              quietWindow: { startSequence: 10, endSequence: 11 },
+              quietWindow: { startSequence: 10, endSequence: 11, eventStable: true },
             };
           },
         },

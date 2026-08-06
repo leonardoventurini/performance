@@ -29,6 +29,7 @@ function hasSealedQuietWindow(execution, producer) {
     && Number.isInteger(output.quietWindow.startSequence)
     && Number.isInteger(output.quietWindow.endSequence)
     && output.quietWindow.endSequence >= output.quietWindow.startSequence
+    && output.quietWindow.eventStable === true
   ));
 }
 

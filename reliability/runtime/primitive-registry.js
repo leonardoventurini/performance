@@ -67,6 +67,7 @@ export function createDeclarativePrimitiveRegistry() {
           || !Number.isInteger(cutoff.quietWindow.startSequence)
           || !Number.isInteger(cutoff.quietWindow.endSequence)
           || cutoff.quietWindow.endSequence < cutoff.quietWindow.startSequence
+          || cutoff.quietWindow.eventStable !== true
         ) {
           throw new Error('trusted evidence adapter returned an invalid immutable cutoff');
         }

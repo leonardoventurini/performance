@@ -27,7 +27,7 @@ function registry(events, { failWrite = false } = {}) {
       async snapshot() { events.push('snapshot'); return { snapshot: [{ _id: '1', value: 1 }], provenance: { snapshot: 'mongodb' } }; },
       async seal_evidence() {
         events.push('seal');
-        return { sealed: true, producers: ['mongodb'], cutoff: { sequence: 3 }, quietWindow: { startSequence: 2, endSequence: 3 } };
+        return { sealed: true, producers: ['mongodb'], cutoff: { sequence: 3 }, quietWindow: { startSequence: 2, endSequence: 3, eventStable: true } };
       },
     },
     async cleanup() { events.push('cleanup'); return { cleanup: true }; },
@@ -137,7 +137,7 @@ test('event absence requires provenance-bound evidence sealed after a quiet wind
     sealed: true,
     producers: ['ddp_client'],
     cutoff: { sequence: 7 },
-    quietWindow: { startSequence: 6, endSequence: 7 },
+    quietWindow: { startSequence: 6, endSequence: 7, eventStable: true },
   };
   assert.equal(evaluateDeclarativeOracles({ definition, execution: { status: 'passed', evidence } }).status, 'passed');
 });
