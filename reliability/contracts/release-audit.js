@@ -7,6 +7,12 @@ const FORBIDDEN_IDENTITY_VALUES = new Set(['unknown', 'system', 'unavailable']);
 const GIT_REVISION_PATTERN = /^[a-f0-9]{40,64}$/u;
 const RELEASE_SOURCE_PATTERN = /^release:[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/u;
 const VERSION_PATTERN = /^\d+\.\d+(?:\.\d+)?(?:[-+][a-zA-Z0-9.-]+)?$/u;
+const AUDIT_ORACLE_FAMILIES = Object.freeze([
+  'snapshot_exact', 'event_present', 'event_absent', 'revision_monotonic',
+  'field_absent', 'observer_identity', 'fallback_identity', 'transport_identity',
+  'session_identity', 'fault_witness', 'cleanup_complete', 'release_identity',
+  'workload_process', 'required_coordinate',
+]);
 
 export const RELEASE_AUDIT_STATUSES = Object.freeze([
   'conformant',
@@ -284,8 +290,9 @@ function validateObserverEvidence(value, path) {
 }
 
 function validateOracle(value, path) {
-  object(value, path, ['oracleId', 'producer', 'digest', 'assertions', 'passed', 'failures']);
+  object(value, path, ['oracleId', 'family', 'producer', 'digest', 'assertions', 'passed', 'failures']);
   identifier(value.oracleId, `${path}.oracleId`);
+  enumeration(value.family, `${path}.family`, AUDIT_ORACLE_FAMILIES);
   enumeration(value.producer, `${path}.producer`, ORACLE_PRODUCERS);
   digest(value.digest, `${path}.digest`);
   if (!Number.isSafeInteger(value.assertions) || value.assertions < 0 || value.assertions > 1_000_000) {

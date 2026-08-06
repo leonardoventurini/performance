@@ -13,11 +13,15 @@ import { createBarrierAdapter, createWaitAdapter } from './adapters/waits.js';
 import { DeclarativeCaseInterpreter } from './interpreter.js';
 import { createDeclarativePrimitiveRegistry } from './primitive-registry.js';
 
-function oracleArtifact(oracle, result, execution) {
+function oracleArtifact(oracle, result, execution, fault) {
   return {
     oracleId: oracle.id,
+    family: oracle.family,
     producer: oracle.producer,
-    digest: contractDigest({
+    digest: oracle.family === 'fault_witness' && fault ? contractDigest({
+      activationEvidenceDigest: fault.activationEvidenceDigest,
+      restorationEvidenceDigest: fault.restorationEvidenceDigest,
+    }) : contractDigest({
       result,
       observed: execution.evidence.outputs[oracle.observed.stepId]?.[oracle.observed.ledger],
       planDigest: execution.evidence.planDigest,
@@ -133,8 +137,9 @@ export async function runDeclarativeCase({
     await mongoClient.close();
   }
   const evaluation = evaluateDeclarativeOracles({ definition, execution });
+  const fault = faultArtifact(definition, execution);
   const oracleResults = definition.oracles.map((oracle, index) => (
-    oracleArtifact(oracle, evaluation.results[index], execution)
+    oracleArtifact(oracle, evaluation.results[index], execution, fault)
   ));
   const reasons = [
     ...(execution.failure ? [execution.failure.reason.slice(0, 256)] : []),
@@ -157,7 +162,7 @@ export async function runDeclarativeCase({
     mongo: mongoIdentity,
     observerEvidence: observerArtifacts(definition, plan, execution),
     oracles: oracleResults,
-    ...(faultArtifact(definition, execution) ? { faultWitness: faultArtifact(definition, execution) } : {}),
+    ...(fault ? { faultWitness: fault } : {}),
     diagnostics: {},
     reasons,
   });

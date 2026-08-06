@@ -11,6 +11,8 @@ import {
 import { contractDigest } from '../contracts/digest.js';
 import {
   NEGATIVE_CONTROL_CONTRACT_DIGEST,
+  DECLARATIVE_AUDIT_CONTRACT_DIGEST,
+  DECLARATIVE_AUDIT_INTERPRETER_VERSION,
   RELEASE_CAPABILITY_CONTRACT_DIGEST,
   RELEASE_CAPABILITY_CONTRACT_ID,
   RELEASE_CAPABILITY_REGISTRY,
@@ -34,6 +36,12 @@ function caseEvidenceStatus(result, contract) {
   }
   if (result.release.requested !== result.release.actual) {
     return { status: 'incomplete', reasons: ['release_identity_mismatch'] };
+  }
+  if (result.contractId !== RELEASE_CAPABILITY_CONTRACT_ID
+    || result.contractDigest !== DECLARATIVE_AUDIT_CONTRACT_DIGEST
+    || result.caseDefinitionDigest !== contract?.definitionDigest
+    || result.interpreterVersion !== DECLARATIVE_AUDIT_INTERPRETER_VERSION) {
+    return { status: 'incomplete', reasons: ['declarative_attestation_mismatch'] };
   }
   if (result.oracles.length === 0 || result.oracles.some(({ assertions }) => assertions === 0)) {
     return { status: 'incomplete', reasons: ['oracle_evidence_missing'] };
@@ -60,8 +68,8 @@ function caseEvidenceStatus(result, contract) {
     }
   }
   if (contract?.requiresTransportIdentity
-    && !result.oracles.some(({ oracleId, producer }) => (
-      oracleId === 'transport-identity' && producer === 'meteor_probe'
+    && !result.oracles.some(({ family, producer }) => (
+      family === 'transport_identity' && producer === 'meteor_probe'
     ))) {
     return { status: 'incomplete', reasons: ['transport_identity_missing'] };
   }

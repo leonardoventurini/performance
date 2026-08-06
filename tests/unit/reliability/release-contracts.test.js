@@ -60,6 +60,7 @@ function validCase() {
     }],
     oracles: [{
       oracleId: 'ddp-content',
+      family: 'snapshot_exact',
       producer: 'ddp_client',
       digest: SHA,
       assertions: 1,

@@ -6,6 +6,9 @@ import { coordinateKey } from '../../../reliability/contracts/release-audit.js';
 import { aggregateReleaseAudit } from '../../../reliability/release-audit/aggregate.js';
 import {
   NEGATIVE_CONTROL_CONTRACT_DIGEST,
+  DECLARATIVE_AUDIT_CONTRACT_DIGEST,
+  DECLARATIVE_AUDIT_INTERPRETER_VERSION,
+  RELEASE_CAPABILITY_CONTRACT_ID,
   RELEASE_CASE_CONTRACTS,
   REQUIRED_NEGATIVE_CONTROLS,
 } from '../../../reliability/release-audit/capability-registry.js';
@@ -41,11 +44,11 @@ function caseResult(coordinate, attemptId = 'attempt-1') {
   const fallback = contract?.expectation === 'fallback_required';
   return {
     schemaVersion: 3,
-    contractId: 'change-stream-v1',
-    contractDigest: SHA,
-    caseDefinitionDigest: SHA,
+    contractId: RELEASE_CAPABILITY_CONTRACT_ID,
+    contractDigest: DECLARATIVE_AUDIT_CONTRACT_DIGEST,
+    caseDefinitionDigest: contract?.definitionDigest || SHA,
     compiledPlanDigest: SHA,
-    interpreterVersion: 'declarative-audit-v1',
+    interpreterVersion: DECLARATIVE_AUDIT_INTERPRETER_VERSION,
     resolvedParameters: { subscribers: 1 },
     stepLedgerDigest: SHA,
     evidenceLedgerDigests: { mongodb: SHA, ddp_client: SHA, meteor_probe: SHA },
@@ -72,6 +75,7 @@ function caseResult(coordinate, attemptId = 'attempt-1') {
     oracles: [
       {
         oracleId: 'mongodb-state',
+        family: 'snapshot_exact',
         producer: 'mongodb',
         digest: SHA,
         assertions: 1,
@@ -80,6 +84,7 @@ function caseResult(coordinate, attemptId = 'attempt-1') {
       },
       {
         oracleId: 'ddp-content',
+        family: 'snapshot_exact',
         producer: 'ddp_client',
         digest: SHA,
         assertions: 1,
@@ -88,6 +93,7 @@ function caseResult(coordinate, attemptId = 'attempt-1') {
       },
       {
         oracleId: 'transport-identity',
+        family: 'transport_identity',
         producer: 'meteor_probe',
         digest: contractDigest({ transport: coordinate.transport }),
         assertions: 1,
@@ -96,6 +102,7 @@ function caseResult(coordinate, attemptId = 'attempt-1') {
       },
       ...(coordinate.faultId ? [{
         oracleId: 'fault-witness',
+        family: 'fault_witness',
         producer: 'fault_controller',
         digest: contractDigest({
           activationEvidenceDigest: SHA,
@@ -286,4 +293,15 @@ test('fault evidence must be linked to an independent controller oracle', () => 
     manifest.capabilities.find(({ id }) => id === recoveryCase.coordinate.caseId).reasons,
     ['fault_witness_oracle_mismatch'],
   );
+});
+
+test('mixed declarative semantics cannot conform', () => {
+  const input = aggregationInput();
+  input.caseResults[0].contractDigest = SHA;
+  const manifest = aggregateReleaseAudit(input);
+  assert.equal(manifest.status, 'incomplete');
+  const capability = manifest.capabilities.find(({ id }) => (
+    id === input.caseResults[0].coordinate.caseId
+  ));
+  assert.deepEqual(capability.reasons, ['declarative_attestation_mismatch']);
 });
