@@ -1,4 +1,5 @@
-import { ReliabilityCollection, TasksCollection } from './tasks-common.client';
+import { ReliabilityCollection, TasksCollection } from './tasks-collection';
+import { buildReliabilityCursorPlans } from './reliability-query-descriptors';
 
 export const registerTaskApi = async () => {
   Meteor.methods({
@@ -24,11 +25,16 @@ export const registerTaskApi = async () => {
     Meteor.publish('fetchTasks', function pubFetchTasks() {
       return TasksCollection.find({});
     });
-    Meteor.publish('reliability.documents', function publishReliabilityDocuments(runId) {
-      if (typeof runId !== 'string' || runId.length < 1 || runId.length > 128) {
-        throw new Meteor.Error('invalid-run-id', 'runId must be a non-empty string of at most 128 characters');
+    Meteor.publish('reliability.documents', function publishReliabilityDocuments(request) {
+      let plans;
+      try {
+        plans = buildReliabilityCursorPlans(request);
+      } catch (error) {
+        throw new Meteor.Error('invalid-reliability-query', error.message);
       }
-      return ReliabilityCollection.find({ runId });
+
+      const cursors = plans.map(({ selector, options }) => ReliabilityCollection.find(selector, options));
+      return cursors.length === 1 ? cursors[0] : cursors;
     });
   }
 };
