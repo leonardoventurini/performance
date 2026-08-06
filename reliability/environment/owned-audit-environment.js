@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -41,6 +42,7 @@ export class OwnedAuditEnvironment {
     this.replicaSet = null;
     this.cluster = null;
     this.proxy = null;
+    this.lastRestoration = null;
   }
 
   async start() {
@@ -62,9 +64,9 @@ export class OwnedAuditEnvironment {
       });
       return this;
     } catch (error) {
-      const cleanupErrors = await this.stop();
-      if (cleanupErrors.length > 0) {
-        throw new AggregateError([error, ...cleanupErrors], 'Owned audit environment startup and cleanup failed');
+      const restoration = await this.stop();
+      if (!restoration.restored) {
+        throw new AggregateError([error, new Error('Owned audit environment cleanup was incomplete')], 'Owned audit environment startup and cleanup failed');
       }
       throw error;
     }
@@ -90,17 +92,46 @@ export class OwnedAuditEnvironment {
   }
 
   async stop() {
-    const errors = [];
+    if (this.lastRestoration) return this.lastRestoration;
+    const resourceRestorations = [];
+    let failureCount = 0;
     for (const key of ['proxy', 'cluster', 'replicaSet']) {
       const resource = this[key];
       this[key] = null;
       if (!resource) continue;
       try {
-        await resource.stop();
+        const result = await resource.stop();
+        resourceRestorations.push({
+          resource: key,
+          restored: result?.restored !== false,
+          forcedShutdownCount: Number.isSafeInteger(result?.forcedShutdownCount)
+            ? result.forcedShutdownCount
+            : Number.isSafeInteger(resource.forcedShutdowns) ? resource.forcedShutdowns : 0,
+        });
       } catch (error) {
-        errors.push(error);
+        failureCount += 1;
+        resourceRestorations.push({
+          resource: key,
+          restored: false,
+          forcedShutdownCount: Number.isSafeInteger(error?.restoration?.forcedShutdownCount)
+            ? error.restoration.forcedShutdownCount
+            : Number.isSafeInteger(resource.forcedShutdowns) ? resource.forcedShutdowns : 0,
+        });
       }
     }
-    return errors;
+    const payload = {
+      schemaVersion: 1,
+      restored: failureCount === 0 && resourceRestorations.every(({ restored }) => restored),
+      failureCount,
+      forcedShutdownCount: resourceRestorations.reduce((total, entry) => total + entry.forcedShutdownCount, 0),
+      resources: resourceRestorations,
+    };
+    const digest = crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex');
+    this.lastRestoration = Object.freeze({
+      ...payload,
+      resources: Object.freeze(resourceRestorations.map((entry) => Object.freeze(entry))),
+      digest,
+    });
+    return this.lastRestoration;
   }
 }

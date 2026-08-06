@@ -37,7 +37,14 @@ test('environment provisions the topology in dependency order', async () => {
   }).start();
   assert.equal(environment.ddpUrl, 'ws://127.0.0.1:1234/websocket');
   assert.deepEqual(events, ['resolve:mongod', 'start:replica', 'start:cluster', 'start:proxy']);
-  assert.deepEqual(await environment.stop(), []);
+  const restoration = await environment.stop();
+  assert.equal(restoration.restored, true);
+  assert.equal(restoration.failureCount, 0);
+  assert.equal(restoration.resources.length, 3);
+  assert.match(restoration.digest, /^[a-f0-9]{64}$/u);
+  assert.equal(Object.isFrozen(restoration), true);
+  assert.equal(JSON.stringify(restoration).includes('/tmp'), false);
+  assert.equal(JSON.stringify(restoration).includes('audit-1'), false);
   assert.deepEqual(events.slice(-3), ['stop:proxy', 'stop:cluster', 'stop:replica']);
 });
 
@@ -67,4 +74,21 @@ test('environment evidence excludes endpoints, tokens, paths, and process ids', 
     proxyLedger: [],
   });
   await environment.stop();
+});
+
+test('cleanup artifact seals forced shutdown counts without process identity', async () => {
+  const { factories } = createHarness();
+  factories.createCluster = async () => ({
+    backends: [{ id: 'a' }, { id: 'b' }],
+    forcedShutdowns: 2,
+    async stop() { return { restored: true, forcedShutdownCount: 2 }; },
+  });
+  const environment = await new OwnedAuditEnvironment({
+    auditId: 'audit-secret', source: { meteorCmd: 'meteor' }, appPath: '/tmp/secret-app', factories,
+  }).start();
+  const restoration = await environment.stop();
+  assert.equal(restoration.forcedShutdownCount, 2);
+  assert.equal(await environment.stop(), restoration);
+  const serialized = JSON.stringify(restoration);
+  assert.doesNotMatch(serialized, /audit-secret|secret-app|pid|token/iu);
 });
