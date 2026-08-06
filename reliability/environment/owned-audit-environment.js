@@ -6,15 +6,12 @@ import { AuditProxy } from './audit-proxy.js';
 import { OwnedMeteorCluster } from './owned-meteor-cluster.js';
 import { OwnedReplicaSet } from './owned-replica-set.js';
 
-/** Resolves mongod from the exact Meteor tool selected for the audit. */
-export function resolveMeteorMongod(source, execute = execFileSync) {
-  const args = [
-    ...(source.releaseArg ? [source.releaseArg] : []),
-    'node',
-    '-p',
-    'process.execPath',
-  ];
-  const nodePath = execute(source.meteorCmd, args, { encoding: 'utf8' }).trim();
+/** Resolves mongod from the fixture's active Meteor dev bundle. */
+export function resolveMeteorMongod(source, appPath, execute = execFileSync) {
+  const nodePath = execute(source.meteorCmd, ['node', '-p', 'process.execPath'], {
+    cwd: appPath,
+    encoding: 'utf8',
+  }).trim();
   const mongodPath = path.resolve(path.dirname(nodePath), '..', 'mongodb', 'bin', 'mongod');
   if (!fs.existsSync(mongodPath)) {
     throw new Error('The selected Meteor tool does not provide a bundled mongod');
@@ -49,7 +46,7 @@ export class OwnedAuditEnvironment {
   async start() {
     if (this.replicaSet || this.cluster || this.proxy) throw new Error('Owned audit environment is already started');
     try {
-      const mongodPath = this.factories.resolveMongod(this.source);
+      const mongodPath = this.factories.resolveMongod(this.source, this.appPath);
       this.replicaSet = await this.factories.createReplicaSet({ auditId: this.auditId, mongodPath });
       this.cluster = await this.factories.createCluster({
         auditId: this.auditId,
@@ -86,6 +83,7 @@ export class OwnedAuditEnvironment {
       auditId: this.auditId,
       topology: 'replica_set',
       replicaSetName: this.replicaSet.replicaSetName,
+      forcedMongoShutdowns: this.replicaSet.forcedShutdowns || 0,
       meteorInstances: this.cluster.backends.map(({ id }) => id),
       proxyLedger: this.proxy.snapshotLedger(),
     });

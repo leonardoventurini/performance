@@ -78,8 +78,12 @@ async function waitForMember(member, timeoutMs = STARTUP_TIMEOUT_MS) {
 
 async function waitForExit(child, timeoutMs = SHUTDOWN_TIMEOUT_MS) {
   if (child.exitCode !== null || child.signalCode !== null) return;
+  const exited = new Promise((resolve) => {
+    child.once('exit', resolve);
+    if (child.exitCode !== null || child.signalCode !== null) resolve();
+  });
   await Promise.race([
-    new Promise((resolve) => child.once('exit', resolve)),
+    exited,
     wait(timeoutMs).then(() => { throw new Error(`Managed process ${child.pid} did not exit`); }),
   ]);
 }
@@ -171,6 +175,7 @@ export class OwnedReplicaSet {
     this.members = [];
     this.started = false;
     this.markerWritten = false;
+    this.forcedShutdowns = 0;
   }
 
   static async create({ auditId, mongodPath, mongoClient, spawnProcess }) {
@@ -359,12 +364,12 @@ export class OwnedReplicaSet {
       try {
         await waitForExit(child);
       } catch (error) {
-        errors.push(error);
+        this.forcedShutdowns += 1;
         child.kill('SIGKILL');
         try {
           await waitForExit(child, 1_000);
         } catch (killError) {
-          errors.push(killError);
+          errors.push(new AggregateError([error, killError], `Managed process ${child.pid} could not be stopped`));
         }
       }
     }

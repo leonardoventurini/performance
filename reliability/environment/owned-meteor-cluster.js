@@ -59,8 +59,12 @@ async function waitForHttp(url, child, getStderr, timeoutMs = STARTUP_TIMEOUT_MS
 
 async function waitForExit(child, timeoutMs = SHUTDOWN_TIMEOUT_MS) {
   if (child.exitCode !== null || child.signalCode !== null) return;
+  const exited = new Promise((resolve) => {
+    child.once('exit', resolve);
+    if (child.exitCode !== null || child.signalCode !== null) resolve();
+  });
   await Promise.race([
-    new Promise((resolve) => child.once('exit', resolve)),
+    exited,
     delay(timeoutMs).then(() => { throw new Error(`Managed Meteor process ${child.pid} did not exit`); }),
   ]);
 }

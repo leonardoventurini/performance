@@ -62,6 +62,7 @@ test('environment evidence excludes endpoints, tokens, paths, and process ids', 
     auditId: 'audit-1',
     topology: 'replica_set',
     replicaSetName: 'audit',
+    forcedMongoShutdowns: 0,
     meteorInstances: ['a', 'b'],
     proxyLedger: [],
   });
