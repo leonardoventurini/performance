@@ -1,7 +1,7 @@
 import { Meteor } from 'meteor/meteor';
 import { Mongo } from 'meteor/mongo';
 import { tryMonitorExtras, initializeTaskCollection, registerTaskApi } from 'meteor/tasks-common';
-import { initMethodTiming, initSubTiming, initPropagationTiming, initObserverPoolSampler, initDdpMessageCounter, initFrameSizeCounter, initCompressionTracker, initDriverFallbackTracker } from 'meteor/bench-monitors';
+import { initMethodTiming, initSubTiming, initPropagationTiming, initObserverPoolSampler, initDdpMessageCounter, initFrameSizeCounter, initCompressionTracker, initDriverFallbackTracker, initAuditObserverTracker } from 'meteor/bench-monitors';
 
 // Emit machine-parseable lines on startup. The benchmark harness greps
 // these from stderr and surfaces them under `runtime.*` in the result
@@ -108,6 +108,7 @@ Meteor.startup(async () => {
   initFrameSizeCounter();
   initCompressionTracker();
   initDriverFallbackTracker();
+  initAuditObserverTracker();
   initObserverPoolSampler();
   tryMonitorExtras();
   initializeTaskCollection();
