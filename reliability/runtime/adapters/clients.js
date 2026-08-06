@@ -4,6 +4,9 @@ import { snapshotDigest } from '../../oracles/snapshot.js';
 import { RAW_DDP_STATES, RawDdpClient } from '../ddp/raw-client.js';
 
 const DISCONNECT_TIMEOUT_MS = 5_000;
+const RECONNECT_STORM_CYCLES = 3;
+const PAYLOAD_512_KIB = 512 * 1024;
+const PAYLOAD_NEAR_CEILING = 15 * 1024 * 1024;
 
 function delay(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -47,6 +50,7 @@ export function createClientAdapter({
   const clients = [];
   const faultControlClients = [];
   const subscriptions = new Map();
+  const postconditions = [];
 
   const ensureClients = async (count) => {
     while (clients.length < count) {
@@ -120,8 +124,22 @@ export function createClientAdapter({
     },
     async execute(action, invocation) {
       const selected = await ensureClients(Number(invocation.resolve(invocation.step.clients)));
-      if (action === 'connect' || action === 'deliver_events' || action === 'fanout'
-        || action === 'await_publication_ready') return {};
+      if (action === 'connect') {
+        if (selected.some(({ state }) => state !== RAW_DDP_STATES.CONNECTED)) throw new Error('not every DDP client negotiated a connection');
+        return { connectedClients: selected.length };
+      }
+      if (action === 'deliver_events') {
+        postconditions.push({ kind: 'deliver_events', clients: selected });
+        return { armedAtEntries: selected.map((client) => client.ledger().length) };
+      }
+      if (action === 'fanout') {
+        postconditions.push({ kind: 'fanout', clients: selected });
+        return { armedSubscribers: selected.length };
+      }
+      if (action === 'await_publication_ready') {
+        if (selected.some((client) => !subscriptions.has(client.clientId))) throw new Error('publication readiness lacks an active subscription');
+        return { readySubscriptions: selected.length };
+      }
       if (action === 'capture_frames') {
         return {
           frame_ledger: proxy.snapshotLedger(),
@@ -171,21 +189,59 @@ export function createClientAdapter({
         'fresh_non_sticky_instance', 'reconnect_storm', 'bounded_reconnect_storm',
       ]);
       if (resumable.has(action)) {
-        selected.forEach((client) => client.terminate());
-        await Promise.all(selected.map((client) => waitForDisconnected(client, invocation.signal)));
-        const outcomes = await Promise.all(selected.map((client) => client.resume()));
+        if (['resume_inflight_method', 'resume_queue_boundary', 'resume_after_hot_code_push', 'fresh_after_grace'].includes(action)) {
+          throw new Error(`client lifecycle action ${action} requires a dedicated runtime controller`);
+        }
+        const cycles = ['concurrent_resume_storm', 'reconnect_storm', 'bounded_reconnect_storm'].includes(action)
+          ? RECONNECT_STORM_CYCLES : 1;
+        let outcomes = [];
+        for (let cycle = 0; cycle < cycles; cycle += 1) {
+          selected.forEach((client) => client.terminate());
+          await Promise.all(selected.map((client) => waitForDisconnected(client, invocation.signal)));
+          outcomes = await Promise.all(selected.map((client) => client.resume()));
+        }
         const observed = [...new Set(outcomes.map(({ classification }) => classification))];
         if (observed.length !== 1) throw new Error('DDP clients disagreed on session identity');
+        if (action === 'resume_auth_context') {
+          await Promise.all(selected.map((client) => client.call('audit.monitorSnapshot', [{
+            runId, caseExecutionId, ownershipToken,
+          }])));
+        }
         return {
           expectedSessionIdentity: expectedClassification(action),
           session_identity: observed[0],
           provenance: { session_identity: 'ddp_client' },
         };
       }
-      if (['round_trip_ejson', 'send_payload_512_kib', 'send_payload_near_ceiling',
-        'verify_catchup_timeout_convergence', 'verify_isolated_multiplexers',
-        'verify_normal_read_your_writes', 'verify_ready_snapshot', 'verify_shared_multiplexer'].includes(action)) {
-        return {};
+      if (['round_trip_ejson', 'send_payload_512_kib', 'send_payload_near_ceiling'].includes(action)) {
+        const payload = action === 'round_trip_ejson'
+          ? { date: new Date('2026-01-01T00:00:00.000Z'), nested: { emoji: '🚀' }, values: [null, true, 1.5] }
+          : 'x'.repeat(action === 'send_payload_512_kib' ? PAYLOAD_512_KIB : PAYLOAD_NEAR_CEILING);
+        const responses = await Promise.all(selected.map((client) => client.call('audit.echo', [{
+          runId, ownershipToken, payload,
+        }])));
+        if (responses.some((response) => JSON.stringify(response.payload) !== JSON.stringify(payload))) {
+          throw new Error('DDP EJSON echo changed the payload');
+        }
+        return { echoedBytes: responses.map(({ byteLength }) => byteLength) };
+      }
+      if (['verify_catchup_timeout_convergence', 'verify_normal_read_your_writes'].includes(action)) {
+        postconditions.push({ kind: 'convergence', clients: selected });
+        return { armedClients: selected.length };
+      }
+      if (['verify_isolated_multiplexers', 'verify_shared_multiplexer'].includes(action)) {
+        const observations = invocation.state.outputs.get('subscribe')?.observerEvidence || [];
+        const identitiesByInstance = Map.groupBy(observations, ({ instanceId }) => instanceId);
+        const valid = [...identitiesByInstance.values()].every((entries) => {
+          const identities = new Set(entries.map(({ multiplexerIdentity }) => multiplexerIdentity));
+          return action === 'verify_shared_multiplexer' ? identities.size === 1 : identities.size === entries.length;
+        });
+        if (!valid || identitiesByInstance.size === 0) throw new Error('observer multiplexer identity did not satisfy the declared relationship');
+        return { verifiedInstances: identitiesByInstance.size };
+      }
+      if (action === 'verify_ready_snapshot') {
+        if (snapshotDigest(adapter.snapshots()) !== snapshotDigest([])) throw new Error('ready snapshot was not the exact initial state');
+        return { readySnapshot: true };
       }
       throw new Error(`client lifecycle action ${action} has no live implementation`);
     },
@@ -196,6 +252,20 @@ export function createClientAdapter({
       return snapshots[0] || [];
     },
     ledgers() { return clients.map((client) => client.ledger()); },
+    verifyPostconditions() {
+      for (const condition of postconditions) {
+        if (condition.kind === 'convergence') {
+          adapter.snapshots();
+          continue;
+        }
+        const delivered = condition.clients.map((client) => client.ledger().some(({ direction, message }) => (
+          direction === 'in' && ['added', 'changed', 'removed'].includes(message.msg)
+        )));
+        if (condition.kind === 'deliver_events' && !delivered.some(Boolean)) throw new Error('no DDP collection event was delivered');
+        if (condition.kind === 'fanout' && !delivered.every(Boolean)) throw new Error('DDP event did not fan out to every declared subscriber');
+      }
+      return { verified: postconditions.length };
+    },
     async close() {
       const allClients = [...clients, ...faultControlClients];
       for (const client of allClients) client.close(1000, 'case cleanup');

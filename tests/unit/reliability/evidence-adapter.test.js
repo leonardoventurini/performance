@@ -24,7 +24,11 @@ test('seal proves an event-stable quiet window', async () => {
   const ledgers = [[{ direction: 'in', message: { msg: 'added' } }]];
   const adapter = createEvidenceAdapter({
     collection: {},
-    clients: { snapshots: () => [], ledgers: () => ledgers },
+    clients: {
+      snapshots: () => [],
+      ledgers: () => ledgers,
+      verifyPostconditions: () => ({ verified: 0 }),
+    },
     database: {},
     proxy: { snapshotLedger: () => [{ sequence: 1 }] },
     runId: 'run-1',

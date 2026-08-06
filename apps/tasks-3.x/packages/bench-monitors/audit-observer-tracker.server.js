@@ -1,7 +1,7 @@
 import { Meteor } from 'meteor/meteor';
 import { MongoInternals } from 'meteor/mongo';
 
-import { extractAuditScope, validateAuditFaultRequest, validateAuditMonitorRequest } from './audit-observer-contract';
+import { extractAuditScope, validateAuditEchoRequest, validateAuditFaultRequest, validateAuditMonitorRequest } from './audit-observer-contract';
 
 const MAX_AUDIT_OBSERVATIONS = 10_000;
 const DRIVER_NAMES = Object.freeze({
@@ -123,6 +123,12 @@ export function initAuditObserverTracker() {
     return handle;
   };
   Meteor.methods({
+    'audit.echo'(request) {
+      return validateAuditEchoRequest(request, {
+        runId: process.env.AUDIT_RUN_ID,
+        ownershipToken: process.env.AUDIT_OWNERSHIP_TOKEN,
+      });
+    },
     'audit.monitorSnapshot'(request) {
       const filter = validateAuditMonitorRequest(request, {
         runId: process.env.AUDIT_RUN_ID,

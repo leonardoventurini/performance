@@ -156,6 +156,15 @@ test('redacts audit ownership tokens from the immutable wire ledger', async () =
   assert.equal(outgoing.message.params[0].ownershipToken, '[redacted]');
   socket.receive({ msg: 'result', id: 'method-1', result: [] });
   await call;
+
+  const echo = client.call('audit.echo', [{
+    runId: 'run-1', ownershipToken: 'secret', payload: 'sensitive-payload',
+  }]);
+  const echoOutgoing = client.ledger().find(({ message }) => message.method === 'audit.echo');
+  assert.equal(echoOutgoing.message.params[0].payload, '[redacted]');
+  assert.equal(echoOutgoing.message.params[0].payloadBytes, 19);
+  socket.receive({ msg: 'result', id: 'method-2', result: { payload: 'sensitive-payload' } });
+  await echo;
 });
 
 test('keeps an immutable bounded ledger and exposes explicit close state', async () => {

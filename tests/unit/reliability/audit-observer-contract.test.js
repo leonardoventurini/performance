@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
   extractAuditScope,
+  validateAuditEchoRequest,
   validateAuditFaultRequest,
   validateAuditMonitorRequest,
 } from '../../../apps/tasks-3.x/packages/bench-monitors/audit-observer-contract.js';
@@ -27,6 +28,16 @@ test('observer correlation extracts only valid run and case identifiers', () => 
     runId: '../escape', caseExecutionId: 'case-1', queryId: 'unordered',
     cursorOrdinal: 0, cursorFingerprint: 'cursor-deadbeef',
   } } }), null);
+});
+
+test('transport echo is ownership-attested and byte bounded', () => {
+  const expected = { runId: 'run-1', ownershipToken: 'secret' };
+  assert.deepEqual(validateAuditEchoRequest({
+    runId: 'run-1', ownershipToken: 'secret', payload: { value: 'ok' },
+  }, expected), { payload: { value: 'ok' }, byteLength: 14 });
+  assert.throws(() => validateAuditEchoRequest({
+    runId: 'run-1', ownershipToken: 'secret', payload: 'oversized',
+  }, expected, 2), /byte ceiling/);
 });
 
 test('fault control accepts only owned closed primitives', () => {

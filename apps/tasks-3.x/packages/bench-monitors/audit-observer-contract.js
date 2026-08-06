@@ -68,3 +68,16 @@ export function validateAuditFaultRequest(value, expected, controllers) {
     faultId: value.faultId,
   });
 }
+
+/** Validates a bounded ownership-attested EJSON transport echo. */
+export function validateAuditEchoRequest(value, expected, maximumBytes = 16_777_216) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError('audit echo request must be an object');
+  }
+  const unknown = Object.keys(value).filter((key) => !['runId', 'ownershipToken', 'payload'].includes(key));
+  if (unknown.length > 0) throw new TypeError(`unknown audit echo fields: ${unknown.sort().join(', ')}`);
+  validateAuditMonitorRequest({ runId: value.runId, ownershipToken: value.ownershipToken }, expected);
+  const byteLength = Buffer.byteLength(JSON.stringify(value.payload));
+  if (byteLength > maximumBytes) throw new TypeError('audit echo payload exceeds the bounded byte ceiling');
+  return Object.freeze({ payload: value.payload, byteLength });
+}

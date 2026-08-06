@@ -31,6 +31,7 @@ export function createEvidenceAdapter({ collection, clients, database, proxy, ru
       throw new Error(`snapshot producer ${step.producer} requires a dedicated adapter`);
     },
     async seal({ signal }) {
+      clients.verifyPostconditions();
       const startSequence = sequence;
       const eventCount = () => clients.ledgers().map((ledger) => ledger.filter(({ direction, message }) => (
         direction === 'in' && ['added', 'changed', 'removed'].includes(message.msg)

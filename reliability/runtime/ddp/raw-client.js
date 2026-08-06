@@ -56,7 +56,14 @@ function redactLedgerMessage(message) {
     ...message,
     params: message.params?.map((parameter) => (
       parameter && typeof parameter === 'object'
-        ? { ...parameter, ownershipToken: '[redacted]' }
+        ? {
+          ...parameter,
+          ownershipToken: '[redacted]',
+          ...(Object.hasOwn(parameter, 'payload') ? {
+            payload: '[redacted]',
+            payloadBytes: Buffer.byteLength(JSON.stringify(parameter.payload)),
+          } : {}),
+        }
         : parameter
     )),
   };
