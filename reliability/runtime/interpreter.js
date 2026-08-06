@@ -4,6 +4,7 @@ const STEP_KINDS = Object.freeze([
   'subscribe', 'mongo_write', 'wait', 'barrier', 'client_lifecycle', 'fault',
   'snapshot', 'seal_evidence',
 ]);
+const ABORT_SETTLEMENT_TIMEOUT_MS = 250;
 
 function immutable(value) {
   const result = structuredClone(value);
@@ -35,15 +36,42 @@ function timeoutSignal(milliseconds, parentSignal) {
   };
 }
 
+async function waitForSettlement(operation, milliseconds) {
+  let timer;
+  const deadline = new Promise((resolve) => {
+    timer = setTimeout(() => resolve(false), milliseconds);
+    timer.unref?.();
+  });
+  try {
+    return await Promise.race([
+      operation.then(() => true, () => true),
+      deadline,
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function bounded(operation, signal) {
   if (signal.aborted) throw signal.reason;
+  const pending = Promise.resolve().then(operation);
   let abort;
   const aborted = new Promise((resolve, reject) => {
     abort = () => reject(signal.reason || new Error('operation aborted'));
     signal.addEventListener('abort', abort, { once: true });
   });
   try {
-    return await Promise.race([Promise.resolve(operation), aborted]);
+    return await Promise.race([pending, aborted]);
+  } catch (error) {
+    if (signal.aborted) {
+      const settled = await waitForSettlement(pending, ABORT_SETTLEMENT_TIMEOUT_MS);
+      if (!settled) {
+        const settlementError = new Error('aborted primitive did not settle; cleanup is unsafe');
+        settlementError.cleanupUnsafe = true;
+        throw settlementError;
+      }
+    }
+    throw error;
   } finally {
     signal.removeEventListener('abort', abort);
   }
@@ -123,6 +151,7 @@ export class DeclarativeCaseInterpreter {
       fixture: immutable(fixture),
       context,
       outputs: new Map(),
+      provenance: new Map(),
       ledger: [],
       sealed: null,
     };
@@ -136,13 +165,16 @@ export class DeclarativeCaseInterpreter {
         );
         try {
           const handler = registryHandler(this.registry, step);
-          const output = await bounded(handler({
+          const output = await bounded(() => handler({
             step: immutable(step),
             signal: stepDeadline.signal,
             resolve: (reference) => resolveValue(reference, state),
             state,
           }), stepDeadline.signal);
           state.outputs.set(step.id, immutable(output || {}));
+          if (output?.provenance && typeof output.provenance === 'object') {
+            state.provenance.set(step.id, immutable(output.provenance));
+          }
           state.ledger.push(immutable({ stepId: step.id, status: 'completed' }));
           if (state.ledger.length > plan.budget.maximumEvidenceEntries) {
             throw new Error('case evidence budget exceeded');
@@ -150,6 +182,7 @@ export class DeclarativeCaseInterpreter {
         } catch (error) {
           status = step.onFailure === 'fail_case' ? 'failed' : 'incomplete';
           failure = { stepId: step.id, reason: String(error.message || error) };
+          if (error.cleanupUnsafe === true) state.cleanupUnsafe = true;
           state.ledger.push(immutable({ stepId: step.id, status, reason: failure.reason }));
           break;
         } finally {
@@ -158,12 +191,23 @@ export class DeclarativeCaseInterpreter {
       }
     } finally {
       caseDeadline.dispose();
-      try {
-        const cleanup = await this.registry.cleanup({ state, definition, runId });
-        state.outputs.set('cleanup', immutable(cleanup || {}));
-      } catch (error) {
-        status = 'incomplete';
-        failure = { stepId: 'cleanup', reason: String(error.message || error) };
+      if (!state.cleanupUnsafe) {
+        const cleanupDeadline = timeoutSignal(plan.budget.stepTimeoutMs);
+        try {
+          const cleanup = await bounded(
+            () => this.registry.cleanup({ state, definition, runId, signal: cleanupDeadline.signal }),
+            cleanupDeadline.signal,
+          );
+          state.outputs.set('cleanup', immutable(cleanup || {}));
+          if (cleanup?.provenance && typeof cleanup.provenance === 'object') {
+            state.provenance.set('cleanup', immutable(cleanup.provenance));
+          }
+        } catch (error) {
+          status = 'incomplete';
+          failure = { stepId: 'cleanup', reason: String(error.message || error) };
+        } finally {
+          cleanupDeadline.dispose();
+        }
       }
     }
     const outputs = Object.fromEntries(state.outputs);
@@ -179,6 +223,7 @@ export class DeclarativeCaseInterpreter {
       failure,
       stepLedger: state.ledger,
       outputs,
+      provenance: Object.fromEntries(state.provenance),
     };
     const evidence = immutable({ ...unsignedEvidence, digest: contractDigest(unsignedEvidence) });
     return Object.freeze({ status, failure, evidence });

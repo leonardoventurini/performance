@@ -15,6 +15,23 @@ function readObserved(reference, execution) {
   return execution.evidence.outputs[reference.stepId]?.[reference.ledger];
 }
 
+function hasBoundProvenance(reference, execution) {
+  return execution.evidence.provenance?.[reference.stepId]?.[reference.ledger] === reference.producer;
+}
+
+function hasSealedQuietWindow(execution, producer) {
+  return Object.values(execution.evidence.outputs).some((output) => (
+    output?.sealed === true
+    && Array.isArray(output.producers)
+    && output.producers.includes(producer)
+    && output.cutoff && typeof output.cutoff === 'object'
+    && output.quietWindow && typeof output.quietWindow === 'object'
+    && Number.isInteger(output.quietWindow.startSequence)
+    && Number.isInteger(output.quietWindow.endSequence)
+    && output.quietWindow.endSequence >= output.quietWindow.startSequence
+  ));
+}
+
 const equality = ({ expected, observed }) => isDeepStrictEqual(observed, expected);
 
 /** Closed oracle catalog. Each family compares independently produced evidence. */
@@ -25,7 +42,11 @@ export const DECLARATIVE_ORACLE_HANDLERS = Object.freeze({
     && snapshotDigest(expected) === snapshotDigest(observed)
   ),
   event_present: ({ expected, observed }) => Array.isArray(observed) && observed.some((entry) => isDeepStrictEqual(entry, expected)),
-  event_absent: ({ expected, observed }) => Array.isArray(observed) && !observed.some((entry) => isDeepStrictEqual(entry, expected)),
+  event_absent: ({ expected, observed, oracle, execution }) => (
+    Array.isArray(observed)
+    && hasSealedQuietWindow(execution, oracle.observed.producer)
+    && !observed.some((entry) => isDeepStrictEqual(entry, expected))
+  ),
   revision_monotonic: ({ observed }) => Array.isArray(observed) && observed.every((value, index) => index === 0 || value > observed[index - 1]),
   field_absent: ({ expected, observed }) => observed && typeof observed === 'object' && !Object.hasOwn(observed, expected),
   observer_identity: equality,
@@ -52,6 +73,7 @@ export function evaluateDeclarativeOracles({ definition, execution, handlers = D
       const expected = readExpected(oracle.expected, execution);
       const observed = readObserved(oracle.observed, execution);
       if (expected === undefined || observed === undefined) reason = 'required_evidence_missing';
+      else if (!hasBoundProvenance(oracle.observed, execution)) reason = 'evidence_provenance_mismatch';
       else passed = handler({ expected, observed, oracle, execution }) === true;
     } catch {
       reason = 'oracle_evaluation_error';

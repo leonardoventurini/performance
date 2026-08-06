@@ -24,8 +24,11 @@ function registry(events, { failWrite = false } = {}) {
     steps: {
       async subscribe({ resolve, step }) { events.push(`subscribe:${resolve(step.clients)}`); return {}; },
       async mongo_write() { events.push('write'); if (failWrite) throw new Error('write failed'); return { expectedState: [{ _id: '1', value: 1 }] }; },
-      async snapshot() { events.push('snapshot'); return { snapshot: [{ _id: '1', value: 1 }] }; },
-      async seal_evidence() { events.push('seal'); return {}; },
+      async snapshot() { events.push('snapshot'); return { snapshot: [{ _id: '1', value: 1 }], provenance: { snapshot: 'mongodb' } }; },
+      async seal_evidence() {
+        events.push('seal');
+        return { sealed: true, producers: ['mongodb'], cutoff: { sequence: 3 }, quietWindow: { startSequence: 2, endSequence: 3 } };
+      },
     },
     async cleanup() { events.push('cleanup'); return { cleanup: true }; },
   };
@@ -59,19 +62,41 @@ test('step failure classification follows the declarative onFailure contract', a
   assert.deepEqual(execution.failure, { stepId: 'write', reason: 'write failed' });
 });
 
-test('step deadlines are enforced even when a primitive does not observe its signal', async () => {
+test('step deadlines abort and settle a primitive before cleanup starts', async () => {
   const events = [];
   const slowPlan = {
     ...plan,
     steps: [{ id: 'subscribe', kind: 'subscribe', timeoutMs: 5, onFailure: 'incomplete_case' }],
   };
   const slowRegistry = registry(events);
-  slowRegistry.steps.subscribe = () => new Promise(() => {});
+  slowRegistry.steps.subscribe = ({ signal }) => new Promise((resolve) => {
+    signal.addEventListener('abort', () => {
+      events.push('primitive-settled');
+      resolve({});
+    }, { once: true });
+  });
   const interpreter = new DeclarativeCaseInterpreter({ registry: slowRegistry, interpreterVersion: 'test-v1' });
   const execution = await interpreter.execute({ plan: slowPlan, definition: { cleanup: {} }, runId: 'run-1', fixture: {} });
   assert.equal(execution.status, 'incomplete');
   assert.match(execution.failure.reason, /deadline exceeded/);
-  assert.deepEqual(events, ['cleanup']);
+  assert.deepEqual(events, ['primitive-settled', 'cleanup']);
+});
+
+test('cleanup has a bounded deadline and must settle after cancellation', async () => {
+  const events = [];
+  const cleanupPlan = { ...plan, budget: { ...plan.budget, stepTimeoutMs: 5 } };
+  const slowRegistry = registry(events);
+  slowRegistry.cleanup = ({ signal }) => new Promise((resolve) => {
+    signal.addEventListener('abort', () => {
+      events.push('cleanup-settled');
+      resolve({});
+    }, { once: true });
+  });
+  const interpreter = new DeclarativeCaseInterpreter({ registry: slowRegistry, interpreterVersion: 'test-v1' });
+  const execution = await interpreter.execute({ plan: cleanupPlan, definition: { cleanup: {} }, runId: 'run-1', fixture: {} });
+  assert.equal(execution.status, 'incomplete');
+  assert.deepEqual(events, ['subscribe:1', 'write', 'snapshot', 'seal', 'cleanup-settled']);
+  assert.match(execution.failure.reason, /deadline exceeded/);
 });
 
 test('oracle evaluator compares independent snapshots and fails closed on absence', async () => {
@@ -84,6 +109,35 @@ test('oracle evaluator compares independent snapshots and fails closed on absenc
     failureReason: 'content_digest_mismatch',
   }] };
   assert.equal(evaluateDeclarativeOracles({ definition, execution }).status, 'passed');
+  const forged = {
+    ...execution,
+    evidence: { ...execution.evidence, provenance: { snapshot: { snapshot: 'ddp_client' } } },
+  };
+  const forgedResult = evaluateDeclarativeOracles({ definition, execution: forged });
+  assert.equal(forgedResult.status, 'failed');
+  assert.equal(forgedResult.results[0].reason, 'evidence_provenance_mismatch');
   const missing = { ...execution, evidence: { ...execution.evidence, outputs: {} } };
   assert.equal(evaluateDeclarativeOracles({ definition, execution: missing }).status, 'incomplete');
+});
+
+test('event absence requires provenance-bound evidence sealed after a quiet window', () => {
+  const definition = { oracles: [{
+    id: 'absent', family: 'event_absent', producer: 'ddp_client', gate: 'hard',
+    expected: { kind: 'literal', value: { type: 'changed' } },
+    observed: { producer: 'ddp_client', stepId: 'events', ledger: 'ledger' },
+    failureReason: 'unexpected_event',
+  }] };
+  const evidence = {
+    coordinate: {},
+    outputs: { events: { ledger: [] } },
+    provenance: { events: { ledger: 'ddp_client' } },
+  };
+  assert.equal(evaluateDeclarativeOracles({ definition, execution: { status: 'passed', evidence } }).status, 'failed');
+  evidence.outputs.seal = {
+    sealed: true,
+    producers: ['ddp_client'],
+    cutoff: { sequence: 7 },
+    quietWindow: { startSequence: 6, endSequence: 7 },
+  };
+  assert.equal(evaluateDeclarativeOracles({ definition, execution: { status: 'passed', evidence } }).status, 'passed');
 });
