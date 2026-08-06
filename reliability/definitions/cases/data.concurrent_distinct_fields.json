@@ -108,28 +108,62 @@
       "onFailure": "fail_case"
     },
     {
-      "id": "exercise",
+      "id": "writer-a",
       "kind": "mongo_write",
-      "operation": "replace_one",
+      "concurrencyGroup": "distinct-field-writers",
+      "operation": "update_one",
       "selector": {
         "kind": "fixture_document",
         "index": 0
       },
       "mutation": {
-        "kind": "generated_document",
-        "generator": "concurrent_distinct_fields-v1"
+        "kind": "increment",
+        "path": [
+          "writerA"
+        ],
+        "amount": 1
       },
       "expectedTransition": {
-        "kind": "replace"
+        "kind": "increment_field",
+        "path": [
+          "writerA"
+        ],
+        "amount": 1
+      },
+      "onFailure": "fail_case"
+    },
+    {
+      "id": "exercise",
+      "kind": "mongo_write",
+      "concurrencyGroup": "distinct-field-writers",
+      "operation": "update_one",
+      "selector": {
+        "kind": "fixture_document",
+        "index": 0
+      },
+      "mutation": {
+        "kind": "increment",
+        "path": [
+          "writerB"
+        ],
+        "amount": 1
+      },
+      "expectedTransition": {
+        "kind": "increment_field",
+        "path": [
+          "writerB"
+        ],
+        "amount": 1
       },
       "onFailure": "fail_case"
     },
     {
       "id": "schedule-barrier",
       "kind": "barrier",
+      "barrier": "distinct-field-writers",
       "participants": {
-        "kind": "parameter",
-        "name": "subscribers"
+        "kind": "literal",
+        "value": 2
       },
       "schedule": "concurrent",
       "onFailure": "fail_case"

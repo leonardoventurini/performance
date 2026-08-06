@@ -139,7 +139,6 @@ export function createDatabaseAdapter({ collection, fixture }) {
       const fixtureDocument = fixture.documents[step.selector.index];
       if (!fixtureDocument) throw new Error('fixture selector is outside the generated document set');
       const id = String(fixtureDocument._id);
-      const current = expected.get(id);
       if (step.operation === 'insert_one') {
         const document = step.mutation.kind === 'generated_document'
           ? { ...fixtureDocument, ...generatedFields(step.mutation.generator, {
@@ -152,7 +151,7 @@ export function createDatabaseAdapter({ collection, fixture }) {
         inserted.add(id);
       } else if (step.operation === 'update_one') {
         await collection.updateOne({ _id: fixtureDocument._id }, mongoUpdate(step.mutation, resolve));
-        expected.set(id, applyTransition(current, step.expectedTransition, resolve));
+        expected.set(id, applyTransition(expected.get(id), step.expectedTransition, resolve));
       } else if (step.operation === 'replace_one') {
         const replacement = { ...fixtureDocument, ...generatedFields(
           step.mutation.generator || 'replacement-document-v1',

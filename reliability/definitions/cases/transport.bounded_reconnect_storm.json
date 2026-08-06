@@ -94,6 +94,7 @@
     {
       "id": "lifecycle",
       "kind": "client_lifecycle",
+      "concurrencyGroup": "live-race",
       "action": "reconnect_storm",
       "clients": {
         "kind": "parameter",
@@ -121,6 +122,7 @@
     {
       "id": "exercise",
       "kind": "mongo_write",
+      "concurrencyGroup": "live-race",
       "operation": "update_one",
       "selector": {
         "kind": "fixture_document",
@@ -151,6 +153,7 @@
     {
       "id": "schedule-barrier",
       "kind": "barrier",
+      "barrier": "live-race",
       "participants": {
         "kind": "parameter",
         "name": "subscribers"

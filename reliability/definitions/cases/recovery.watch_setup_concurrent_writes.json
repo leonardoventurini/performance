@@ -93,6 +93,7 @@
     {
       "id": "activate-fault",
       "kind": "fault",
+      "concurrencyGroup": "live-race",
       "operation": "activate",
       "controller": "watch_setup_pause",
       "faultId": "primary-fault",
@@ -118,6 +119,7 @@
     {
       "id": "exercise",
       "kind": "mongo_write",
+      "concurrencyGroup": "live-race",
       "operation": "update_one",
       "selector": {
         "kind": "fixture_document",
@@ -142,6 +144,7 @@
     {
       "id": "schedule-barrier",
       "kind": "barrier",
+      "barrier": "live-race",
       "participants": {
         "kind": "parameter",
         "name": "subscribers"

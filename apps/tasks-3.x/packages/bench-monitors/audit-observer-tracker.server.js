@@ -22,8 +22,36 @@ const INTERNAL_FAULT_CONTROLLERS = Object.freeze([
   'change_stream_repeated_restart',
   'change_stream_unexpected_close',
   'stream_restart',
+  'startup_snapshot_pause',
+  'watch_setup_pause',
   'writes_continue_during_recovery',
 ]);
+
+function driverMatchesCase(driver, caseExecutionId) {
+  return driver?._cursorDescription?.selector?.caseExecutionId === caseExecutionId;
+}
+
+function installDriverGate(drivers, caseExecutionId, method) {
+  const prototypes = [...new Set(drivers.map((driver) => Object.getPrototypeOf(driver)))];
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const restorations = prototypes.map((prototype) => {
+    const original = prototype[method];
+    if (typeof original !== 'function') throw new Error(`audit fault requires ${method}`);
+    const wrapped = async function (...args) {
+      if (driverMatchesCase(this, caseExecutionId)) await gate;
+      return original.apply(this, args);
+    };
+    prototype[method] = wrapped;
+    return () => {
+      if (prototype[method] === wrapped) prototype[method] = original;
+    };
+  });
+  return () => {
+    for (const restore of restorations) restore();
+    release();
+  };
+}
 
 function caseDrivers(caseExecutionId) {
   const drivers = driversByCase.get(caseExecutionId);
@@ -108,7 +136,12 @@ export function initAuditObserverTracker() {
       if (streams.length === 0) throw new Error('audit fault requires an active shared change stream');
       if (fault.operation === 'activate') {
         if (activeFaults.has(key)) throw new Error('audit fault is already active');
-        if (fault.controller === 'change_stream_unexpected_close') {
+        let releaseGate = null;
+        if (fault.controller === 'startup_snapshot_pause') {
+          releaseGate = installDriverGate(drivers, fault.caseExecutionId, '_sendInitialAdds');
+        } else if (fault.controller === 'watch_setup_pause') {
+          releaseGate = installDriverGate(drivers, fault.caseExecutionId, '_startWatching');
+        } else if (fault.controller === 'change_stream_unexpected_close') {
           for (const stream of streams) stream._changeStream?.emit('close');
         } else if (fault.controller === 'stream_restart') {
           await Promise.all(streams.map((stream) => stream._restart()));
@@ -119,11 +152,12 @@ export function initAuditObserverTracker() {
           error.code = 91;
           for (const stream of streams) stream._changeStream?.emit('error', error);
         }
-        activeFaults.set(key, { ...fault, activatedAt: Date.now() });
+        activeFaults.set(key, { ...fault, activatedAt: Date.now(), releaseGate });
         return { activated: true, restored: false, controller: fault.controller, faultId: fault.faultId };
       }
       const active = activeFaults.get(key);
       if (!active || active.controller !== fault.controller) throw new Error('audit fault was not activated by this process');
+      active.releaseGate?.();
       await waitForStreams(fault.caseExecutionId);
       activeFaults.delete(key);
       return { activated: true, restored: true, controller: fault.controller, faultId: fault.faultId };

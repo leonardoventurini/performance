@@ -62,6 +62,37 @@ test('step failure classification follows the declarative onFailure contract', a
   assert.deepEqual(execution.failure, { stepId: 'write', reason: 'write failed' });
 });
 
+test('named concurrency groups start members before a barrier joins them', async () => {
+  const events = [];
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const concurrentRegistry = registry(events);
+  concurrentRegistry.steps.mongo_write = async ({ step }) => {
+    events.push(`start:${step.id}`);
+    if (step.id === 'writer-a') await gate;
+    else release();
+    events.push(`finish:${step.id}`);
+    return { expectedState: [] };
+  };
+  concurrentRegistry.steps.barrier = async ({ step }) => {
+    events.push(`barrier:${step.id}`);
+    return { joined: true };
+  };
+  const concurrentPlan = {
+    ...plan,
+    steps: [
+      { id: 'writer-a', kind: 'mongo_write', concurrencyGroup: 'writers', onFailure: 'fail_case' },
+      { id: 'writer-b', kind: 'mongo_write', concurrencyGroup: 'writers', onFailure: 'fail_case' },
+      { id: 'join', kind: 'barrier', barrier: 'writers', schedule: 'concurrent', participants: { kind: 'literal', value: 2 }, onFailure: 'fail_case' },
+    ],
+  };
+  const interpreter = new DeclarativeCaseInterpreter({ registry: concurrentRegistry, interpreterVersion: 'test-v1' });
+  const execution = await interpreter.execute({ plan: concurrentPlan, definition: { cleanup: {} }, runId: 'run-1', fixture: {} });
+  assert.equal(execution.status, 'passed');
+  assert.deepEqual(events, ['start:writer-a', 'start:writer-b', 'finish:writer-b', 'finish:writer-a', 'barrier:join', 'cleanup']);
+  assert.deepEqual(execution.evidence.stepLedger.map(({ stepId }) => stepId), ['writer-a', 'writer-b', 'join']);
+});
+
 test('step deadlines abort and settle a primitive before cleanup starts', async () => {
   const events = [];
   const slowPlan = {

@@ -207,17 +207,23 @@ function query(value, path) {
   if (value.kind === 'multiple_projections' && value.projections === undefined) fail(`${path}.projections`, 'is required');
 }
 function step(value, path) {
-  record(value, path, ['id', 'kind', 'timeoutMs', 'onFailure', 'operation', 'selector', 'mutation', 'expectedTransition', 'predicate', 'inputs', 'controller', 'faultId', 'action', 'clients', 'producer', 'barrier', 'query', 'schedule', 'participants', 'scope'], ['id', 'kind', 'onFailure']);
+  record(value, path, ['id', 'kind', 'timeoutMs', 'onFailure', 'concurrencyGroup', 'operation', 'selector', 'mutation', 'expectedTransition', 'predicate', 'inputs', 'controller', 'faultId', 'action', 'clients', 'producer', 'barrier', 'query', 'schedule', 'participants', 'scope'], ['id', 'kind', 'onFailure']);
   id(value.id, `${path}.id`); oneOf(value.kind, `${path}.kind`, STEP_KINDS); oneOf(value.onFailure, `${path}.onFailure`, ['fail_case', 'incomplete_case']);
   if (value.timeoutMs !== undefined) integer(value.timeoutMs, `${path}.timeoutMs`, 1, GLOBAL_LIMITS.stepTimeoutMs);
-  const base = ['id', 'kind', 'timeoutMs', 'onFailure'];
+  if (value.concurrencyGroup !== undefined) {
+    if (value.kind === 'barrier' || value.kind === 'seal_evidence' || value.kind === 'snapshot') {
+      fail(`${path}.concurrencyGroup`, `is not allowed for ${value.kind}`);
+    }
+    id(value.concurrencyGroup, `${path}.concurrencyGroup`);
+  }
+  const base = ['id', 'kind', 'timeoutMs', 'onFailure', 'concurrencyGroup'];
   const requiredBase = ['id', 'kind', 'onFailure'];
   if (value.kind === 'mongo_write') { record(value, path, [...base, 'operation', 'selector', 'mutation', 'expectedTransition'], [...requiredBase, 'operation', 'selector', 'mutation', 'expectedTransition']); oneOf(value.operation, `${path}.operation`, ['insert_one', 'insert_many', 'update_one', 'replace_one', 'delete_one', 'delete_many']); selector(value.selector, `${path}.selector`); mutation(value.mutation, `${path}.mutation`); transition(value.expectedTransition, `${path}.expectedTransition`); }
   else if (value.kind === 'wait') { record(value, path, [...base, 'predicate', 'inputs'], [...requiredBase, 'predicate', 'inputs']); oneOf(value.predicate, `${path}.predicate`, ['all_subscribers_ready', 'event_ledger_contains', 'all_subscribers_converged', 'observer_driver_witnessed', 'fault_activated', 'fault_recovered']); record(value.inputs, `${path}.inputs`, Object.keys(value.inputs || {}), []); for (const [key, ref] of Object.entries(value.inputs)) { id(key, `${path}.inputs.${key}`); validateValueRef(ref, `${path}.inputs.${key}`); } }
   else if (value.kind === 'fault') { record(value, path, [...base, 'operation', 'controller', 'faultId'], [...requiredBase, 'operation', 'controller', 'faultId']); oneOf(value.operation, `${path}.operation`, ['activate', 'restore']); oneOf(value.controller, `${path}.controller`, DECLARATIVE_AUDIT_FAULT_CONTROLLERS); id(value.faultId, `${path}.faultId`); }
   else if (value.kind === 'client_lifecycle') { record(value, path, [...base, 'action', 'clients'], [...requiredBase, 'action', 'clients']); oneOf(value.action, `${path}.action`, DECLARATIVE_AUDIT_CLIENT_ACTIONS); validateValueRef(value.clients, `${path}.clients`); }
   else if (value.kind === 'snapshot') { record(value, path, [...base, 'producer', 'scope'], [...requiredBase, 'producer', 'scope']); oneOf(value.producer, `${path}.producer`, DECLARATIVE_AUDIT_PRODUCERS); oneOf(value.scope, `${path}.scope`, ['expected', 'mongodb', 'ddp', 'all']); }
-  else if (value.kind === 'barrier') { record(value, path, [...base, 'barrier', 'schedule', 'participants'], [...requiredBase, 'schedule', 'participants']); if (value.barrier !== undefined) id(value.barrier, `${path}.barrier`); oneOf(value.schedule, `${path}.schedule`, ['serialized', 'concurrent', 'burst']); validateValueRef(value.participants, `${path}.participants`); }
+  else if (value.kind === 'barrier') { record(value, path, [...base, 'barrier', 'schedule', 'participants'], [...requiredBase, 'barrier', 'schedule', 'participants']); id(value.barrier, `${path}.barrier`); oneOf(value.schedule, `${path}.schedule`, ['serialized', 'concurrent', 'burst']); validateValueRef(value.participants, `${path}.participants`); }
   else if (value.kind === 'subscribe') { record(value, path, [...base, 'query', 'clients'], [...requiredBase, 'query', 'clients']); query(value.query, `${path}.query`); validateValueRef(value.clients, `${path}.clients`); }
   else record(value, path, base, requiredBase);
   return value;
@@ -244,6 +250,14 @@ export function validateDeclarativeCaseDefinition(value, path = 'case') {
   record(value.fixture, `${path}.fixture`, ['collection', 'publication', 'generator', 'subscribers', 'documents', 'payloadBytes']); oneOf(value.fixture.collection, `${path}.fixture.collection`, ['reliabilityDocuments']); oneOf(value.fixture.publication, `${path}.fixture.publication`, ['reliability.documents']); oneOf(value.fixture.generator, `${path}.fixture.generator`, DECLARATIVE_AUDIT_GENERATORS); for (const key of ['subscribers', 'documents', 'payloadBytes']) validateValueRef(value.fixture[key], `${path}.fixture.${key}`);
   list(value.preconditions, `${path}.preconditions`, (entry, p) => { record(entry, p, ['kind', 'driver', 'topology', 'transport'], ['kind']); oneOf(entry.kind, `${p}.kind`, ['actual_observer_available', 'observer_driver_unavailable', 'topology_available', 'topology_matches_coordinate', 'transport_available', 'fault_controller_available']); if (entry.driver !== undefined) oneOf(entry.driver, `${p}.driver`, ['changeStreams', 'oplog', 'polling']); if (entry.topology !== undefined) oneOf(entry.topology, `${p}.topology`, ['replica_set', 'sharded_cluster', 'standalone']); if (entry.transport !== undefined) validateValueRef(entry.transport, `${p}.transport`); return entry; }, 32);
   const steps = list(value.steps, `${path}.steps`, step, GLOBAL_LIMITS.maximumSteps, true); unique(steps.map((entry) => entry.id), `${path}.steps`);
+  const openConcurrencyGroups = new Set();
+  for (const entry of steps) {
+    if (entry.concurrencyGroup !== undefined) openConcurrencyGroups.add(entry.concurrencyGroup);
+    if (entry.kind === 'barrier') {
+      if (!openConcurrencyGroups.delete(entry.barrier)) fail(`${path}.steps`, `barrier ${entry.id} has no open concurrency group ${entry.barrier}`);
+    }
+  }
+  if (openConcurrencyGroups.size > 0) fail(`${path}.steps`, `has unjoined concurrency groups: ${[...openConcurrencyGroups].sort().join(', ')}`);
   const stepIndex = new Map(steps.map((entry, index) => [entry.id, index]));
   const visitRefs = (node, nodePath, ownerIndex) => { if (!node || typeof node !== 'object') return; if (node.kind === 'step') { validateValueRef(node, nodePath); const target = stepIndex.get(node.stepId); if (target === undefined) fail(`${nodePath}.stepId`, 'references an unknown step'); if (target >= ownerIndex) fail(`${nodePath}.stepId`, 'must reference an earlier step'); } for (const [key, child] of Object.entries(node)) visitRefs(child, `${nodePath}.${key}`, ownerIndex); };
   steps.forEach((entry, index) => visitRefs(entry, `${path}.steps[${index}]`, index));

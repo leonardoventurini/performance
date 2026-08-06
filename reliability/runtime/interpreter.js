@@ -157,40 +157,72 @@ export class DeclarativeCaseInterpreter {
     };
     let status = 'passed';
     let failure = null;
+    const pendingGroups = new Map();
+    const recordCompleted = (step, output) => {
+      state.outputs.set(step.id, immutable(output || {}));
+      if (output?.provenance && typeof output.provenance === 'object') {
+        state.provenance.set(step.id, immutable(output.provenance));
+      }
+      state.ledger.push(immutable({ stepId: step.id, status: 'completed' }));
+      if (state.ledger.length > plan.budget.maximumEvidenceEntries) {
+        throw new Error('case evidence budget exceeded');
+      }
+    };
+    const invokeStep = (step, parentSignal) => {
+      const stepDeadline = timeoutSignal(
+        Math.min(step.timeoutMs || plan.budget.stepTimeoutMs, plan.budget.stepTimeoutMs),
+        parentSignal,
+      );
+      const operation = bounded(() => registryHandler(this.registry, step)({
+        step: immutable(step),
+        signal: stepDeadline.signal,
+        resolve: (reference) => resolveValue(reference, state),
+        state,
+      }), stepDeadline.signal).finally(() => stepDeadline.dispose());
+      return operation;
+    };
     try {
       for (const step of plan.steps) {
-        const stepDeadline = timeoutSignal(
-          Math.min(step.timeoutMs || plan.budget.stepTimeoutMs, plan.budget.stepTimeoutMs),
-          caseDeadline.signal,
-        );
         try {
-          const handler = registryHandler(this.registry, step);
-          const output = await bounded(() => handler({
-            step: immutable(step),
-            signal: stepDeadline.signal,
-            resolve: (reference) => resolveValue(reference, state),
-            state,
-          }), stepDeadline.signal);
-          state.outputs.set(step.id, immutable(output || {}));
-          if (output?.provenance && typeof output.provenance === 'object') {
-            state.provenance.set(step.id, immutable(output.provenance));
+          if (step.concurrencyGroup !== undefined) {
+            const entries = pendingGroups.get(step.concurrencyGroup) || [];
+            entries.push({ step, operation: invokeStep(step, caseDeadline.signal) });
+            pendingGroups.set(step.concurrencyGroup, entries);
+            continue;
           }
-          state.ledger.push(immutable({ stepId: step.id, status: 'completed' }));
-          if (state.ledger.length > plan.budget.maximumEvidenceEntries) {
-            throw new Error('case evidence budget exceeded');
+          if (step.kind === 'barrier') {
+            const entries = pendingGroups.get(step.barrier);
+            if (!entries || entries.length === 0) throw new Error(`concurrency group ${step.barrier} has no pending members`);
+            const outcomes = await Promise.allSettled(entries.map(({ operation }) => operation));
+            for (let index = 0; index < entries.length; index += 1) {
+              const member = entries[index].step;
+              const outcome = outcomes[index];
+              if (outcome.status === 'rejected') {
+                outcome.reason.concurrencyStep = member;
+                throw outcome.reason;
+              }
+              recordCompleted(member, outcome.value);
+            }
+            pendingGroups.delete(step.barrier);
           }
+          const output = await invokeStep(step, caseDeadline.signal);
+          recordCompleted(step, output);
         } catch (error) {
-          status = step.onFailure === 'fail_case' ? 'failed' : 'incomplete';
-          failure = { stepId: step.id, reason: String(error.message || error) };
+          const failedStep = error.concurrencyStep || step;
+          status = failedStep.onFailure === 'fail_case' ? 'failed' : 'incomplete';
+          failure = { stepId: failedStep.id, reason: String(error.message || error) };
           if (error.cleanupUnsafe === true) state.cleanupUnsafe = true;
-          state.ledger.push(immutable({ stepId: step.id, status, reason: failure.reason }));
+          state.ledger.push(immutable({ stepId: failedStep.id, status, reason: failure.reason }));
           break;
-        } finally {
-          stepDeadline.dispose();
         }
       }
     } finally {
       caseDeadline.dispose();
+      if (pendingGroups.size > 0) {
+        const unsettled = [...pendingGroups.values()].flat().map(({ operation }) => operation);
+        const settled = await waitForSettlement(Promise.allSettled(unsettled), ABORT_SETTLEMENT_TIMEOUT_MS);
+        if (!settled) state.cleanupUnsafe = true;
+      }
       if (!state.cleanupUnsafe) {
         const cleanupDeadline = timeoutSignal(plan.budget.stepTimeoutMs);
         try {
