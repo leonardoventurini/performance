@@ -93,6 +93,27 @@ test('named concurrency groups start members before a barrier joins them', async
   assert.deepEqual(execution.evidence.stepLedger.map(({ stepId }) => stepId), ['writer-a', 'writer-b', 'join']);
 });
 
+test('failed race steps restore trusted faults before pending members settle', async () => {
+  const events = [];
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const abortRegistry = registry(events);
+  abortRegistry.steps.subscribe = async () => { events.push('pending'); await gate; events.push('settled'); return {}; };
+  abortRegistry.steps.mongo_write = async () => { throw new Error('race failed'); };
+  abortRegistry.abort = async () => { events.push('abort'); release(); };
+  const abortPlan = {
+    ...plan,
+    steps: [
+      { id: 'pending', kind: 'subscribe', concurrencyGroup: 'race', onFailure: 'incomplete_case' },
+      { id: 'failure', kind: 'mongo_write', onFailure: 'fail_case' },
+    ],
+  };
+  const interpreter = new DeclarativeCaseInterpreter({ registry: abortRegistry, interpreterVersion: 'test-v1' });
+  const execution = await interpreter.execute({ plan: abortPlan, definition: { cleanup: {} }, runId: 'run-1', fixture: {} });
+  assert.equal(execution.status, 'failed');
+  assert.deepEqual(events, ['pending', 'abort', 'settled', 'cleanup']);
+});
+
 test('step deadlines abort and settle a primitive before cleanup starts', async () => {
   const events = [];
   const slowPlan = {

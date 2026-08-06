@@ -19,6 +19,10 @@ function deferred() {
     resolve = resolvePromise;
     reject = rejectPromise;
   });
+  // DDP shutdown can reject several correlated waits in the same tick. The
+  // owning operation still observes the original rejection, while this sink
+  // prevents a sibling wait from becoming a process-level unhandled rejection.
+  promise.catch(() => {});
   return { promise, resolve, reject };
 }
 

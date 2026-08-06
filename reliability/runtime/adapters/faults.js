@@ -20,15 +20,11 @@ function digestibleWitness(controller, faultId, activated, restored) {
 /** Controls only resources owned by the current audit environment. */
 export function createFaultAdapter({ environment, clients, runId, caseExecutionId, ownershipToken }) {
   const active = new Map();
-  const controlClient = () => {
-    const client = clients.clients[0];
-    if (!client) throw new Error('fault control requires an authenticated owned DDP client');
-    return client;
-  };
-  const internal = async (controller, operation, faultId) => controlClient().call(
-    'audit.faultControl',
-    [{ runId, caseExecutionId, ownershipToken, controller, operation, faultId }],
-  );
+  const internal = async (controller, operation, faultId) => Promise.all((await clients.faultControlClients()).map((client) => (
+    client.call('audit.faultControl', [{
+      runId, caseExecutionId, ownershipToken, controller, operation, faultId,
+    }])
+  )));
   return Object.freeze({
     state: active,
     async execute(controller, operation, { step }) {
@@ -70,8 +66,8 @@ export function createFaultAdapter({ environment, clients, runId, caseExecutionI
         if (!outcome.restored) throw outcome.error;
         restored = true;
       } else {
-        const witness = await internal(controller, 'restore', key);
-        restored = witness.restored === true;
+        const witnesses = await internal(controller, 'restore', key);
+        restored = witnesses.every((witness) => witness.restored === true);
       }
       active.delete(key);
       return {
@@ -96,6 +92,20 @@ export function createFaultAdapter({ environment, clients, runId, caseExecutionI
         }
       }
       if (failures.length > 0) throw new AggregateError(failures, 'fault restoration was incomplete');
+    },
+    async waitUntilEngaged(signal) {
+      const gated = [...active.entries()].find(([, fault]) => (
+        ['startup_snapshot_pause', 'watch_setup_pause'].includes(fault.controller)
+      ));
+      if (!gated) throw new Error('no pending lifecycle gate is active');
+      const [faultId, fault] = gated;
+      let lastStatuses = [];
+      while (!signal.aborted) {
+        lastStatuses = await internal(fault.controller, 'status', faultId);
+        if (lastStatuses.every((status) => status.engaged === true)) return { engaged: true };
+        await delay(10);
+      }
+      throw new Error(`lifecycle gate did not engage on every Meteor instance: ${lastStatuses.map(({ engaged }) => engaged === true).join(',')}`);
     },
   });
 }

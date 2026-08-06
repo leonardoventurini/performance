@@ -58,7 +58,7 @@ export function validateAuditFaultRequest(value, expected, controllers) {
     ownershipToken: value.ownershipToken,
   }, expected);
   if (!controllers.includes(value.controller)) throw new TypeError('unknown audit fault controller');
-  if (!['activate', 'restore'].includes(value.operation)) throw new TypeError('unknown audit fault operation');
+  if (!['activate', 'status', 'restore'].includes(value.operation)) throw new TypeError('unknown audit fault operation');
   if (!identifier(value.faultId)) throw new TypeError('faultId must be a valid audit identifier');
   return Object.freeze({
     runId: value.runId,

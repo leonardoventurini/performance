@@ -179,6 +179,7 @@ export class DeclarativeCaseInterpreter {
         resolve: (reference) => resolveValue(reference, state),
         state,
       }), stepDeadline.signal).finally(() => stepDeadline.dispose());
+      operation.catch(() => {});
       return operation;
     };
     try {
@@ -193,6 +194,10 @@ export class DeclarativeCaseInterpreter {
           if (step.kind === 'barrier') {
             const entries = pendingGroups.get(step.barrier);
             if (!entries || entries.length === 0) throw new Error(`concurrency group ${step.barrier} has no pending members`);
+            const declaredParticipants = Number(resolveValue(step.participants, state));
+            if (declaredParticipants !== entries.length) {
+              throw new Error(`concurrency group ${step.barrier} declared ${declaredParticipants} participants but started ${entries.length}`);
+            }
             const outcomes = await Promise.allSettled(entries.map(({ operation }) => operation));
             for (let index = 0; index < entries.length; index += 1) {
               const member = entries[index].step;
@@ -219,6 +224,14 @@ export class DeclarativeCaseInterpreter {
     } finally {
       caseDeadline.dispose();
       if (pendingGroups.size > 0) {
+        try {
+          await this.registry.abort?.({ state, definition, runId });
+        } catch (error) {
+          status = 'incomplete';
+          const abortFailure = { stepId: 'abort', status: 'incomplete', reason: String(error.message || error) };
+          state.ledger.push(immutable(abortFailure));
+          failure ||= { stepId: 'abort', reason: abortFailure.reason };
+        }
         const unsettled = [...pendingGroups.values()].flat().map(({ operation }) => operation);
         const settled = await waitForSettlement(Promise.allSettled(unsettled), ABORT_SETTLEMENT_TIMEOUT_MS);
         if (!settled) state.cleanupUnsafe = true;

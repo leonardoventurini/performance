@@ -28,18 +28,23 @@ const INTERNAL_FAULT_CONTROLLERS = Object.freeze([
 ]);
 
 function driverMatchesCase(driver, caseExecutionId) {
-  return driver?._cursorDescription?.selector?.caseExecutionId === caseExecutionId;
+  return driver?._cursorDescription?.selector?.caseExecutionId === caseExecutionId
+    || extractAuditScope(driver?._cursorDescription)?.caseExecutionId === caseExecutionId;
 }
 
 function installDriverGate(drivers, caseExecutionId, method) {
   const prototypes = [...new Set(drivers.map((driver) => Object.getPrototypeOf(driver)))];
   let release;
+  let engaged = false;
   const gate = new Promise((resolve) => { release = resolve; });
   const restorations = prototypes.map((prototype) => {
     const original = prototype[method];
     if (typeof original !== 'function') throw new Error(`audit fault requires ${method}`);
     const wrapped = async function (...args) {
-      if (driverMatchesCase(this, caseExecutionId)) await gate;
+      if (driverMatchesCase(this, caseExecutionId)) {
+        engaged = true;
+        await gate;
+      }
       return original.apply(this, args);
     };
     prototype[method] = wrapped;
@@ -47,10 +52,13 @@ function installDriverGate(drivers, caseExecutionId, method) {
       if (prototype[method] === wrapped) prototype[method] = original;
     };
   });
-  return () => {
-    for (const restore of restorations) restore();
-    release();
-  };
+  return Object.freeze({
+    engaged: () => engaged,
+    release() {
+      for (const restore of restorations) restore();
+      release();
+    },
+  });
 }
 
 function caseDrivers(caseExecutionId) {
@@ -133,14 +141,20 @@ export function initAuditObserverTracker() {
       const key = `${fault.caseExecutionId}:${fault.faultId}`;
       const drivers = caseDrivers(fault.caseExecutionId);
       const streams = [...new Set(drivers.map((driver) => driver?._sharedStream).filter(Boolean))];
-      if (streams.length === 0) throw new Error('audit fault requires an active shared change stream');
+      if (fault.operation === 'status') {
+        const active = activeFaults.get(key);
+        if (!active || active.controller !== fault.controller) throw new Error('audit fault was not activated by this process');
+        return { activated: true, engaged: active.gate?.engaged() === true, controller: fault.controller, faultId: fault.faultId };
+      }
       if (fault.operation === 'activate') {
         if (activeFaults.has(key)) throw new Error('audit fault is already active');
-        let releaseGate = null;
+        let gate = null;
         if (fault.controller === 'startup_snapshot_pause') {
-          releaseGate = installDriverGate(drivers, fault.caseExecutionId, '_sendInitialAdds');
+          gate = installDriverGate(drivers, fault.caseExecutionId, '_sendInitialAdds');
         } else if (fault.controller === 'watch_setup_pause') {
-          releaseGate = installDriverGate(drivers, fault.caseExecutionId, '_startWatching');
+          gate = installDriverGate(drivers, fault.caseExecutionId, '_startWatching');
+        } else if (streams.length === 0) {
+          throw new Error('audit fault requires an active shared change stream');
         } else if (fault.controller === 'change_stream_unexpected_close') {
           for (const stream of streams) stream._changeStream?.emit('close');
         } else if (fault.controller === 'stream_restart') {
@@ -152,13 +166,13 @@ export function initAuditObserverTracker() {
           error.code = 91;
           for (const stream of streams) stream._changeStream?.emit('error', error);
         }
-        activeFaults.set(key, { ...fault, activatedAt: Date.now(), releaseGate });
+        activeFaults.set(key, { ...fault, activatedAt: Date.now(), gate });
         return { activated: true, restored: false, controller: fault.controller, faultId: fault.faultId };
       }
       const active = activeFaults.get(key);
       if (!active || active.controller !== fault.controller) throw new Error('audit fault was not activated by this process');
-      active.releaseGate?.();
-      await waitForStreams(fault.caseExecutionId);
+      if (active.gate) active.gate.release();
+      else await waitForStreams(fault.caseExecutionId);
       activeFaults.delete(key);
       return { activated: true, restored: true, controller: fault.controller, faultId: fault.faultId };
     },

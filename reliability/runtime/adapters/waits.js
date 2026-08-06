@@ -31,6 +31,7 @@ export function createWaitAdapter({ clients, database, faults }) {
         if (faults.state.size === 0) throw new Error('no fault is active');
         return { activated: true };
       }
+      if (predicate === 'fault_engaged') return faults.waitUntilEngaged(signal);
       if (predicate === 'fault_recovered') {
         if (faults.state.size !== 0) throw new Error('fault has not been restored');
         return { restored: true };

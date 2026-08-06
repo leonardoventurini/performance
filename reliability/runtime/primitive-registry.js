@@ -6,6 +6,7 @@ import {
 const WAIT_PREDICATES = Object.freeze([
   'all_subscribers_ready', 'event_ledger_contains', 'all_subscribers_converged',
   'observer_driver_witnessed', 'fault_activated', 'fault_recovered',
+  'fault_engaged',
 ]);
 
 function immutable(value) {
@@ -77,6 +78,13 @@ export function createDeclarativePrimitiveRegistry() {
     wait: actionHandlers(WAIT_PREDICATES, 'waits'),
     clientLifecycle: actionHandlers(DECLARATIVE_AUDIT_CLIENT_ACTIONS, 'clients'),
     fault: Object.freeze(fault),
+    abort: async ({ state }) => {
+      const faults = requireAdapter(state, 'faults', 'restoreAll');
+      const clients = requireAdapter(state, 'clients', 'close');
+      const outcomes = await Promise.allSettled([faults.restoreAll(), clients.close()]);
+      const failures = outcomes.filter(({ status }) => status === 'rejected').map(({ reason }) => reason);
+      if (failures.length > 0) throw new AggregateError(failures, 'trusted abort recovery was incomplete');
+    },
     cleanup: async ({ state, definition, runId }) => {
       const database = requireAdapter(state, 'database', 'cleanup');
       return database.cleanup({ state, definition, runId });

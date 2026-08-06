@@ -45,6 +45,7 @@ export function createClientAdapter({
   maximumLedgerEntries, transport, clientFactory,
 }) {
   const clients = [];
+  const faultControlClients = [];
   const subscriptions = new Map();
 
   const ensureClients = async (count) => {
@@ -69,6 +70,27 @@ export function createClientAdapter({
   const adapter = {
     clients,
     subscriptions,
+    async faultControlClients() {
+      if (faultControlClients.length > 0) return faultControlClients;
+      for (const backend of cluster.backends) {
+        const clientId = `${caseExecutionId}:control:${backend.id}`;
+        const client = new RawDdpClient({
+          endpoint,
+          clientId,
+          maximumLedgerEntries,
+          webSocketFactory: (url) => new WebSocket(url, {
+            headers: {
+              'x-audit-connection': clientId,
+              'x-audit-backend': backend.id,
+            },
+            perMessageDeflate: false,
+          }),
+        });
+        await client.connect();
+        faultControlClients.push(client);
+      }
+      return faultControlClients;
+    },
     async subscribe({ step, resolve, signal }) {
       const selected = await ensureClients(Number(resolve(step.clients)));
       const descriptor = resolveReliabilityQueryId(step.query);
@@ -175,7 +197,9 @@ export function createClientAdapter({
     },
     ledgers() { return clients.map((client) => client.ledger()); },
     async close() {
-      for (const client of clients) client.close(1000, 'case cleanup');
+      const allClients = [...clients, ...faultControlClients];
+      for (const client of allClients) client.close(1000, 'case cleanup');
+      await Promise.all(allClients.map((client) => waitForDisconnected(client)));
     },
   };
   return Object.freeze(adapter);
