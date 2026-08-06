@@ -71,7 +71,7 @@ function evidenceLedgerDigests(execution) {
 
 /** Executes one compiled coordinate against a running owned environment. */
 export async function runDeclarativeCase({
-  environment, definition, plan, release, attemptId, mongoClientClass = MongoClient,
+  environment, definition, plan, release, attemptId, mongoClientClass = MongoClient, captureExecution,
 }) {
   const runId = environment.auditId;
   const caseExecutionId = attemptId;
@@ -140,7 +140,7 @@ export async function runDeclarativeCase({
     ...(execution.failure ? [execution.failure.reason.slice(0, 256)] : []),
     ...evaluation.results.filter(({ passed }) => !passed).map(({ reason }) => reason),
   ].slice(0, 32);
-  return validateAuditCaseResult({
+  const result = validateAuditCaseResult({
     schemaVersion: 3,
     contractId: plan.contractId,
     contractDigest: plan.contractDigest,
@@ -161,4 +161,15 @@ export async function runDeclarativeCase({
     diagnostics: {},
     reasons,
   });
+  captureExecution?.({
+    definition,
+    plan,
+    execution: {
+      ...execution,
+      contextEvidence: { ddpLedgers: clients.ledgers() },
+    },
+    evaluation,
+    result,
+  });
+  return result;
 }

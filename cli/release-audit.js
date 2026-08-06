@@ -8,6 +8,7 @@ import { OwnedAuditEnvironment } from '../reliability/environment/owned-audit-en
 import { coordinateReleaseAudit } from '../reliability/release-audit/coordinator.js';
 import { attestReleaseIdentity } from '../reliability/release-audit/identity.js';
 import { runDeclarativeCase } from '../reliability/runtime/run-case.js';
+import { runDeclarativeNegativeControls } from '../reliability/runtime/negative-controls.js';
 
 const DEFAULT_RELEASE = '3.5.1-beta.0';
 const DEFAULT_SEED = 42;
@@ -42,6 +43,8 @@ export function createReleaseCaseExecutor({
 }) {
   const environments = new Map();
   const caseOutcomes = [];
+  const executionRecords = [];
+  let attemptedCoordinates = 0;
   const extraEnvironment = Object.fromEntries((Array.isArray(values.env) ? values.env : values.env ? [values.env] : [])
     .map((entry) => String(entry).split(/=(.*)/su).slice(0, 2))
     .filter(([key]) => key));
@@ -62,6 +65,7 @@ export function createReleaseCaseExecutor({
   };
 
   const executeCase = async ({ coordinate, attemptId }) => {
+    attemptedCoordinates += 1;
     const definition = catalog.casesById.get(coordinate.caseId);
     if (!definition) throw new Error(`required declarative case ${coordinate.caseId} is missing`);
     const plan = compileDeclarativeCase({
@@ -70,6 +74,7 @@ export function createReleaseCaseExecutor({
     const environment = await environmentFor(coordinate);
     const result = await runCase({
       environment, definition, plan, release: releaseIdentity, attemptId,
+      captureExecution: (record) => executionRecords.push(record),
     });
     caseOutcomes.push(result);
     return result;
@@ -86,9 +91,15 @@ export function createReleaseCaseExecutor({
       profilerRestored: true,
       networkRestored: restored,
     };
+    const negativeControls = runDeclarativeNegativeControls({
+      controls: catalog.negativeControls || [],
+      records: executionRecords,
+      recovery: recoveryPayload,
+      requiredCoordinateCount: attemptedCoordinates,
+    });
     return {
       recovery: { ...recoveryPayload, digest: contractDigest(recoveryPayload) },
-      negativeControls: [],
+      negativeControls,
       caseOutcomes,
     };
   };

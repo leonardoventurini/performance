@@ -129,6 +129,13 @@ function mongoUpdate(mutation, resolve) {
   throw new Error(`MongoDB mutation ${mutation.kind}:${mutation.variant || ''} is unavailable`);
 }
 
+function withRevisionIncrement(update) {
+  return {
+    ...update,
+    $inc: { ...(update.$inc || {}), revision: 1 },
+  };
+}
+
 /** Creates the database/model adapter for one isolated case. */
 export function createDatabaseAdapter({ collection, fixture }) {
   const expected = new Map(fixture.documents.map((document) => [String(document._id), clone(document)]));
@@ -150,13 +157,18 @@ export function createDatabaseAdapter({ collection, fixture }) {
         expected.set(id, applyTransition(document, step.expectedTransition, resolve));
         inserted.add(id);
       } else if (step.operation === 'update_one') {
-        await collection.updateOne({ _id: fixtureDocument._id }, mongoUpdate(step.mutation, resolve));
-        expected.set(id, applyTransition(expected.get(id), step.expectedTransition, resolve));
+        await collection.updateOne(
+          { _id: fixtureDocument._id },
+          withRevisionIncrement(mongoUpdate(step.mutation, resolve)),
+        );
+        const transitioned = applyTransition(expected.get(id), step.expectedTransition, resolve);
+        transitioned.revision = Number(transitioned.revision || 0) + 1;
+        expected.set(id, transitioned);
       } else if (step.operation === 'replace_one') {
         const replacement = { ...fixtureDocument, ...generatedFields(
           step.mutation.generator || 'replacement-document-v1',
           { seed: 0, payloadBytes: Buffer.byteLength(fixtureDocument.payload || '') },
-        ) };
+        ), revision: Number(expected.get(id)?.revision || 0) + 1 };
         await collection.replaceOne({ _id: fixtureDocument._id }, replacement);
         expected.set(id, replacement);
       } else if (step.operation === 'delete_one') {
