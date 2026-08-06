@@ -101,3 +101,45 @@ test('database interruption targets only live marker-attested members', async ()
   ]);
   await assert.rejects(() => replicaSet.resumeAll(), /not suspended/);
 });
+
+test('recovery attestation independently checks documents and profiler state', async () => {
+  const observations = [];
+  class FakeMongoClient {
+    async connect() { observations.push('connect'); }
+
+    db(name) {
+      assert.equal(name, 'meteor');
+      return {
+        collection(collectionName) {
+          assert.equal(collectionName, 'reliabilityDocuments');
+          return {
+            async countDocuments(filter) {
+              assert.deepEqual(filter, {});
+              return 0;
+            },
+          };
+        },
+        async command(command) {
+          assert.deepEqual(command, { profile: -1 });
+          return { was: 0 };
+        },
+      };
+    }
+
+    async close() { observations.push('close'); }
+  }
+  const replicaSet = new OwnedReplicaSet({
+    auditId: 'audit-1',
+    mongodPath: '/bin/false',
+    rootPath: path.join(os.tmpdir(), 'meteor-audit-rs-test-attestation'),
+    mongoClient: FakeMongoClient,
+  });
+  replicaSet.members = [37_017, 37_018, 37_019].map((port) => ({ port }));
+  replicaSet.assertLiveOwnership = () => ({});
+
+  assert.deepEqual(await replicaSet.attestRecovery(), {
+    runDocumentsRemoved: true,
+    profilerRestored: true,
+  });
+  assert.deepEqual(observations, ['connect', 'close']);
+});

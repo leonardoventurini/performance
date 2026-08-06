@@ -1,5 +1,6 @@
 const AUDIT_IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const AUDIT_CURSOR_SCOPE_OPTION = '_auditObserverScope';
+const OBSERVER_DRIVERS = Object.freeze(['changeStreams', 'oplog', 'polling']);
 
 function identifier(value) {
   return typeof value === 'string' && AUDIT_IDENTIFIER.test(value) ? value : null;
@@ -21,6 +22,22 @@ export function extractAuditScope(cursorDescription) {
   if (!runId || !caseExecutionId || !queryId || !cursorFingerprint
     || !Number.isSafeInteger(cursorOrdinal) || cursorOrdinal < 0) return null;
   return Object.freeze({ runId, caseExecutionId, queryId, cursorOrdinal, cursorFingerprint });
+}
+
+/**
+ * Returns fallback provenance only when Meteor's driver selection checks
+ * independently observed why the preferred driver was rejected.
+ */
+export function deriveObservedFallback(selection, actualDriver) {
+  if (!selection || typeof selection !== 'object' || !OBSERVER_DRIVERS.includes(actualDriver)) return null;
+  if (!Array.isArray(selection.configuredOrder) || !Array.isArray(selection.attempts)) return null;
+  const fallbackFrom = selection.configuredOrder[0];
+  if (!OBSERVER_DRIVERS.includes(fallbackFrom) || fallbackFrom === actualDriver) return null;
+  const rejected = selection.attempts.find(({ driver }) => driver === fallbackFrom);
+  if (!rejected || rejected.available !== false || typeof rejected.reason !== 'string' || rejected.reason.length === 0) {
+    return null;
+  }
+  return Object.freeze({ fallbackFrom, fallbackReason: rejected.reason.slice(0, 256) });
 }
 
 /** Validates the authenticated read request for correlated observer evidence. */

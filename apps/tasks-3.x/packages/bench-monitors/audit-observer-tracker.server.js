@@ -1,7 +1,8 @@
 import { Meteor } from 'meteor/meteor';
 import { MongoInternals } from 'meteor/mongo';
+import { AsyncLocalStorage } from 'node:async_hooks';
 
-import { extractAuditScope, validateAuditEchoRequest, validateAuditFaultRequest, validateAuditMonitorRequest } from './audit-observer-contract';
+import { deriveObservedFallback, extractAuditScope, validateAuditEchoRequest, validateAuditFaultRequest, validateAuditMonitorRequest } from './audit-observer-contract';
 
 const MAX_AUDIT_OBSERVATIONS = 10_000;
 const DRIVER_NAMES = Object.freeze({
@@ -12,8 +13,10 @@ const DRIVER_NAMES = Object.freeze({
 
 const observations = [];
 const multiplexerIdentities = new WeakMap();
+const fallbackProvenanceByMultiplexer = new WeakMap();
 const driversByCase = new Map();
 const activeFaults = new Map();
+const selectionContexts = new AsyncLocalStorage();
 let sequence = 0;
 let multiplexerSequence = 0;
 let patched = false;
@@ -98,14 +101,48 @@ export function initAuditObserverTracker() {
     throw new Error('audit observer tracking requires mongo._observeChanges');
   }
   const original = mongo._observeChanges.bind(mongo);
+  const originalSelect = mongo._selectReactivityDriver?.bind(mongo);
+  if (typeof originalSelect !== 'function') {
+    throw new Error('audit observer tracking requires mongo._selectReactivityDriver');
+  }
+  mongo._selectReactivityDriver = async function (configuredOrder, driverChecks) {
+    const context = selectionContexts.getStore();
+    if (!context) return originalSelect(configuredOrder, driverChecks);
+    const attempts = [];
+    const observedChecks = Object.fromEntries(Object.entries(driverChecks).map(([driver, check]) => [
+      driver,
+      async () => {
+        const result = await check();
+        attempts.push(Object.freeze({
+          driver,
+          available: result?.available === true,
+          ...(typeof result?.reason === 'string' && result.reason.length > 0 ? { reason: result.reason } : {}),
+        }));
+        return result;
+      },
+    ]));
+    const result = await originalSelect(configuredOrder, observedChecks);
+    context.selection = Object.freeze({ configuredOrder: [...configuredOrder], attempts: Object.freeze(attempts) });
+    return result;
+  };
   mongo._observeChanges = async function (...args) {
-    const handle = await original(...args);
     const scope = extractAuditScope(args[0]);
+    const context = {};
+    const handle = scope?.runId === process.env.AUDIT_RUN_ID
+      ? await selectionContexts.run(context, () => original(...args))
+      : await original(...args);
     if (scope?.runId === process.env.AUDIT_RUN_ID) {
       const drivers = driversByCase.get(scope.caseExecutionId) || new Set();
       if (handle?._multiplexer?._observeDriver) drivers.add(handle._multiplexer._observeDriver);
       driversByCase.set(scope.caseExecutionId, drivers);
-      const className = handle?._multiplexer?._observeDriver?.constructor?.name;
+      const multiplexer = handle?._multiplexer;
+      const className = multiplexer?._observeDriver?.constructor?.name;
+      const actualDriver = DRIVER_NAMES[className] || `unknown:${className || 'undefined'}`;
+      const observedFallback = deriveObservedFallback(context.selection, actualDriver);
+      if (observedFallback && multiplexer) {
+        fallbackProvenanceByMultiplexer.set(multiplexer, observedFallback);
+      }
+      const fallback = observedFallback || fallbackProvenanceByMultiplexer.get(multiplexer);
       observations.push(Object.freeze({
         sequence: ++sequence,
         monotonicNs: process.hrtime.bigint().toString(),
@@ -115,8 +152,9 @@ export function initAuditObserverTracker() {
         queryId: scope.queryId,
         cursorOrdinal: scope.cursorOrdinal,
         cursorFingerprint: scope.cursorFingerprint,
-        actualDriver: DRIVER_NAMES[className] || `unknown:${className || 'undefined'}`,
-        multiplexerIdentity: multiplexerIdentity(handle?._multiplexer),
+        actualDriver,
+        ...(fallback || {}),
+        multiplexerIdentity: multiplexerIdentity(multiplexer),
       }));
       if (observations.length > MAX_AUDIT_OBSERVATIONS) observations.shift();
     }

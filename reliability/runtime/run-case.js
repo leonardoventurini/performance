@@ -38,10 +38,10 @@ function observerArtifacts(definition, plan, execution) {
     cursorId: `${observation.instanceId}:${observation.cursorFingerprint}:${observation.sequence}`,
     requestedOrder: plan.coordinate.observerOrder,
     actualDriver: observation.actualDriver,
-    ...(observation.actualDriver === plan.coordinate.observerOrder[0] ? {} : {
-      fallbackFrom: plan.coordinate.observerOrder[0],
-      fallbackReason: `closed_query:${observation.queryId}`,
-    }),
+    ...(typeof observation.fallbackFrom === 'string'
+      && typeof observation.fallbackReason === 'string'
+      ? { fallbackFrom: observation.fallbackFrom, fallbackReason: observation.fallbackReason }
+      : {}),
   }));
 }
 

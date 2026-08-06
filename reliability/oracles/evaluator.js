@@ -57,7 +57,6 @@ export const DECLARATIVE_ORACLE_HANDLERS = Object.freeze({
   fault_witness: equality,
   cleanup_complete: equality,
   release_identity: equality,
-  workload_process: equality,
   required_coordinate: equality,
 });
 

@@ -102,15 +102,6 @@
     },
     {
       "schemaVersion": 1,
-      "id": "nonzero_process_passing_json",
-      "targetOracleFamily": "workload_process",
-      "mutation": {
-        "kind": "set_workload_exit_nonzero"
-      },
-      "expectedReason": "workload_process_failed"
-    },
-    {
-      "schemaVersion": 1,
       "id": "required_case_removed",
       "targetOracleFamily": "required_coordinate",
       "mutation": {

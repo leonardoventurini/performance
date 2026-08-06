@@ -44,7 +44,6 @@ export function createReleaseCaseExecutor({
   const environments = new Map();
   const caseOutcomes = [];
   const executionRecords = [];
-  let attemptedCoordinates = 0;
   const extraEnvironment = Object.fromEntries((Array.isArray(values.env) ? values.env : values.env ? [values.env] : [])
     .map((entry) => String(entry).split(/=(.*)/su).slice(0, 2))
     .filter(([key]) => key));
@@ -65,7 +64,6 @@ export function createReleaseCaseExecutor({
   };
 
   const executeCase = async ({ coordinate, attemptId }) => {
-    attemptedCoordinates += 1;
     const definition = catalog.casesById.get(coordinate.caseId);
     if (!definition) throw new Error(`required declarative case ${coordinate.caseId} is missing`);
     const plan = compileDeclarativeCase({
@@ -84,18 +82,20 @@ export function createReleaseCaseExecutor({
     const restorations = [];
     for (const environment of environments.values()) restorations.push(await environment.stop());
     environments.clear();
-    const restored = restorations.length > 0 && restorations.every((entry) => entry.restored);
     const recoveryPayload = {
-      runDocumentsRemoved: restored,
-      topologyRestored: restored,
-      profilerRestored: true,
-      networkRestored: restored,
+      runDocumentsRemoved: restorations.length > 0
+        && restorations.every((entry) => entry.recovery?.runDocumentsRemoved === true),
+      topologyRestored: restorations.length > 0
+        && restorations.every((entry) => entry.recovery?.topologyRestored === true),
+      profilerRestored: restorations.length > 0
+        && restorations.every((entry) => entry.recovery?.profilerRestored === true),
+      networkRestored: restorations.length > 0
+        && restorations.every((entry) => entry.recovery?.networkRestored === true),
     };
     const negativeControls = runDeclarativeNegativeControls({
       controls: catalog.negativeControls || [],
       records: executionRecords,
       recovery: recoveryPayload,
-      requiredCoordinateCount: attemptedCoordinates,
     });
     return {
       recovery: { ...recoveryPayload, digest: contractDigest(recoveryPayload) },

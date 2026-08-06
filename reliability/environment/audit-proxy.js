@@ -226,6 +226,11 @@ export class AuditProxy {
     return connection;
   }
 
+  /** Returns the owned backend currently carrying one exact audit connection. */
+  backendIdForConnection(connectionId) {
+    return this.ownedConnection(connectionId).backendId;
+  }
+
   dropConnection(connectionId) {
     const connection = this.ownedConnection(connectionId);
     this.record('fault_socket_drop', { connectionId, backendId: connection.backendId });
@@ -272,7 +277,7 @@ export class AuditProxy {
   }
 
   async stop() {
-    if (!this.httpServer) return;
+    if (!this.httpServer) return Object.freeze({ networkRestored: true });
     for (const connection of this.connections.values()) {
       connection.downstream.terminate();
       connection.upstream.terminate();
@@ -285,5 +290,11 @@ export class AuditProxy {
     this.httpServer = null;
     this.webSocketServer = null;
     this.port = null;
+    return Object.freeze({
+      networkRestored: this.connections.size === 0
+        && this.httpServer === null
+        && this.webSocketServer === null
+        && this.port === null,
+    });
   }
 }

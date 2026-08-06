@@ -21,7 +21,7 @@ export const DECLARATIVE_AUDIT_ORACLE_FAMILIES = Object.freeze([
   'snapshot_exact', 'event_present', 'event_absent', 'revision_monotonic',
   'field_absent', 'observer_identity', 'fallback_identity', 'transport_identity',
   'session_identity', 'fault_witness', 'cleanup_complete', 'release_identity',
-  'workload_process', 'required_coordinate',
+  'required_coordinate',
 ]);
 export const DECLARATIVE_AUDIT_GENERATORS = Object.freeze([
   'array_shapes-v1',
@@ -317,7 +317,7 @@ export function validateCapabilityCatalog(value, path = 'capabilities') {
 
 /** Validates a NegativeControlDefinitionV1 without accepting asserted outcomes. */
 export function validateNegativeControlDefinition(value, path = 'negativeControl') {
-  record(value, path, ['schemaVersion', 'id', 'targetOracleFamily', 'mutation', 'expectedReason']); if (value.schemaVersion !== 1) fail(`${path}.schemaVersion`, 'must equal 1'); id(value.id, `${path}.id`); oneOf(value.targetOracleFamily, `${path}.targetOracleFamily`, DECLARATIVE_AUDIT_ORACLE_FAMILIES); record(value.mutation, `${path}.mutation`, ['kind']); oneOf(value.mutation.kind, `${path}.mutation.kind`, ['drop_event', 'duplicate_event', 'reorder_revision', 'alter_payload_byte', 'retain_removed_field', 'substitute_observer', 'suppress_fallback_record', 'substitute_session', 'duplicate_idempotent_effect', 'omit_fault_witness', 'omit_release_identity', 'set_workload_exit_nonzero', 'remove_required_case', 'fail_restoration']); id(value.expectedReason, `${path}.expectedReason`); return normalized(value);
+  record(value, path, ['schemaVersion', 'id', 'targetOracleFamily', 'mutation', 'expectedReason']); if (value.schemaVersion !== 1) fail(`${path}.schemaVersion`, 'must equal 1'); id(value.id, `${path}.id`); oneOf(value.targetOracleFamily, `${path}.targetOracleFamily`, DECLARATIVE_AUDIT_ORACLE_FAMILIES); record(value.mutation, `${path}.mutation`, ['kind']); oneOf(value.mutation.kind, `${path}.mutation.kind`, ['drop_event', 'duplicate_event', 'reorder_revision', 'alter_payload_byte', 'retain_removed_field', 'substitute_observer', 'suppress_fallback_record', 'substitute_session', 'duplicate_idempotent_effect', 'omit_fault_witness', 'omit_release_identity', 'remove_required_case', 'fail_restoration']); id(value.expectedReason, `${path}.expectedReason`); return normalized(value);
 }
 
 /** Validates the closed negative-controls.json envelope. */

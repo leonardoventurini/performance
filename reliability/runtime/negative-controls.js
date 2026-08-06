@@ -1,6 +1,20 @@
 import { contractDigest } from '../contracts/digest.js';
 import { validateNegativeControlResult } from '../contracts/release-audit.js';
 import { DECLARATIVE_ORACLE_HANDLERS } from '../oracles/evaluator.js';
+import {
+  caseEvidenceStatus,
+  logicalCoordinateStatus,
+  recoveryEvidenceStatus,
+  releaseIdentityStatus,
+} from '../release-audit/aggregate.js';
+import { RELEASE_CASE_CONTRACTS } from '../release-audit/capability-registry.js';
+
+const PRODUCTION_GATES = Object.freeze({
+  caseEvidenceStatus,
+  logicalCoordinateStatus,
+  recoveryEvidenceStatus,
+  releaseIdentityStatus,
+});
 
 function incomingEvents(record) {
   return record.execution.contextEvidence?.ddpLedgers?.flatMap((ledger) => ledger
@@ -99,27 +113,49 @@ function substitutedOracle(records, family, ledger, replacement) {
   };
 }
 
-function artifactMutation(records, kind) {
+function rejectedBy(gateResult, evidence) {
+  const actualReason = gateResult?.reasons?.[0];
+  return {
+    detected: gateResult?.status !== 'passed' && typeof actualReason === 'string',
+    actualReason,
+    evidence,
+  };
+}
+
+function artifactMutation(records, kind, gates) {
   if (kind === 'suppress_fallback_record') {
     const record = recordFor(records, ({ result }) => result.observerEvidence.some(({ fallbackFrom }) => fallbackFrom));
     if (!record) return null;
-    return { detected: record.result.observerEvidence.length > 0, evidence: { caseId: record.definition.id, observerEvidence: [] } };
+    const mutated = structuredClone(record.result);
+    mutated.observerEvidence = [];
+    return rejectedBy(
+      gates.caseEvidenceStatus(mutated, RELEASE_CASE_CONTRACTS[record.definition.id]),
+      { caseId: record.definition.id, observerEvidence: [] },
+    );
   }
   if (kind === 'omit_fault_witness') {
     const record = recordFor(records, ({ result }) => result.faultWitness !== undefined);
     if (!record) return null;
-    return { detected: record.result.coordinate.faultId !== undefined, evidence: { caseId: record.definition.id, faultWitness: null } };
+    const mutated = structuredClone(record.result);
+    delete mutated.faultWitness;
+    return rejectedBy(
+      gates.caseEvidenceStatus(mutated, RELEASE_CASE_CONTRACTS[record.definition.id]),
+      { caseId: record.definition.id, faultWitness: null },
+    );
   }
   if (kind === 'omit_release_identity') {
     const record = records[0];
     if (!record) return null;
-    return { detected: typeof record.result.release?.actual === 'string', evidence: { caseId: record.definition.id, release: null } };
+    return rejectedBy(
+      gates.releaseIdentityStatus(undefined, record.result.release),
+      { caseId: record.definition.id, release: null },
+    );
   }
   return null;
 }
 
 function executeMutation(control, context) {
-  const { records, recovery, requiredCoordinateCount } = context;
+  const { records, recovery, gates } = context;
   switch (control.mutation.kind) {
     case 'drop_event': return { ...eventMutation(records, 'drop_event'), reason: 'ddp_event_missing' };
     case 'duplicate_event': return { ...eventMutation(records, 'duplicate_event'), reason: 'logical_event_duplicate' };
@@ -127,38 +163,45 @@ function executeMutation(control, context) {
     case 'alter_payload_byte': return { ...alteredSnapshot(records, 'alter_payload_byte'), reason: 'content_digest_mismatch' };
     case 'retain_removed_field': return { ...retainedField(records), reason: 'stale_field_retained' };
     case 'substitute_observer': return { ...substitutedOracle(records, 'observer_identity', 'observer_selection', 'polling'), reason: 'observer_identity_mismatch' };
-    case 'suppress_fallback_record': return { ...artifactMutation(records, control.mutation.kind), reason: 'fallback_evidence_missing' };
+    case 'suppress_fallback_record': return artifactMutation(records, control.mutation.kind, gates);
     case 'substitute_session': return { ...substitutedOracle(records, 'session_identity', 'session_identity', 'fresh'), reason: 'session_identity_mismatch' };
     case 'duplicate_idempotent_effect': return { ...alteredSnapshot(records, 'duplicate_idempotent_effect'), reason: 'idempotency_violation' };
-    case 'omit_fault_witness': return { ...artifactMutation(records, control.mutation.kind), reason: 'fault_witness_missing' };
-    case 'omit_release_identity': return { ...artifactMutation(records, control.mutation.kind), reason: 'release_identity_missing' };
-    case 'set_workload_exit_nonzero': {
+    case 'omit_fault_witness': return artifactMutation(records, control.mutation.kind, gates);
+    case 'omit_release_identity': return artifactMutation(records, control.mutation.kind, gates);
+    case 'remove_required_case': {
       const record = records[0];
-      return record ? { detected: record.result.status === 'passed', reason: 'workload_process_failed', evidence: { caseId: record.definition.id, exitCode: 1 } } : null;
+      if (!record) return null;
+      return rejectedBy(
+        gates.logicalCoordinateStatus([], RELEASE_CASE_CONTRACTS[record.definition.id]),
+        { caseId: record.definition.id, before: 1, after: 0 },
+      );
     }
-    case 'remove_required_case': return {
-      detected: records.length === requiredCoordinateCount,
-      reason: 'required_coordinate_missing',
-      evidence: { before: records.length, after: Math.max(0, records.length - 1), requiredCoordinateCount },
-    };
-    case 'fail_restoration': return {
-      detected: recovery && Object.values(recovery).includes(true),
-      reason: 'recovery_incomplete',
-      evidence: { ...recovery, topologyRestored: false },
-    };
+    case 'fail_restoration': {
+      if (!recovery) return null;
+      const mutatedState = {
+        runDocumentsRemoved: recovery.runDocumentsRemoved,
+        topologyRestored: false,
+        profilerRestored: recovery.profilerRestored,
+        networkRestored: recovery.networkRestored,
+      };
+      const mutated = { ...mutatedState, digest: contractDigest(mutatedState) };
+      return rejectedBy(gates.recoveryEvidenceStatus(mutated), mutated);
+    }
     default: return null;
   }
 }
 
 /** Runs every catalog negative control against evidence from this exact audit. */
-export function runDeclarativeNegativeControls({ controls, records, recovery, requiredCoordinateCount }) {
+export function runDeclarativeNegativeControls({
+  controls, records, recovery, gates = PRODUCTION_GATES,
+}) {
   return Object.freeze(controls.map((control) => {
-    const outcome = executeMutation(control, { records, recovery, requiredCoordinateCount });
+    const outcome = executeMutation(control, { records, recovery, gates });
     const detected = outcome?.detected === true;
     return validateNegativeControlResult({
       controlId: control.id,
       expectedReason: control.expectedReason,
-      actualReason: detected ? outcome.reason : 'negative_control_not_detected',
+      actualReason: detected ? (outcome.actualReason || outcome.reason) : 'negative_control_not_detected',
       detected,
       evidenceDigest: contractDigest({
         controlId: control.id,

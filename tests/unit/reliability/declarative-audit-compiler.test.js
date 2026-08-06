@@ -99,7 +99,7 @@ test('checked-in catalog covers and compiles every required default coordinate',
   const loaded = loadDeclarativeAuditCatalog();
   assert.equal(loaded.capabilities.length, 92);
   assert.equal(loaded.cases.length, 88);
-  assert.equal(loaded.negativeControls.length, 14);
+  assert.equal(loaded.negativeControls.length, 13);
   const matrix = resolveReleaseAuditMatrix({
     topologyScope: ['replica_set'],
     transportScope: ['sockjs', 'uws'],

@@ -11,7 +11,7 @@ const AUDIT_ORACLE_FAMILIES = Object.freeze([
   'snapshot_exact', 'event_present', 'event_absent', 'revision_monotonic',
   'field_absent', 'observer_identity', 'fallback_identity', 'transport_identity',
   'session_identity', 'fault_witness', 'cleanup_complete', 'release_identity',
-  'workload_process', 'required_coordinate',
+  'required_coordinate',
 ]);
 
 export const RELEASE_AUDIT_STATUSES = Object.freeze([

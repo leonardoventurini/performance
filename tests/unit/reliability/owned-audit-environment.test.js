@@ -7,14 +7,23 @@ function createHarness({ failAt = null } = {}) {
   const events = [];
   const resource = (name, fields = {}) => ({
     ...fields,
-    async stop() { events.push(`stop:${name}`); },
+    async stop() {
+      events.push(`stop:${name}`);
+      if (name === 'proxy') return { networkRestored: true };
+      if (name === 'replica') return { topologyRestored: true };
+      return { restored: true, processGroupsTerminated: true, workspaceRemoved: true };
+    },
   });
   const factories = {
     resolveMongod() { events.push('resolve:mongod'); return '/owned/mongod'; },
     async createReplicaSet() {
       events.push('start:replica');
       if (failAt === 'replica') throw new Error('replica failed');
-      return resource('replica', { uri: 'mongodb://127.0.0.1:27017/meteor', replicaSetName: 'audit' });
+      return resource('replica', {
+        uri: 'mongodb://127.0.0.1:27017/meteor',
+        replicaSetName: 'audit',
+        async attestRecovery() { return { runDocumentsRemoved: true, profilerRestored: true }; },
+      });
     },
     async createCluster() {
       events.push('start:cluster');
@@ -40,6 +49,12 @@ test('environment provisions the topology in dependency order', async () => {
   const restoration = await environment.stop();
   assert.equal(restoration.restored, true);
   assert.equal(restoration.failureCount, 0);
+  assert.deepEqual(restoration.recovery, {
+    runDocumentsRemoved: true,
+    topologyRestored: true,
+    profilerRestored: true,
+    networkRestored: true,
+  });
   assert.equal(restoration.resources.length, 3);
   assert.match(restoration.digest, /^[a-f0-9]{64}$/u);
   assert.equal(Object.isFrozen(restoration), true);
@@ -91,4 +106,43 @@ test('cleanup artifact seals forced shutdown counts without process identity', a
   assert.equal(await environment.stop(), restoration);
   const serialized = JSON.stringify(restoration);
   assert.doesNotMatch(serialized, /audit-secret|secret-app|pid|token/iu);
+});
+
+test('cleanup fails closed for each missing recovery attestation', async () => {
+  for (const missingDimension of [
+    'runDocumentsRemoved', 'topologyRestored', 'profilerRestored', 'networkRestored',
+  ]) {
+    const { factories } = createHarness();
+    if (missingDimension === 'runDocumentsRemoved' || missingDimension === 'profilerRestored') {
+      const createReplicaSet = factories.createReplicaSet;
+      factories.createReplicaSet = async () => {
+        const replicaSet = await createReplicaSet();
+        replicaSet.attestRecovery = async () => ({
+          runDocumentsRemoved: missingDimension !== 'runDocumentsRemoved',
+          profilerRestored: missingDimension !== 'profilerRestored',
+        });
+        return replicaSet;
+      };
+    } else if (missingDimension === 'topologyRestored') {
+      factories.createCluster = async () => ({
+        backends: [{ id: 'a' }, { id: 'b' }],
+        async stop() { return {}; },
+      });
+    } else {
+      factories.createProxy = async () => ({
+        port: 1234,
+        snapshotLedger: () => [],
+        async stop() { return {}; },
+      });
+    }
+    const environment = await new OwnedAuditEnvironment({
+      auditId: `audit-${missingDimension}`,
+      source: { meteorCmd: 'meteor' },
+      appPath: '/tmp/app',
+      factories,
+    }).start();
+    const restoration = await environment.stop();
+    assert.equal(restoration.recovery[missingDimension], false, missingDimension);
+    assert.equal(restoration.restored, false, missingDimension);
+  }
 });

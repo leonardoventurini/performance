@@ -232,6 +232,21 @@ test('wrong fallback driver is a behavioral failure despite passing content', ()
   );
 });
 
+test('fallback-required evidence cannot pass without observed fallback provenance', () => {
+  const input = aggregationInput();
+  const result = input.caseResults.find(({ coordinate }) => (
+    coordinate.caseId === 'fallback.ordered_observer'
+  ));
+  delete result.observerEvidence[0].fallbackFrom;
+  delete result.observerEvidence[0].fallbackReason;
+  const manifest = aggregateReleaseAudit(input);
+  assert.equal(manifest.status, 'non_conformant');
+  assert.equal(
+    manifest.capabilities.find(({ id }) => id === 'fallback.ordered_observer').status,
+    'failed',
+  );
+});
+
 test('Change Stream unavailability resolves exact fallback per topology', () => {
   const input = aggregationInput();
   const cases = input.caseResults.filter(({ coordinate }) => (

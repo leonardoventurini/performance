@@ -175,9 +175,42 @@ export function createClientAdapter({
         return {};
       }
       if (action === 'clean_server_shutdown') {
-        await cluster.stopInstance('meteor-0');
-        await cluster.restartInstance('meteor-0');
-        return {};
+        const targetedBackends = [...new Set(selected.map((client) => (
+          proxy.backendIdForConnection(client.clientId)
+        )))];
+        const stoppedBackends = [];
+        try {
+          for (const backendId of targetedBackends) {
+            await cluster.stopInstance(backendId);
+            stoppedBackends.push(backendId);
+          }
+          await Promise.all(selected.map((client) => waitForDisconnected(client, invocation.signal)));
+        } finally {
+          const restarts = await Promise.allSettled(stoppedBackends.map((backendId) => (
+            cluster.restartInstance(backendId)
+          )));
+          const restartFailures = restarts
+            .filter(({ status }) => status === 'rejected')
+            .map(({ reason }) => reason);
+          if (restartFailures.length > 0) {
+            throw new AggregateError(restartFailures, 'clean server shutdown could not restore every targeted backend');
+          }
+        }
+        const outcomes = await Promise.all(selected.map((client) => client.resume()));
+        await Promise.all(selected.map(async (client, index) => {
+          if (outcomes[index].classification !== 'fresh') return;
+          const prior = subscriptions.get(client.clientId);
+          if (!prior) throw new Error('clean server shutdown lost subscription ownership');
+          const reopened = await client.subscribe(prior.name, prior.params);
+          subscriptions.set(client.clientId, reopened);
+        }));
+        return {
+          shutdown_recovered: targetedBackends.length > 0
+            && targetedBackends.every((backendId) => stoppedBackends.includes(backendId))
+            && outcomes.every(({ classification }) => ['fresh', 'resumed'].includes(classification)),
+          shutdown_witness: { targetedBackends, stoppedBackends, reconnections: outcomes },
+          provenance: { shutdown_recovered: 'ddp_client', shutdown_witness: 'ddp_client' },
+        };
       }
       if (action === 'fresh_non_sticky_instance') proxy.setRoutePolicy({ kind: 'round_robin' });
       else proxy.setRoutePolicy({ kind: 'sticky' });
@@ -192,6 +225,9 @@ export function createClientAdapter({
         if (['resume_inflight_method', 'resume_queue_boundary', 'resume_after_hot_code_push', 'fresh_after_grace'].includes(action)) {
           throw new Error(`client lifecycle action ${action} requires a dedicated runtime controller`);
         }
+        if (action === 'resume_auth_context') {
+          throw new Error('client lifecycle action resume_auth_context requires an authenticated DDP fixture');
+        }
         const cycles = ['concurrent_resume_storm', 'reconnect_storm', 'bounded_reconnect_storm'].includes(action)
           ? RECONNECT_STORM_CYCLES : 1;
         let outcomes = [];
@@ -202,11 +238,6 @@ export function createClientAdapter({
         }
         const observed = [...new Set(outcomes.map(({ classification }) => classification))];
         if (observed.length !== 1) throw new Error('DDP clients disagreed on session identity');
-        if (action === 'resume_auth_context') {
-          await Promise.all(selected.map((client) => client.call('audit.monitorSnapshot', [{
-            runId, caseExecutionId, ownershipToken,
-          }])));
-        }
         return {
           expectedSessionIdentity: expectedClassification(action),
           session_identity: observed[0],

@@ -26,7 +26,26 @@ function same(value, expected) {
   return contractDigest(value) === contractDigest(expected);
 }
 
-function caseEvidenceStatus(result, contract) {
+/** Applies the production release-identity gate before evidence is aggregated. */
+export function releaseIdentityStatus(candidate, expected) {
+  if (candidate === undefined || candidate === null) {
+    return { status: 'incomplete', reasons: ['release_identity_missing'] };
+  }
+  let validated;
+  try {
+    validated = validateReleaseIdentity(candidate);
+  } catch {
+    return { status: 'incomplete', reasons: ['release_identity_invalid'] };
+  }
+  if (validated.harnessDirty) return { status: 'incomplete', reasons: ['harness_dirty'] };
+  if (validated.requested !== validated.actual || (expected && !same(validated, expected))) {
+    return { status: 'incomplete', reasons: ['release_identity_mismatch'] };
+  }
+  return { status: 'passed', reasons: [] };
+}
+
+/** Applies the production case-artifact gate and returns its exact rejection reason. */
+export function caseEvidenceStatus(result, contract) {
   if (result.status === 'failed') return { status: 'failed', reasons: result.reasons };
   if (result.status === 'incomplete' || result.status === 'not_applicable') {
     return { status: 'incomplete', reasons: result.reasons };
@@ -57,7 +76,12 @@ function caseEvidenceStatus(result, contract) {
   }
   if (contract?.requiresObserverEvidence) {
     if (result.observerEvidence.length === 0) {
-      return { status: 'incomplete', reasons: ['observer_evidence_missing'] };
+      return {
+        status: 'incomplete',
+        reasons: [contract.expectation === 'fallback_required'
+          ? 'fallback_evidence_missing'
+          : 'observer_evidence_missing'],
+      };
     }
     if (result.observerEvidence.some((evidence) => (
       !same(evidence.requestedOrder, result.coordinate.observerOrder)
@@ -117,7 +141,8 @@ function caseEvidenceStatus(result, contract) {
   return { status: 'passed', reasons: [] };
 }
 
-function logicalCoordinateStatus(attempts, contract) {
+/** Applies the production required-coordinate gate to all attempts for one coordinate. */
+export function logicalCoordinateStatus(attempts, contract) {
   if (attempts.length === 0) {
     return { status: 'incomplete', reasons: ['required_coordinate_missing'] };
   }
@@ -149,18 +174,22 @@ function negativeControlsComplete(results, suppliedDigest) {
   return seen.size === expectedById.size;
 }
 
-function recoveryComplete(recovery) {
+/** Applies the production restoration gate and preserves an actionable reason. */
+export function recoveryEvidenceStatus(recovery) {
   const evidence = {
     runDocumentsRemoved: recovery.runDocumentsRemoved,
     topologyRestored: recovery.topologyRestored,
     profilerRestored: recovery.profilerRestored,
     networkRestored: recovery.networkRestored,
   };
-  return recovery.digest === contractDigest(evidence)
+  const complete = recovery.digest === contractDigest(evidence)
     && recovery.runDocumentsRemoved
     && recovery.topologyRestored
     && recovery.profilerRestored
     && recovery.networkRestored;
+  return complete
+    ? { status: 'passed', reasons: [] }
+    : { status: 'incomplete', reasons: ['recovery_incomplete'] };
 }
 
 /**
@@ -209,7 +238,9 @@ export function aggregateReleaseAudit({
     }
     seenAttempts.add(attemptKey);
     if (!requiredCoordinateKeys.has(coordinate)) unknownEvidence = true;
-    if (!same(validated.release, validatedRelease)) identityIncomplete = true;
+    if (releaseIdentityStatus(validated.release, validatedRelease).status !== 'passed') {
+      identityIncomplete = true;
+    }
     if (validated.mongo.topology !== validated.coordinate.topology) identityIncomplete = true;
     mongoVersion ??= validated.mongo.serverVersion;
     mongoFcv ??= validated.mongo.featureCompatibilityVersion;
@@ -291,7 +322,7 @@ export function aggregateReleaseAudit({
     || unknownEvidence
     || hasIncompleteCapability
     || !negativeControlsComplete(controls, negativeControlContractDigest)
-    || !recoveryComplete(validatedRecovery);
+    || recoveryEvidenceStatus(validatedRecovery).status !== 'passed';
   const status = hasFailedCapability
     ? 'non_conformant'
     : completionIncomplete ? 'incomplete' : 'conformant';

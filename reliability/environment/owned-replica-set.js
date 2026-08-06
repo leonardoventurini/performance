@@ -366,12 +366,32 @@ export class OwnedReplicaSet {
     await this.awaitHealthy();
   }
 
+  /** Attests database cleanup and profiler state while the owned topology is live. */
+  async attestRecovery() {
+    this.assertLiveOwnership();
+    const client = new this.mongoClient(this.uri, { serverSelectionTimeoutMS: 5_000 });
+    try {
+      await client.connect();
+      const database = client.db('meteor');
+      const [runDocumentCount, profiler] = await Promise.all([
+        database.collection('reliabilityDocuments').countDocuments({}),
+        database.command({ profile: -1 }),
+      ]);
+      return Object.freeze({
+        runDocumentsRemoved: runDocumentCount === 0,
+        profilerRestored: profiler.was === 0,
+      });
+    } finally {
+      await client.close();
+    }
+  }
+
   async stop() {
     const errors = [];
     if (!fs.existsSync(this.rootPath) && this.members.length === 0) {
       this.started = false;
       this.markerWritten = false;
-      return;
+      return Object.freeze({ topologyRestored: true, forcedShutdownCount: this.forcedShutdowns });
     }
     if (this.markerWritten) {
       try {
@@ -410,6 +430,10 @@ export class OwnedReplicaSet {
     }
     this.markerWritten = false;
     if (errors.length > 0) throw new AggregateError(errors, 'Managed MongoDB shutdown was incomplete');
+    return Object.freeze({
+      topologyRestored: !fs.existsSync(this.rootPath) && this.members.length === 0 && !this.suspended,
+      forcedShutdownCount: this.forcedShutdowns,
+    });
   }
 }
 

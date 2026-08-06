@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  deriveObservedFallback,
   extractAuditScope,
   validateAuditEchoRequest,
   validateAuditFaultRequest,
@@ -28,6 +29,27 @@ test('observer correlation extracts only valid run and case identifiers', () => 
     runId: '../escape', caseExecutionId: 'case-1', queryId: 'unordered',
     cursorOrdinal: 0, cursorFingerprint: 'cursor-deadbeef',
   } } }), null);
+});
+
+test('fallback provenance requires an independently observed rejected driver check', () => {
+  assert.deepEqual(deriveObservedFallback({
+    configuredOrder: ['changeStreams', 'oplog', 'polling'],
+    attempts: [
+      { driver: 'changeStreams', available: false, reason: 'ordered observeChanges is unsupported' },
+      { driver: 'oplog', available: true },
+    ],
+  }, 'oplog'), {
+    fallbackFrom: 'changeStreams',
+    fallbackReason: 'ordered observeChanges is unsupported',
+  });
+  assert.equal(deriveObservedFallback({
+    configuredOrder: ['changeStreams', 'oplog', 'polling'],
+    attempts: [{ driver: 'changeStreams', available: false }],
+  }, 'oplog'), null);
+  assert.equal(deriveObservedFallback({
+    configuredOrder: ['changeStreams', 'oplog', 'polling'],
+    attempts: [{ driver: 'changeStreams', available: true }],
+  }, 'oplog'), null);
 });
 
 test('transport echo is ownership-attested and byte bounded', () => {

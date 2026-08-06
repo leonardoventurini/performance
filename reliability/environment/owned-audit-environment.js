@@ -93,8 +93,21 @@ export class OwnedAuditEnvironment {
 
   async stop() {
     if (this.lastRestoration) return this.lastRestoration;
+    const ownedResources = Object.freeze({
+      proxy: this.proxy !== null,
+      cluster: this.cluster !== null,
+      replicaSet: this.replicaSet !== null,
+    });
     const resourceRestorations = [];
     let failureCount = 0;
+    let databaseAttestation = null;
+    if (this.replicaSet) {
+      try {
+        databaseAttestation = await this.replicaSet.attestRecovery();
+      } catch {
+        failureCount += 1;
+      }
+    }
     for (const key of ['proxy', 'cluster', 'replicaSet']) {
       const resource = this[key];
       this[key] = null;
@@ -104,6 +117,9 @@ export class OwnedAuditEnvironment {
         resourceRestorations.push({
           resource: key,
           restored: result?.restored !== false,
+          topologyRestored: result?.topologyRestored === true
+            || (key === 'cluster' && result?.processGroupsTerminated === true && result?.workspaceRemoved === true),
+          networkRestored: result?.networkRestored === true,
           forcedShutdownCount: Number.isSafeInteger(result?.forcedShutdownCount)
             ? result.forcedShutdownCount
             : Number.isSafeInteger(resource.forcedShutdowns) ? resource.forcedShutdowns : 0,
@@ -113,17 +129,33 @@ export class OwnedAuditEnvironment {
         resourceRestorations.push({
           resource: key,
           restored: false,
+          topologyRestored: false,
+          networkRestored: false,
           forcedShutdownCount: Number.isSafeInteger(error?.restoration?.forcedShutdownCount)
             ? error.restoration.forcedShutdownCount
             : Number.isSafeInteger(resource.forcedShutdowns) ? resource.forcedShutdowns : 0,
         });
       }
     }
+    const topologyResources = resourceRestorations.filter(({ resource }) => resource !== 'proxy');
+    const expectedTopologyResources = Number(ownedResources.cluster) + Number(ownedResources.replicaSet);
+    const recovery = {
+      runDocumentsRemoved: !ownedResources.replicaSet
+        || databaseAttestation?.runDocumentsRemoved === true,
+      topologyRestored: topologyResources.length === expectedTopologyResources
+        && topologyResources.every(({ topologyRestored }) => topologyRestored),
+      profilerRestored: !ownedResources.replicaSet
+        || databaseAttestation?.profilerRestored === true,
+      networkRestored: !ownedResources.proxy || resourceRestorations.some(
+        ({ resource, networkRestored }) => resource === 'proxy' && networkRestored,
+      ),
+    };
     const payload = {
-      schemaVersion: 1,
-      restored: failureCount === 0 && resourceRestorations.every(({ restored }) => restored),
+      schemaVersion: 2,
+      restored: failureCount === 0 && Object.values(recovery).every(Boolean),
       failureCount,
       forcedShutdownCount: resourceRestorations.reduce((total, entry) => total + entry.forcedShutdownCount, 0),
+      recovery,
       resources: resourceRestorations,
     };
     const digest = crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex');
