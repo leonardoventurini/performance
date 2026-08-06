@@ -31,7 +31,6 @@ describe('release audit coordinator', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'release-coordinator-'));
     directories.push(root);
     const executeCase = async () => null;
-    executeCase.supports = () => false;
     const result = await coordinateReleaseAudit({
       repositoryRoot: process.cwd(),
       resultsRoot: root,
@@ -61,7 +60,7 @@ describe('release audit coordinator', () => {
     assert.equal(events.at(-1).kind, 'audit_completed');
     assert.deepEqual(
       events.map(({ sequence }) => sequence),
-      [1, 2, 3, 4],
+      Array.from({ length: events.length }, (_, index) => index + 1),
     );
     const manifestPath = path.join(result.artifactRoot, 'manifest.json');
     const forged = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));

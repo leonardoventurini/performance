@@ -91,6 +91,18 @@ export async function coordinateReleaseAudit({
   let releaseExecution = createReleaseExecution();
   let sequence = journal.lastSequence || 0;
   const caseResults = [];
+  let effectiveRecovery = recovery;
+  let effectiveNegativeControls = negativeControls;
+  let executorFinalized = false;
+
+  const finalizeExecutor = async () => {
+    if (executorFinalized) return;
+    executorFinalized = true;
+    if (typeof executeCase.finalize !== 'function') return;
+    const finalization = await executeCase.finalize();
+    if (finalization?.recovery) effectiveRecovery = finalization.recovery;
+    if (finalization?.negativeControls) effectiveNegativeControls = finalization.negativeControls;
+  };
 
   const append = async ({ kind, state, payload, coordinate, attemptId }) => {
     sequence += 1;
@@ -129,9 +141,6 @@ export async function coordinateReleaseAudit({
     releaseExecution = advanceReleaseExecution(releaseExecution, 'executing');
 
     for (const coordinate of matrix.coordinates) {
-      if (typeof executeCase.supports === 'function' && !executeCase.supports(coordinate)) {
-        continue;
-      }
       const attemptId = crypto.randomUUID();
       let caseExecution = createCaseExecution();
       caseExecution = advanceCaseExecution(caseExecution, 'preflighted');
@@ -189,15 +198,17 @@ export async function coordinateReleaseAudit({
       });
     }
 
+    await finalizeExecutor();
+
     releaseExecution = advanceReleaseExecution(releaseExecution, 'aggregating');
     await append({
       kind: 'cleanup_verified',
       state: 'cleanup_verified',
       payload: {
-        runDocumentsRemoved: recovery.runDocumentsRemoved,
-        topologyRestored: recovery.topologyRestored,
-        profilerRestored: recovery.profilerRestored,
-        networkRestored: recovery.networkRestored,
+        runDocumentsRemoved: effectiveRecovery.runDocumentsRemoved,
+        topologyRestored: effectiveRecovery.topologyRestored,
+        profilerRestored: effectiveRecovery.profilerRestored,
+        networkRestored: effectiveRecovery.networkRestored,
       },
     });
     const provisional = aggregateReleaseAudit({
@@ -206,9 +217,9 @@ export async function coordinateReleaseAudit({
       transportScope,
       seed,
       caseResults,
-      negativeControls,
+      negativeControls: effectiveNegativeControls,
       negativeControlContractDigest: NEGATIVE_CONTROL_CONTRACT_DIGEST,
-      recovery,
+      recovery: effectiveRecovery,
       progress: {
         firstSequence: 1,
         lastSequence: sequence + 1,
@@ -233,9 +244,9 @@ export async function coordinateReleaseAudit({
       transportScope,
       seed,
       caseResults,
-      negativeControls,
+      negativeControls: effectiveNegativeControls,
       negativeControlContractDigest: NEGATIVE_CONTROL_CONTRACT_DIGEST,
-      recovery,
+      recovery: effectiveRecovery,
       progress: {
         firstSequence: progressSeal.firstSequence,
         lastSequence: progressSeal.lastSequence,
@@ -256,6 +267,7 @@ export async function coordinateReleaseAudit({
       progressSeal,
     };
   } catch (error) {
+    await finalizeExecutor().catch(() => {});
     if (journal.lastSequence !== null) {
       await append({
         kind: 'audit_aborted',

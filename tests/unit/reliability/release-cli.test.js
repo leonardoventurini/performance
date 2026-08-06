@@ -1,32 +1,29 @@
 import assert from 'node:assert/strict';
-import { describe, test } from 'node:test';
+import test from 'node:test';
+
 import { createReleaseCaseExecutor } from '../../../cli/release-audit.js';
 
-describe('release audit CLI case adapter', () => {
-  test('exposes only independently qualified bounded CRUD coordinates', () => {
-    const executeCase = createReleaseCaseExecutor({
-      values: {},
-      config: {},
-      releaseName: '3.5.1-beta.0',
-      releaseIdentity: {},
-    });
-    assert.equal(executeCase.supports({
-      caseId: 'event.insert',
-      topology: 'replica_set',
-      transport: 'sockjs',
-      observerOrder: ['changeStreams', 'oplog', 'polling'],
-    }), true);
-    assert.equal(executeCase.supports({
-      caseId: 'session.resume.within_grace_period',
-      topology: 'replica_set',
-      transport: 'sockjs',
-      observerOrder: ['changeStreams', 'oplog', 'polling'],
-    }), false);
-    assert.equal(executeCase.supports({
-      caseId: 'event.insert',
-      topology: 'standalone',
-      transport: 'sockjs',
-      observerOrder: ['changeStreams', 'oplog', 'polling'],
-    }), false);
+test('release executor compiles every coordinate without silent support filtering', async () => {
+  const calls = [];
+  const environment = { stop: async () => ({ restored: true }) };
+  const executeCase = createReleaseCaseExecutor({
+    values: {}, source: {}, appPath: '/app', releaseIdentity: {},
+    catalog: {
+      casesById: new Map([['event.insert', { id: 'event.insert' }]]),
+      profilesById: new Map(),
+    },
+    environmentFactory: async () => environment,
+    runCase: async (input) => { calls.push(input); return { status: 'passed' }; },
   });
+  await assert.rejects(() => executeCase({
+    coordinate: {
+      caseId: 'missing', transport: 'sockjs', topology: 'replica_set', seed: 1,
+      observerOrder: ['changeStreams', 'oplog', 'polling'],
+    },
+    attemptId: 'attempt',
+  }), /required declarative case missing is missing/);
+  assert.equal(Object.hasOwn(executeCase, 'supports'), false);
+  const finalized = await executeCase.finalize();
+  assert.equal(finalized.recovery.topologyRestored, false);
+  assert.deepEqual(calls, []);
 });
