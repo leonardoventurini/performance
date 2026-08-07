@@ -5,6 +5,15 @@ import { fileURLToPath } from 'node:url';
 
 const MANIFEST_VERSION = 1;
 const MANIFEST_NAME = 'build-manifest.json';
+const INPUT_ROOTS = [
+  'build', 'cli', 'collectors', 'drivers', 'lib', 'reliability', 'reporters', 'runner',
+  'scripts/helpers', 'tests', 'types', 'typescript-tools',
+] as const;
+const INPUT_FILES = [
+  'bench.js', 'bench.ts', 'bench.config.ts', 'meteor-source.ts', 'package.json', 'package-lock.json',
+  'playwright.config.ts', 'tsconfig.json', 'tsconfig.base.json', 'tsconfig.node.json',
+  'tsconfig.hosts.json', 'tsconfig.playwright.json', 'tsconfig.tools.json',
+] as const;
 
 /** A content-addressed file recorded by the deterministic root build. */
 export interface ManifestFile {
@@ -46,7 +55,8 @@ function parseManifest(value: unknown): BuildManifest {
   };
 }
 
-async function verifyFiles(root: string, files: readonly ManifestFile[], kind: string): Promise<void> {
+/** Verifies that each declared manifest file exists beneath its root with unchanged contents. */
+export async function verifyManifestFiles(root: string, files: readonly ManifestFile[], kind: string): Promise<void> {
   for (const file of files) {
     const absolutePath = path.resolve(root, file.path);
     if (!absolutePath.startsWith(`${root}${path.sep}`)) throw new Error(`${kind} escapes repository: ${file.path}`);
@@ -74,20 +84,48 @@ async function listOutputFiles(root: string): Promise<string[]> {
   return files.sort();
 }
 
+async function listCurrentInputs(repositoryRoot: string): Promise<string[]> {
+  const inputs: string[] = [];
+  for (const inputRoot of INPUT_ROOTS) {
+    const absoluteRoot = path.join(repositoryRoot, inputRoot);
+    try {
+      const files = await listOutputFiles(absoluteRoot);
+      inputs.push(...files.map((file) => `${inputRoot}/${file}`));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+  }
+  for (const inputFile of INPUT_FILES) {
+    try {
+      await readFile(path.join(repositoryRoot, inputFile));
+      inputs.push(inputFile);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+  }
+  return [...new Set(inputs)].sort();
+}
+
+/** Rejects both undeclared current files and declared files absent from the current inventory. */
+export function assertSameInventory(actual: readonly string[], declared: readonly ManifestFile[], kind: string): void {
+  const declaredPaths = declared.map((file) => file.path).sort();
+  if (JSON.stringify(actual) !== JSON.stringify(declaredPaths)) {
+    throw new Error(`${kind} inventory does not match its manifest`);
+  }
+}
+
 /** Rejects absent, malformed, modified, or incomplete emitted build output. */
 export async function verifyBuildManifest(): Promise<void> {
   const outputRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   const repositoryRoot = path.dirname(outputRoot);
   const manifestPath = path.join(outputRoot, MANIFEST_NAME);
   const manifest = parseManifest(JSON.parse(await readFile(manifestPath, 'utf8')) as unknown);
-  await verifyFiles(repositoryRoot, manifest.inputs, 'build input');
-  await verifyFiles(outputRoot, manifest.outputs, 'build output');
+  assertSameInventory(await listCurrentInputs(repositoryRoot), manifest.inputs, 'build input');
+  await verifyManifestFiles(repositoryRoot, manifest.inputs, 'build input');
+  await verifyManifestFiles(outputRoot, manifest.outputs, 'build output');
 
   const emittedFiles = (await listOutputFiles(outputRoot))
     .filter((relativePath) => relativePath !== MANIFEST_NAME && !relativePath.endsWith('.tsbuildinfo'))
     .sort();
-  const declaredFiles = manifest.outputs.map((file) => file.path).sort();
-  if (JSON.stringify(emittedFiles) !== JSON.stringify(declaredFiles)) {
-    throw new Error('build output inventory does not match its manifest');
-  }
+  assertSameInventory(emittedFiles, manifest.outputs, 'build output');
 }

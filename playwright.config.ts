@@ -11,10 +11,9 @@ import { defineConfig, devices } from '@playwright/test';
  * See https://playwright.dev/docs/test-configuration.
  */
 export default defineConfig({
-  tsconfig: './tsconfig.playwright.json',
   globalTimeout: 240_000,
-  testDir: './tests',
-  testMatch: '**/*.spec.ts',
+  testDir: './dist/tests',
+  testMatch: '**/*.spec.js',
   /* Run tests in files in parallel */
   fullyParallel: true,
   /* Fail the build on CI if you accidentally left test.only in the source code. */

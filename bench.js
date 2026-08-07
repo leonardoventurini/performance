@@ -19,13 +19,14 @@ try {
   await verifierModule.verifyBuildManifest();
 
   const benchmarkModule = await import(pathToFileURL(`${import.meta.dirname}/dist/bench.js`).href);
-  if (typeof benchmarkModule.main === 'function') {
-    await benchmarkModule.main({
-      argv: process.argv.slice(2),
-      env: process.env,
-      repositoryRoot: import.meta.dirname,
-    });
+  if (typeof benchmarkModule.main !== 'function') {
+    throw new Error('compiled benchmark entry point is missing main()');
   }
+  await benchmarkModule.main({
+    argv: process.argv.slice(2),
+    env: process.env,
+    repositoryRoot: import.meta.dirname,
+  });
 } catch (error) {
   const message = error instanceof Error ? error.message : String(error);
   console.error(`Unable to start the benchmark CLI: ${message}`);
