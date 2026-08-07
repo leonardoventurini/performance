@@ -28,35 +28,47 @@ test('every declarative query shape maps to one closed fixture descriptor', () =
   assert.throws(() => resolveReliabilityQueryId({ kind: 'arbitrary' }), /no closed fixture descriptor/u);
 });
 
-function harness({ backendIds, resumeClassification = 'resumed' }) {
-  const clients = [];
-  const stopped = [];
-  const restarted = [];
+interface TestClient {
+  readonly clientId: string;
+  state: string;
+  connect(): Promise<void>;
+  resume(): Promise<{ classification: string }>;
+}
+
+function harness({ backendIds, resumeClassification = 'resumed' }: Readonly<{
+  backendIds: readonly string[];
+  resumeClassification?: string;
+}>) {
+  const clients: TestClient[] = [];
+  const stopped: string[] = [];
+  const restarted: string[] = [];
   const adapter = createClientAdapter({
     endpoint: 'ws://127.0.0.1:3000/websocket',
     proxy: {
       backendIdForConnection(clientId) {
-        return backendIds[Number(clientId.split(':').at(-1))];
+        const backendId = backendIds[Number(clientId.split(':').at(-1))];
+        if (!backendId) throw new Error('test client has no backend');
+        return backendId;
       },
       setRoutePolicy() {},
     },
     cluster: {
       backends: [...new Set(backendIds)].map((id) => ({ id })),
-      async stopInstance(backendId) {
+      async stopInstance(backendId: string) {
         stopped.push(backendId);
         clients.forEach((client, index) => {
           if (backendIds[index] === backendId) client.state = RAW_DDP_STATES.DISCONNECTED;
         });
       },
-      async restartInstance(backendId) { restarted.push(backendId); },
+      async restartInstance(backendId: string) { restarted.push(backendId); },
     },
     runId: 'run-1',
     caseExecutionId: 'case-1',
     ownershipToken: 'owned-token',
     maximumLedgerEntries: 100,
     transport: 'sockjs',
-    clientFactory({ clientId }) {
-      const client = {
+    clientFactory({ clientId }: Readonly<{ clientId: string }>) {
+      const client: TestClient = {
         clientId,
         state: RAW_DDP_STATES.DISCONNECTED,
         async connect() { this.state = RAW_DDP_STATES.CONNECTED; },
@@ -72,7 +84,7 @@ function harness({ backendIds, resumeClassification = 'resumed' }) {
   return { adapter, stopped, restarted };
 }
 
-function invocation(clientCount) {
+function invocation(clientCount: number) {
   return {
     step: { clients: { kind: 'literal', value: clientCount } },
     resolve: () => clientCount,

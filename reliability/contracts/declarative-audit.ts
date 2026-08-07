@@ -95,6 +95,141 @@ export const DECLARATIVE_AUDIT_FAULT_CONTROLLERS = Object.freeze([
 type UnknownRecord = Record<string, unknown>;
 type ScalarChoice = string | number | boolean | null;
 
+/** Data values accepted by authored declarative references. */
+export type DeclarativeValue =
+  | null | boolean | number | string
+  | readonly DeclarativeValue[]
+  | { readonly [key: string]: DeclarativeValue };
+
+/** A closed reference resolved by the trusted interpreter. */
+export type DeclarativeValueRef =
+  | Readonly<{ kind: 'literal'; value: DeclarativeValue }>
+  | Readonly<{ kind: 'parameter'; name: string }>
+  | Readonly<{ kind: 'coordinate'; field: 'seed' | 'transport' | 'topology' | 'observerOrder' }>
+  | Readonly<{ kind: 'run'; field: 'runId' }>
+  | Readonly<{ kind: 'fixture'; field: 'documents' | 'subscriberIds' }>
+  | Readonly<{ kind: 'step'; stepId: string; output: string }>;
+
+/** Fixture selector supported by database mutations. */
+export type DeclarativeSelector =
+  | Readonly<{ kind: 'fixture_document'; index: number }>
+  | Readonly<{ kind: 'field_equals'; field: string; value: DeclarativeValueRef }>;
+
+/** Query descriptors admitted by the reliability publication fixture. */
+export interface DeclarativeQuery {
+  readonly kind: 'unordered' | 'ordered' | 'windowed' | 'selector' | 'projection'
+    | 'multiple_projections' | 'unsupported_selector' | 'change_stream_unavailable';
+  readonly selector?: DeclarativeSelector;
+  readonly sort?: readonly Readonly<{ field: string; direction: 'ascending' | 'descending' }>[];
+  readonly skip?: DeclarativeValue | DeclarativeValueRef;
+  readonly limit?: DeclarativeValue | DeclarativeValueRef;
+  readonly fields?: readonly string[];
+  readonly projections?: readonly (readonly string[])[];
+  readonly operator?: 'json_schema';
+}
+
+/** MongoDB mutation selected by a compiled write step. */
+export interface DeclarativeMutation {
+  readonly kind: 'set' | 'unset' | 'increment' | 'push' | 'fixture_document'
+    | 'generated_document' | 'projection_variant' | 'none';
+  readonly path?: readonly string[];
+  readonly value?: DeclarativeValue | DeclarativeValueRef;
+  readonly amount?: DeclarativeValue | DeclarativeValueRef;
+  readonly index?: number;
+  readonly generator?: string;
+  readonly variant?: string;
+}
+
+/** Expected-model transition paired with a MongoDB mutation. */
+export interface DeclarativeTransition {
+  readonly kind: 'insert' | 'replace' | 'delete' | 'set_field' | 'remove_field'
+    | 'increment_field' | 'append_array' | 'projection_variant';
+  readonly path?: readonly string[];
+  readonly value?: DeclarativeValue | DeclarativeValueRef;
+  readonly amount?: DeclarativeValue | DeclarativeValueRef;
+  readonly variant?: string;
+}
+
+interface DeclarativeStepBase {
+  readonly id: string;
+  readonly timeoutMs?: number;
+  readonly onFailure: 'fail_case' | 'incomplete_case';
+  readonly concurrencyGroup?: string;
+}
+
+/** Closed executable step union shared by compiler and runtime. */
+export type DeclarativeStep =
+  | (DeclarativeStepBase & Readonly<{ kind: 'subscribe'; query: DeclarativeQuery; clients: DeclarativeValueRef }>)
+  | (DeclarativeStepBase & Readonly<{ kind: 'mongo_write'; operation: 'insert_one' | 'insert_many' | 'update_one' | 'replace_one' | 'delete_one' | 'delete_many'; selector: DeclarativeSelector; mutation: DeclarativeMutation; expectedTransition: DeclarativeTransition }>)
+  | (DeclarativeStepBase & Readonly<{ kind: 'wait'; predicate: string; inputs: Readonly<Record<string, DeclarativeValueRef>> }>)
+  | (DeclarativeStepBase & Readonly<{ kind: 'barrier'; barrier: string; schedule: 'serialized' | 'concurrent' | 'burst'; participants: DeclarativeValueRef }>)
+  | (DeclarativeStepBase & Readonly<{ kind: 'client_lifecycle'; action: string; clients: DeclarativeValueRef }>)
+  | (DeclarativeStepBase & Readonly<{ kind: 'fault'; operation: 'activate' | 'restore'; controller: string; faultId: string }>)
+  | (DeclarativeStepBase & Readonly<{ kind: 'snapshot'; producer: string; scope: 'expected' | 'mongodb' | 'ddp' | 'all' }>)
+  | (DeclarativeStepBase & Readonly<{ kind: 'seal_evidence' }>);
+
+/** Exact coordinate identity for one compiled case execution. */
+export interface DeclarativeCoordinate {
+  readonly caseId: string;
+  readonly transport: 'sockjs' | 'sockjs-polling' | 'uws';
+  readonly topology: 'replica_set' | 'sharded_cluster' | 'standalone';
+  readonly observerOrder: readonly string[];
+  readonly seed: number;
+  readonly faultId?: string;
+}
+
+/** Resource limits attached to every compiled plan. */
+export interface DeclarativeBudget {
+  readonly maximumSteps: number;
+  readonly maximumDocuments: number;
+  readonly maximumSubscribers: number;
+  readonly maximumPayloadBytes: number;
+  readonly maximumEvidenceEntries: number;
+  readonly stepTimeoutMs: number;
+  readonly caseTimeoutMs: number;
+  readonly maximumRetries: 0 | 1;
+}
+
+/** Immutable plan consumed by the trusted interpreter. */
+export interface CompiledCasePlan {
+  readonly schemaVersion: 1;
+  readonly contractId: string;
+  readonly contractDigest: string;
+  readonly caseDefinitionDigest: string;
+  readonly profileId: string;
+  readonly coordinate: DeclarativeCoordinate;
+  readonly resolvedParameters: Readonly<Record<string, DeclarativeValue>>;
+  readonly steps: readonly DeclarativeStep[];
+  readonly budget: DeclarativeBudget;
+  readonly digest: string;
+}
+
+/** Oracle descriptor used to bind independent evidence to a hard or diagnostic gate. */
+export interface DeclarativeOracle {
+  readonly id: string;
+  readonly family: string;
+  readonly producer: string;
+  readonly expected: DeclarativeValueRef;
+  readonly observed: Readonly<{ producer: string; stepId: string; ledger: string }>;
+  readonly failureReason: string;
+  readonly gate: 'hard' | 'diagnostic';
+}
+
+/** Authored case fields required by the runtime interpreter. */
+export interface DeclarativeCaseDefinition {
+  readonly id: string;
+  readonly fixture: Readonly<{
+    collection: 'reliabilityDocuments';
+    publication: 'reliability.documents';
+    generator: string;
+    subscribers: DeclarativeValueRef;
+    documents: DeclarativeValueRef;
+    payloadBytes: DeclarativeValueRef;
+  }>;
+  readonly steps: readonly DeclarativeStep[];
+  readonly oracles: readonly DeclarativeOracle[];
+}
+
 function fail(path: string, message: string): never { throw new TypeError(`${path} ${message}`); }
 function record(
   value: unknown,

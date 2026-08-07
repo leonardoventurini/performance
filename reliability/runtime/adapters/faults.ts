@@ -1,10 +1,36 @@
 const AUTO_RESTORE_MS = 250;
 
-function delay(milliseconds) {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+interface FaultClient {
+  readonly state: string;
+  call?(method: string, params: readonly unknown[]): Promise<unknown>;
+  terminate?(): void;
+  resume(): Promise<unknown>;
 }
 
-async function resumeAfterDisconnect(client) {
+interface FaultClients {
+  readonly clients: readonly FaultClient[];
+  faultControlClients?(): Promise<readonly FaultClient[]>;
+}
+
+interface FaultReplicaSet {
+  stepDownPrimary(): Promise<unknown>;
+  suspendAll?(): void;
+  resumeAll?(): Promise<unknown>;
+}
+
+interface FaultEnvironment { readonly replicaSet: FaultReplicaSet }
+
+interface FaultStatus { readonly engaged?: boolean; readonly restored?: boolean }
+interface TrackedFault {
+  readonly controller: string;
+  readonly recovery: Promise<Readonly<{ restored: boolean; error?: unknown }>> | null;
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function resumeAfterDisconnect(client: FaultClient): Promise<unknown> {
   const deadline = Date.now() + 5_000;
   while (client.state !== 'disconnected') {
     if (Date.now() >= deadline) throw new Error('faulted DDP client did not disconnect');
@@ -13,42 +39,63 @@ async function resumeAfterDisconnect(client) {
   return client.resume();
 }
 
-function digestibleWitness(controller, faultId, activated, restored) {
+function digestibleWitness(controller: string, faultId: string, activated: boolean, restored: boolean) {
   return Object.freeze({ controller, faultId, activated, restored });
 }
 
 /** Controls only resources owned by the current audit environment. */
-export function createFaultAdapter({ environment, clients, runId, caseExecutionId, ownershipToken }) {
-  const active = new Map();
-  const internal = async (controller, operation, faultId) => Promise.all((await clients.faultControlClients()).map((client) => (
-    client.call('audit.faultControl', [{
+export function createFaultAdapter({ environment, clients, runId, caseExecutionId, ownershipToken }: Readonly<{
+  environment: FaultEnvironment;
+  clients: FaultClients;
+  runId: string;
+  caseExecutionId: string;
+  ownershipToken: string;
+}>) {
+  const active = new Map<string, TrackedFault>();
+  const internal = async (controller: string, operation: string, faultId: string): Promise<FaultStatus[]> => {
+    if (!clients.faultControlClients) throw new Error('fault control clients are unavailable');
+    return Promise.all((await clients.faultControlClients()).map(async (client) => {
+    if (!client.call) throw new Error('fault control DDP method is unavailable');
+    const result = await client.call('audit.faultControl', [{
       runId, caseExecutionId, ownershipToken, controller, operation, faultId,
-    }])
-  )));
+    }]);
+    if (!result || typeof result !== 'object') throw new Error('fault controller returned an invalid witness');
+    return {
+      ...(typeof Reflect.get(result, 'engaged') === 'boolean' ? { engaged: Reflect.get(result, 'engaged') === true } : {}),
+      ...(typeof Reflect.get(result, 'restored') === 'boolean' ? { restored: Reflect.get(result, 'restored') === true } : {}),
+    };
+    }));
+  };
   return Object.freeze({
     state: active,
-    async execute(controller, operation, { step }) {
+    async execute(controller: string, operation: string, { step }: Readonly<{
+      step: Readonly<{ faultId: string }>;
+    }>) {
       const key = step.faultId;
       if (operation === 'activate') {
         if (active.has(key)) throw new Error(`fault ${key} is already active`);
-        let recovery;
+        let recovery: Promise<unknown> | null;
         if (['mongodb_primary_step_down', 'replica_set_election'].includes(controller)) {
           recovery = environment.replicaSet.stepDownPrimary();
         } else if (controller === 'meteor_mongo_interruption') {
+          if (!environment.replicaSet.suspendAll || !environment.replicaSet.resumeAll) {
+            throw new Error('MongoDB interruption controls are unavailable');
+          }
           environment.replicaSet.suspendAll();
-          recovery = new Promise((resolve, reject) => {
-            const timer = setTimeout(() => environment.replicaSet.resumeAll().then(resolve, reject), AUTO_RESTORE_MS);
+          const resumeAll = environment.replicaSet.resumeAll;
+          recovery = new Promise<unknown>((resolve, reject) => {
+            const timer = setTimeout(() => resumeAll().then(resolve, reject), AUTO_RESTORE_MS);
             timer.unref?.();
           });
         } else if (controller === 'ddp_client_disconnect') {
           const selected = clients.clients;
-          selected.forEach((client) => client.terminate());
+          selected.forEach((client) => client.terminate?.());
           recovery = Promise.all(selected.map(resumeAfterDisconnect));
         } else {
           await internal(controller, 'activate', key);
           recovery = null;
         }
-        const tracked = recovery ? Promise.resolve(recovery).then(
+        const tracked: TrackedFault['recovery'] = recovery ? Promise.resolve(recovery).then(
           () => ({ restored: true }),
           (error) => ({ restored: false, error }),
         ) : null;
@@ -60,7 +107,7 @@ export function createFaultAdapter({ environment, clients, runId, caseExecutionI
       }
       const fault = active.get(key);
       if (!fault || fault.controller !== controller) throw new Error(`fault ${key} has no matching activation`);
-      let restored;
+      let restored: boolean;
       if (fault.recovery) {
         const outcome = await fault.recovery;
         if (!outcome.restored) throw outcome.error;
@@ -77,7 +124,7 @@ export function createFaultAdapter({ environment, clients, runId, caseExecutionI
       };
     },
     async restoreAll() {
-      const failures = [];
+      const failures: unknown[] = [];
       for (const [faultId, fault] of [...active]) {
         try {
           if (fault.recovery) {
@@ -93,13 +140,13 @@ export function createFaultAdapter({ environment, clients, runId, caseExecutionI
       }
       if (failures.length > 0) throw new AggregateError(failures, 'fault restoration was incomplete');
     },
-    async waitUntilEngaged(signal) {
+    async waitUntilEngaged(signal: AbortSignal) {
       const gated = [...active.entries()].find(([, fault]) => (
         ['startup_snapshot_pause', 'watch_setup_pause'].includes(fault.controller)
       ));
       if (!gated) throw new Error('no pending lifecycle gate is active');
       const [faultId, fault] = gated;
-      let lastStatuses = [];
+      let lastStatuses: FaultStatus[] = [];
       while (!signal.aborted) {
         lastStatuses = await internal(fault.controller, 'status', faultId);
         if (lastStatuses.every((status) => status.engaged === true)) return { engaged: true };

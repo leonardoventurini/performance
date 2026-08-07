@@ -5,8 +5,13 @@ import {
   buildDeclarativeFixture,
   createDatabaseAdapter,
 } from '../../../reliability/runtime/adapters/database.js';
+import type {
+  DeclarativeFixture,
+  ReliabilityCollection,
+  ReliabilityDocument,
+} from '../../../reliability/runtime/adapters/database.js';
 
-function fixtureInput(caseExecutionId) {
+function fixtureInput(caseExecutionId: string): Parameters<typeof buildDeclarativeFixture>[0] {
   return {
     definition: {
       fixture: {
@@ -21,30 +26,42 @@ function fixtureInput(caseExecutionId) {
   };
 }
 
-function collection() {
-  const documents = new Map();
+interface TestCollection extends ReliabilityCollection {
+  readonly documents: Map<string, ReliabilityDocument>;
+}
+
+function collection(): TestCollection {
+  const documents = new Map<string, ReliabilityDocument>();
   return {
     documents,
-    async insertOne(document) { documents.set(document._id, structuredClone(document)); },
-    async updateOne(selector, update) {
-      const document = documents.get(selector._id);
-      if (update.$set) for (const [key, value] of Object.entries(update.$set)) document[key] = value;
-      if (update.$inc) for (const [key, value] of Object.entries(update.$inc)) document[key] += value;
-      if (update.$unset) for (const key of Object.keys(update.$unset)) delete document[key];
-      if (update.$push) for (const [key, value] of Object.entries(update.$push)) document[key].push(value);
+    async insertOne(document: ReliabilityDocument) { documents.set(document._id, structuredClone(document)); },
+    async updateOne(selector: Record<string, unknown>, update: Record<string, unknown>) {
+      const document = documents.get(String(selector._id));
+      if (!document) throw new Error('test document is missing');
+      if (update.$set && typeof update.$set === 'object') for (const [key, value] of Object.entries(update.$set)) document[key] = value;
+      if (update.$inc && typeof update.$inc === 'object') for (const [key, value] of Object.entries(update.$inc)) document[key] = Number(document[key] ?? 0) + Number(value);
+      if (update.$unset && typeof update.$unset === 'object') for (const key of Object.keys(update.$unset)) delete document[key];
+      if (update.$push && typeof update.$push === 'object') for (const [key, value] of Object.entries(update.$push)) {
+        const values = document[key];
+        document[key] = [...(Array.isArray(values) ? values : []), value];
+      }
     },
-    async replaceOne(selector, replacement) { documents.set(selector._id, structuredClone(replacement)); },
-    async deleteOne(selector) { documents.delete(selector._id); },
-    async deleteMany({ runId }) { for (const [id, document] of documents) if (document.runId === runId) documents.delete(id); },
-    async countDocuments({ runId }) { return [...documents.values()].filter((document) => document.runId === runId).length; },
+    async replaceOne(selector: Record<string, unknown>, replacement: ReliabilityDocument) { documents.set(String(selector._id), structuredClone(replacement)); },
+    async deleteOne(selector: Record<string, unknown>) { documents.delete(String(selector._id)); },
+    async deleteMany({ runId }: Record<string, unknown>) { for (const [id, document] of documents) if (document.runId === runId) documents.delete(id); },
+    async countDocuments({ runId }: Record<string, unknown>) { return [...documents.values()].filter((document) => document.runId === runId).length; },
   };
 }
 
 test('database mutation and expected transition are independent paths', async () => {
   const store = collection();
-  const fixture = { documents: [{ _id: 'run:0', runId: 'run', counter: 0 }] };
+  const fixture: DeclarativeFixture = { documents: [{
+    _id: 'run:0', runId: 'run', caseExecutionId: 'case', sequence: 0, revision: 0,
+    counter: 0,
+  }] };
   const adapter = createDatabaseAdapter({ collection: store, fixture });
-  const resolve = (value) => value?.kind === 'literal' ? value.value : value;
+  const resolve = (value: unknown): unknown => value && typeof value === 'object'
+    && Reflect.get(value, 'kind') === 'literal' ? Reflect.get(value, 'value') : value;
   await adapter.write({
     step: {
       operation: 'insert_one', selector: { index: 0 }, mutation: { kind: 'fixture_document' },
@@ -59,15 +76,21 @@ test('database mutation and expected transition are independent paths', async ()
     },
     resolve,
   });
-  assert.equal(store.documents.get('run:0').counter, 1);
-  assert.equal(output.expectedState[0].counter, 1);
-  output.expectedState[0].counter = 99;
-  assert.equal(adapter.expectedSnapshot()[0].counter, 1);
+  assert.equal(store.documents.get('run:0')?.counter, 1);
+  const outputDocument = output.expectedState[0];
+  assert.ok(outputDocument);
+  assert.equal(outputDocument.counter, 1);
+  outputDocument.counter = 99;
+  const expectedDocument = adapter.expectedSnapshot()[0];
+  assert.ok(expectedDocument);
+  assert.equal(expectedDocument.counter, 1);
 });
 
 test('cleanup proves no run-scoped documents remain', async () => {
   const store = collection();
-  store.documents.set('one', { _id: 'one', runId: 'run' });
+  store.documents.set('one', {
+    _id: 'one', runId: 'run', caseExecutionId: 'case', sequence: 0, revision: 0,
+  });
   const adapter = createDatabaseAdapter({ collection: store, fixture: { documents: [] } });
   assert.deepEqual(await adapter.cleanup({ runId: 'run' }), {
     cleanup: true, provenance: { cleanup: 'mongodb' },
@@ -78,19 +101,22 @@ test('fixture identity is isolated by case execution', () => {
   const first = buildDeclarativeFixture(fixtureInput('case-one'));
   const second = buildDeclarativeFixture(fixtureInput('case-two'));
 
-  assert.notEqual(first.documents[0]._id, second.documents[0]._id);
-  assert.equal(first.documents[0]._id, 'shared-run:case-one:0');
-  assert.equal(Object.hasOwn(first.documents[0], 'ephemeral'), true);
+  const firstDocument = first.documents[0];
+  const secondDocument = second.documents[0];
+  assert.ok(firstDocument && secondDocument);
+  assert.notEqual(firstDocument._id, secondDocument._id);
+  assert.equal(firstDocument._id, 'shared-run:case-one:0');
+  assert.equal(Object.hasOwn(firstDocument, 'ephemeral'), true);
 });
 
 test('replacement mutations preserve audit scope without retaining stale fields', async () => {
   const store = collection();
-  const fixture = { documents: [{
+  const fixture: DeclarativeFixture = { documents: [{
     _id: 'run:0', runId: 'run', caseExecutionId: 'case', sequence: 0,
     revision: 0, payload: 'payload', ephemeral: 'stale', projected: 'stale',
   }] };
   const adapter = createDatabaseAdapter({ collection: store, fixture });
-  const resolve = (value) => value;
+  const resolve = (value: unknown): unknown => value;
   await adapter.write({
     step: {
       operation: 'insert_one', selector: { index: 0 }, mutation: { kind: 'fixture_document' },
@@ -108,6 +134,7 @@ test('replacement mutations preserve audit scope without retaining stale fields'
   });
 
   const replacement = store.documents.get('run:0');
+  assert.ok(replacement);
   assert.equal(replacement.runId, 'run');
   assert.equal(replacement.caseExecutionId, 'case');
   assert.equal(replacement.retained, true);

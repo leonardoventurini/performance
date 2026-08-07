@@ -1,6 +1,8 @@
 import WebSocket from 'ws';
 
 import { snapshotDigest } from '../../oracles/snapshot.js';
+import type { DeclarativeQuery } from '../../contracts/declarative-audit.js';
+import type { InterpreterState } from '../interpreter.js';
 import { RAW_DDP_STATES, RawDdpClient } from '../ddp/raw-client.js';
 
 const DISCONNECT_TIMEOUT_MS = 5_000;
@@ -8,12 +10,106 @@ const RECONNECT_STORM_CYCLES = 3;
 const PAYLOAD_512_KIB = 512 * 1024;
 const PAYLOAD_NEAR_CEILING = 15 * 1024 * 1024;
 
-function delay(milliseconds) {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+interface SubscriptionHandle { readonly id: string; readonly name: string; readonly params: readonly unknown[] }
+interface ResumeOutcome { readonly classification: string }
+interface ClientLike {
+  readonly clientId: string;
+  state: string;
+  connect(): Promise<unknown>;
+  resume(): Promise<ResumeOutcome>;
+  subscribe?(name: string, params?: readonly unknown[]): Promise<SubscriptionHandle>;
+  unsubscribe?(id: string): Promise<void>;
+  call?(method: string, params?: readonly unknown[]): Promise<unknown>;
+  terminate?(): void;
+  close?(code?: number, reason?: string): void;
+  snapshot?(collectionName: string): readonly Readonly<Record<string, unknown>>[];
+  ledger?(): readonly LedgerEntry[];
+}
+
+interface LedgerEntry {
+  readonly direction: string;
+  readonly message: Readonly<{ msg?: string }>;
+}
+
+interface ClientProxy {
+  snapshotLedger?(): readonly unknown[];
+  setSlowConsumer?(clientId: string, enabled: boolean): void;
+  sendFragmented?(clientId: string, input: Readonly<{ direction: string; chunks: readonly Buffer[] }>): Promise<unknown>;
+  backendIdForConnection(clientId: string): string;
+  setRoutePolicy(policy: Readonly<{ kind: string }>): void;
+}
+
+interface ClientCluster {
+  readonly backends: readonly Readonly<{ id: string }>[];
+  stopInstance(backendId: string): Promise<unknown>;
+  restartInstance(backendId: string): Promise<unknown>;
+}
+
+interface ClientInvocation {
+  readonly step: Readonly<{ clients: unknown }>;
+  readonly resolve: (reference: unknown) => unknown;
+  readonly signal: AbortSignal;
+  readonly state?: InterpreterState;
+}
+
+interface ObserverEvidence {
+  readonly instanceId: string;
+  readonly cursorFingerprint: string;
+  readonly sequence: number;
+  readonly actualDriver: string;
+  readonly multiplexerIdentity: string;
+  readonly fallbackFrom?: string;
+  readonly fallbackReason?: string;
+}
+
+interface EchoResponse { readonly payload: unknown; readonly byteLength: number }
+
+function validateObserverEvidence(value: unknown): ObserverEvidence[] {
+  if (!Array.isArray(value)) throw new Error('observer evidence must be an array');
+  return value.map((entry) => {
+    if (!entry || typeof entry !== 'object') throw new Error('observer evidence entry is invalid');
+    const instanceId = Reflect.get(entry, 'instanceId');
+    const cursorFingerprint = Reflect.get(entry, 'cursorFingerprint');
+    const sequence = Reflect.get(entry, 'sequence');
+    const actualDriver = Reflect.get(entry, 'actualDriver');
+    const multiplexerIdentity = Reflect.get(entry, 'multiplexerIdentity');
+    const fallbackFrom = Reflect.get(entry, 'fallbackFrom');
+    const fallbackReason = Reflect.get(entry, 'fallbackReason');
+    if (typeof instanceId !== 'string' || typeof cursorFingerprint !== 'string'
+        || !Number.isSafeInteger(sequence) || typeof actualDriver !== 'string'
+        || typeof multiplexerIdentity !== 'string') {
+      throw new Error('observer evidence entry is incomplete');
+    }
+    return {
+      instanceId,
+      cursorFingerprint,
+      sequence: Number(sequence),
+      actualDriver,
+      multiplexerIdentity,
+      ...(typeof fallbackFrom === 'string' ? { fallbackFrom } : {}),
+      ...(typeof fallbackReason === 'string' ? { fallbackReason } : {}),
+    };
+  });
+}
+
+function validateEchoResponse(value: unknown): EchoResponse {
+  if (!value || typeof value !== 'object') throw new Error('DDP echo response is invalid');
+  const byteLength = Reflect.get(value, 'byteLength');
+  if (!Number.isSafeInteger(byteLength)) throw new Error('DDP echo byte length is invalid');
+  return { payload: Reflect.get(value, 'payload'), byteLength: Number(byteLength) };
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
 }
 
 /** Resolves a validated declarative query into the fixture's closed descriptor. */
-export function resolveReliabilityQueryId(query) {
+export function resolveReliabilityQueryId(query: Readonly<{
+  kind: string;
+  limit?: unknown | undefined;
+  skip?: unknown | undefined;
+  selector?: DeclarativeQuery['selector'] | Readonly<{ field?: string }> | undefined;
+}>): string {
   if (query.kind === 'unordered') return 'unordered';
   if (query.kind === 'ordered') {
     throw new Error('ordered observer evidence requires a dedicated server-side observe primitive');
@@ -26,12 +122,14 @@ export function resolveReliabilityQueryId(query) {
   if (query.kind === 'windowed' && query.skip !== undefined) {
     throw new Error('skip fallback evidence requires a query-scoped expected-model primitive');
   }
-  if (query.kind === 'selector' && query.selector.field === 'included') return 'selector_included';
-  if (query.kind === 'selector' && query.selector.field === 'cohort') return 'selector_secondary_cohort';
+  if (query.kind === 'selector' && query.selector && 'field' in query.selector
+      && query.selector.field === 'included') return 'selector_included';
+  if (query.kind === 'selector' && query.selector && 'field' in query.selector
+      && query.selector.field === 'cohort') return 'selector_secondary_cohort';
   throw new Error(`query ${query.kind} has no closed fixture descriptor`);
 }
 
-async function waitForDisconnected(client, signal) {
+async function waitForDisconnected(client: ClientLike, signal?: AbortSignal): Promise<void> {
   const deadline = Date.now() + DISCONNECT_TIMEOUT_MS;
   while (client.state !== RAW_DDP_STATES.DISCONNECTED) {
     if (signal?.aborted) throw signal.reason;
@@ -40,7 +138,7 @@ async function waitForDisconnected(client, signal) {
   }
 }
 
-function expectedClassification(action) {
+function expectedClassification(action: string): 'fresh' | 'resumed' {
   return new Set([
     'fresh_after_grace', 'fresh_non_sticky_instance', 'resume_after_hot_code_push',
     'resume_non_sticky_instance', 'resume_grace_expired',
@@ -51,13 +149,39 @@ function expectedClassification(action) {
 export function createClientAdapter({
   endpoint, proxy, cluster, runId, caseExecutionId, ownershipToken,
   maximumLedgerEntries, transport, clientFactory,
-}) {
-  const clients = [];
-  const faultControlClients = [];
-  const subscriptions = new Map();
-  const postconditions = [];
+}: Readonly<{
+  endpoint: string;
+  proxy: ClientProxy;
+  cluster: ClientCluster;
+  runId: string;
+  caseExecutionId: string;
+  ownershipToken: string;
+  maximumLedgerEntries: number;
+  transport: string;
+  clientFactory?: (input: Readonly<{ clientId: string; endpoint: string; maximumLedgerEntries: number }>) => ClientLike;
+}>) {
+  const clients: ClientLike[] = [];
+  const faultControlClients: ClientLike[] = [];
+  const subscriptions = new Map<string, SubscriptionHandle>();
+  const postconditions: Array<Readonly<{ kind: 'deliver_events' | 'fanout' | 'convergence'; clients: readonly ClientLike[] }>> = [];
 
-  const ensureClients = async (count) => {
+  const createWebSocketFactory = (clientId: string, backendId?: string) => (url: string) => {
+    const socket = new WebSocket(url, {
+      headers: {
+        'x-audit-connection': clientId,
+        ...(backendId ? { 'x-audit-backend': backendId } : {}),
+      },
+      perMessageDeflate: false,
+    });
+    return {
+      on(event: string, listener: (event?: unknown) => void): void { socket.on(event, listener); },
+      send(data: string): void { socket.send(data); },
+      close(code?: number, reason?: string): void { socket.close(code, reason); },
+      terminate(): void { socket.terminate(); },
+    };
+  };
+
+  const ensureClients = async (count: number): Promise<ClientLike[]> => {
     while (clients.length < count) {
       const index = clients.length;
       const clientId = `${caseExecutionId}:client:${index}`;
@@ -65,10 +189,7 @@ export function createClientAdapter({
         endpoint,
         clientId,
         maximumLedgerEntries,
-        webSocketFactory: (url) => new WebSocket(url, {
-          headers: { 'x-audit-connection': clientId },
-          perMessageDeflate: false,
-        }),
+        webSocketFactory: createWebSocketFactory(clientId),
       });
       await client.connect();
       clients.push(client);
@@ -87,32 +208,39 @@ export function createClientAdapter({
           endpoint,
           clientId,
           maximumLedgerEntries,
-          webSocketFactory: (url) => new WebSocket(url, {
-            headers: {
-              'x-audit-connection': clientId,
-              'x-audit-backend': backend.id,
-            },
-            perMessageDeflate: false,
-          }),
+          webSocketFactory: createWebSocketFactory(clientId, backend.id),
         });
         await client.connect();
         faultControlClients.push(client);
       }
       return faultControlClients;
     },
-    async subscribe({ step, resolve, signal }) {
+    async subscribe({ step, resolve, signal }: Readonly<{
+      step: Readonly<{ clients: unknown; query: DeclarativeQuery }>;
+      resolve: (reference: unknown) => unknown;
+      signal?: AbortSignal;
+    }>) {
       const selected = await ensureClients(Number(resolve(step.clients)));
       const descriptor = resolveReliabilityQueryId(step.query);
-      const opened = await Promise.all(selected.map((client) => client.subscribe(
+      const opened = await Promise.all(selected.map((client) => {
+        if (!client.subscribe) throw new Error('DDP subscription primitive is unavailable');
+        return client.subscribe(
         'reliability.documents',
         [{ runId, caseExecutionId, queryId: descriptor }],
-      )));
-      selected.forEach((client, index) => subscriptions.set(client.clientId, opened[index]));
-      const observerEvidence = await selected[0].call('audit.monitorSnapshot', [{
+        );
+      }));
+      selected.forEach((client, index) => {
+        const subscription = opened[index];
+        if (subscription) subscriptions.set(client.clientId, subscription);
+      });
+      const witnessClient = selected[0];
+      if (!witnessClient?.call) throw new Error('observer evidence client is unavailable');
+      const observerResult = await witnessClient.call('audit.monitorSnapshot', [{
         runId,
         caseExecutionId,
         ownershipToken,
       }]);
+      const observerEvidence = validateObserverEvidence(observerResult);
       if (signal?.aborted) throw signal.reason;
       const actualDrivers = [...new Set(observerEvidence.map(({ actualDriver }) => actualDriver))];
       if (actualDrivers.length !== 1) throw new Error('audit cursors selected inconsistent observer drivers');
@@ -142,7 +270,7 @@ export function createClientAdapter({
         },
       };
     },
-    async execute(action, invocation) {
+    async execute(action: string, invocation: ClientInvocation) {
       const selected = await ensureClients(Number(invocation.resolve(invocation.step.clients)));
       if (action === 'connect') {
         if (selected.some(({ state }) => state !== RAW_DDP_STATES.CONNECTED)) throw new Error('not every DDP client negotiated a connection');
@@ -150,7 +278,7 @@ export function createClientAdapter({
       }
       if (action === 'deliver_events') {
         postconditions.push({ kind: 'deliver_events', clients: selected });
-        return { armedAtEntries: selected.map((client) => client.ledger().length) };
+        return { armedAtEntries: selected.map((client) => client.ledger?.().length ?? 0) };
       }
       if (action === 'fanout') {
         postconditions.push({ kind: 'fanout', clients: selected });
@@ -161,26 +289,32 @@ export function createClientAdapter({
         return { readySubscriptions: selected.length };
       }
       if (action === 'capture_frames') {
+        if (!proxy.snapshotLedger) throw new Error('frame capture proxy control is unavailable');
         return {
           frame_ledger: proxy.snapshotLedger(),
           provenance: { frame_ledger: 'ddp_client' },
         };
       }
       if (action === 'stop_subscription') {
-        await Promise.all(selected.map((client) => client.unsubscribe(subscriptions.get(client.clientId).id)));
+        await Promise.all(selected.map((client) => {
+          const subscription = subscriptions.get(client.clientId);
+          if (!client.unsubscribe || !subscription) throw new Error('active DDP subscription is unavailable');
+          return client.unsubscribe(subscription.id);
+        }));
         return {};
       }
       if (action === 'clean_client_shutdown') {
-        selected.forEach((client) => client.close(1000, 'declarative clean shutdown'));
+        selected.forEach((client) => client.close?.(1000, 'declarative clean shutdown'));
         await Promise.all(selected.map((client) => waitForDisconnected(client, invocation.signal)));
         return {};
       }
       if (action === 'abrupt_disconnect' || action === 'abrupt_socket_loss') {
-        selected.forEach((client) => client.terminate());
+        selected.forEach((client) => client.terminate?.());
         await Promise.all(selected.map((client) => waitForDisconnected(client, invocation.signal)));
         return {};
       }
       if (action === 'slow_consumer') {
+        if (!proxy.setSlowConsumer) throw new Error('slow-consumer proxy control is unavailable');
         for (const client of selected) proxy.setSlowConsumer(client.clientId, true);
         await delay(100);
         for (const client of selected) proxy.setSlowConsumer(client.clientId, false);
@@ -188,6 +322,7 @@ export function createClientAdapter({
       }
       if (action === 'fragment_frames') {
         for (const client of selected) {
+          if (!proxy.sendFragmented) throw new Error('fragmentation proxy control is unavailable');
           await proxy.sendFragmented(client.clientId, {
             direction: 'to_backend', chunks: [Buffer.from('{"msg":"ping",'), Buffer.from('"id":"fragment"}')],
           });
@@ -198,7 +333,7 @@ export function createClientAdapter({
         const targetedBackends = [...new Set(selected.map((client) => (
           proxy.backendIdForConnection(client.clientId)
         )))];
-        const stoppedBackends = [];
+        const stoppedBackends: string[] = [];
         try {
           for (const backendId of targetedBackends) {
             await cluster.stopInstance(backendId);
@@ -209,18 +344,17 @@ export function createClientAdapter({
           const restarts = await Promise.allSettled(stoppedBackends.map((backendId) => (
             cluster.restartInstance(backendId)
           )));
-          const restartFailures = restarts
-            .filter(({ status }) => status === 'rejected')
-            .map(({ reason }) => reason);
+          const restartFailures = restarts.flatMap((outcome) => outcome.status === 'rejected' ? [outcome.reason] : []);
           if (restartFailures.length > 0) {
             throw new AggregateError(restartFailures, 'clean server shutdown could not restore every targeted backend');
           }
         }
         const outcomes = await Promise.all(selected.map((client) => client.resume()));
         await Promise.all(selected.map(async (client, index) => {
-          if (outcomes[index].classification !== 'fresh') return;
+          if (outcomes[index]?.classification !== 'fresh') return;
           const prior = subscriptions.get(client.clientId);
           if (!prior) throw new Error('clean server shutdown lost subscription ownership');
+          if (!client.subscribe) throw new Error('DDP subscription primitive is unavailable');
           const reopened = await client.subscribe(prior.name, prior.params);
           subscriptions.set(client.clientId, reopened);
         }));
@@ -250,9 +384,9 @@ export function createClientAdapter({
         }
         const cycles = ['concurrent_resume_storm', 'reconnect_storm', 'bounded_reconnect_storm'].includes(action)
           ? RECONNECT_STORM_CYCLES : 1;
-        let outcomes = [];
+        let outcomes: ResumeOutcome[] = [];
         for (let cycle = 0; cycle < cycles; cycle += 1) {
-          selected.forEach((client) => client.terminate());
+          selected.forEach((client) => client.terminate?.());
           await Promise.all(selected.map((client) => waitForDisconnected(client, invocation.signal)));
           outcomes = await Promise.all(selected.map((client) => client.resume()));
         }
@@ -268,9 +402,10 @@ export function createClientAdapter({
         const payload = action === 'round_trip_ejson'
           ? { date: new Date('2026-01-01T00:00:00.000Z'), nested: { emoji: '🚀' }, values: [null, true, 1.5] }
           : 'x'.repeat(action === 'send_payload_512_kib' ? PAYLOAD_512_KIB : PAYLOAD_NEAR_CEILING);
-        const responses = await Promise.all(selected.map((client) => client.call('audit.echo', [{
-          runId, ownershipToken, payload,
-        }])));
+        const responses = await Promise.all(selected.map(async (client) => {
+          if (!client.call) throw new Error('DDP method primitive is unavailable');
+          return validateEchoResponse(await client.call('audit.echo', [{ runId, ownershipToken, payload }]));
+        }));
         if (responses.some((response) => JSON.stringify(response.payload) !== JSON.stringify(payload))) {
           throw new Error('DDP EJSON echo changed the payload');
         }
@@ -281,7 +416,7 @@ export function createClientAdapter({
         return { armedClients: selected.length };
       }
       if (['verify_isolated_multiplexers', 'verify_shared_multiplexer'].includes(action)) {
-        const observations = invocation.state.outputs.get('subscribe')?.observerEvidence || [];
+        const observations = validateObserverEvidence(invocation.state?.outputs.get('subscribe')?.observerEvidence ?? []);
         const identitiesByInstance = Map.groupBy(observations, ({ instanceId }) => instanceId);
         const valid = [...identitiesByInstance.values()].every((entries) => {
           const identities = new Set(entries.map(({ multiplexerIdentity }) => multiplexerIdentity));
@@ -297,20 +432,24 @@ export function createClientAdapter({
       throw new Error(`client lifecycle action ${action} has no live implementation`);
     },
     snapshots() {
-      const snapshots = clients.map((client) => client.snapshot('reliabilityDocuments'));
+      const snapshots = clients.map((client) => {
+        if (!client.snapshot) throw new Error('DDP snapshot primitive is unavailable');
+        return client.snapshot('reliabilityDocuments');
+      });
       const digests = new Set(snapshots.map(snapshotDigest));
       if (digests.size > 1) throw new Error('DDP subscribers did not converge to one snapshot');
       return snapshots[0] || [];
     },
-    ledgers() { return clients.map((client) => client.ledger()); },
+    ledgers() { return clients.map((client) => client.ledger?.() ?? []); },
     verifyPostconditions() {
       for (const condition of postconditions) {
         if (condition.kind === 'convergence') {
           adapter.snapshots();
           continue;
         }
-        const delivered = condition.clients.map((client) => client.ledger().some(({ direction, message }) => (
-          direction === 'in' && ['added', 'changed', 'removed'].includes(message.msg)
+        const delivered = condition.clients.map((client) => (client.ledger?.() ?? []).some(({ direction, message }) => (
+          direction === 'in' && typeof message.msg === 'string'
+            && ['added', 'changed', 'removed'].includes(message.msg)
         )));
         if (condition.kind === 'deliver_events' && !delivered.some(Boolean)) throw new Error('no DDP collection event was delivered');
         if (condition.kind === 'fanout' && !delivered.every(Boolean)) throw new Error('DDP event did not fan out to every declared subscriber');
@@ -319,7 +458,7 @@ export function createClientAdapter({
     },
     async close() {
       const allClients = [...clients, ...faultControlClients];
-      for (const client of allClients) client.close(1000, 'case cleanup');
+      for (const client of allClients) client.close?.(1000, 'case cleanup');
       await Promise.all(allClients.map((client) => waitForDisconnected(client)));
     },
   };

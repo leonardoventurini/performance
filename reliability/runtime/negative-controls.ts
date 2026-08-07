@@ -16,31 +16,111 @@ const PRODUCTION_GATES = Object.freeze({
   releaseIdentityStatus,
 });
 
-function incomingEvents(record) {
-  return record.execution.contextEvidence?.ddpLedgers?.flatMap((ledger) => ledger
-    .filter(({ direction, message }) => direction === 'in'
-      && ['added', 'changed', 'removed'].includes(message.msg))
-    .map(({ sequence, message }) => ({ sequence, message }))) || [];
+interface NegativeControl {
+  readonly id: string;
+  readonly expectedReason: string;
+  readonly mutation: Readonly<{ kind: string }>;
 }
 
-function recordFor(records, predicate) {
+interface DdpEvent {
+  readonly sequence?: number;
+  readonly message: Readonly<{
+    msg?: string;
+    fields?: Readonly<{ revision?: number }>;
+    [key: string]: unknown;
+  }>;
+}
+
+interface RuntimeRecord {
+  readonly definition: Readonly<{
+    id: string;
+    oracles: readonly (Readonly<Record<string, unknown>> & Readonly<{
+      id: string;
+      family: string;
+      expected: Readonly<Record<string, unknown>> & Readonly<{ kind: string; value?: unknown; stepId?: string; output?: string }>;
+      observed: Readonly<Record<string, unknown>> & Readonly<{ producer: string; stepId: string; ledger: string }>;
+      failureReason: string;
+      gate: string;
+    }>)[];
+  }>;
+  readonly execution: Readonly<{
+    status: string;
+    evidence: Readonly<{
+      coordinate: Readonly<Record<string, unknown>>;
+      outputs: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
+      provenance?: Readonly<Record<string, Readonly<Record<string, string | undefined>> | undefined>>;
+    }>;
+    contextEvidence?: Readonly<{ ddpLedgers?: readonly (readonly Readonly<{ direction: string; sequence?: number; message: DdpEvent['message'] }>[])[] }>;
+  }>;
+  readonly result: Readonly<{
+    status: string;
+    observerEvidence: readonly Readonly<{ fallbackFrom?: string }>[];
+    faultWitness?: unknown;
+    release?: unknown;
+  }>;
+}
+
+interface RecoveryEvidence {
+  readonly runDocumentsRemoved: boolean;
+  readonly topologyRestored: boolean;
+  readonly profilerRestored: boolean;
+  readonly networkRestored: boolean;
+}
+
+interface GateResult { readonly status?: string; readonly reasons?: readonly string[] }
+interface ProductionGates {
+  caseEvidenceStatus(result: unknown, contract: unknown): GateResult;
+  logicalCoordinateStatus(attempts: readonly unknown[], contract: unknown): GateResult;
+  recoveryEvidenceStatus(recovery: unknown): GateResult;
+  releaseIdentityStatus(candidate: unknown, expected: unknown): GateResult;
+}
+
+interface MutationOutcome {
+  readonly detected?: boolean;
+  readonly actualReason?: string;
+  readonly reason?: string;
+  readonly evidence?: unknown;
+}
+
+function evaluateMutation(
+  family: string,
+  expected: unknown,
+  observed: unknown,
+  record: RuntimeRecord,
+): boolean {
+  const oracle = record.definition.oracles.find((entry) => entry.family === family);
+  const handler = DECLARATIVE_ORACLE_HANDLERS[family];
+  if (!oracle || !handler) return false;
+  return handler({ expected, observed, oracle, execution: record.execution });
+}
+
+function incomingEvents(record: RuntimeRecord): DdpEvent[] {
+  return record.execution.contextEvidence?.ddpLedgers?.flatMap((ledger) => ledger
+    .filter(({ direction, message }) => direction === 'in'
+      && typeof message.msg === 'string' && ['added', 'changed', 'removed'].includes(message.msg))
+    .map(({ sequence, message }) => ({ ...(sequence === undefined ? {} : { sequence }), message }))) || [];
+}
+
+function recordFor(records: readonly RuntimeRecord[], predicate: (record: RuntimeRecord) => boolean): RuntimeRecord | undefined {
   return records.find((record) => record.result.status === 'passed' && predicate(record));
 }
 
-function oracleRecord(records, family) {
+function oracleRecord(records: readonly RuntimeRecord[], family: string): RuntimeRecord | undefined {
   return recordFor(records, ({ definition }) => definition.oracles.some((oracle) => oracle.family === family));
 }
 
-function snapshotPair(record) {
+function snapshotPair(record: RuntimeRecord): Readonly<{ expected: unknown; observed: unknown }> | null {
   const oracle = record.definition.oracles.find(({ family }) => family === 'snapshot_exact');
   if (!oracle) return null;
   return {
-    expected: record.execution.evidence.outputs[oracle.expected.stepId]?.[oracle.expected.output],
+    expected: oracle.expected.stepId === undefined || oracle.expected.output === undefined
+      ? undefined
+      : record.execution.evidence.outputs[oracle.expected.stepId]?.[oracle.expected.output],
     observed: record.execution.evidence.outputs[oracle.observed.stepId]?.[oracle.observed.ledger],
   };
 }
 
-function alteredSnapshot(records, kind) {
+function alteredSnapshot(records: readonly RuntimeRecord[], kind: string): MutationOutcome | null {
   const record = oracleRecord(records, 'snapshot_exact');
   const pair = record && snapshotPair(record);
   if (!record || !Array.isArray(pair?.observed) || pair.observed.length === 0) return null;
@@ -52,20 +132,21 @@ function alteredSnapshot(records, kind) {
     observed.push(structuredClone(observed[0]));
   }
   return {
-    detected: !DECLARATIVE_ORACLE_HANDLERS.snapshot_exact({ expected: pair.expected, observed }),
+    detected: !evaluateMutation('snapshot_exact', pair.expected, observed, record),
     evidence: { caseId: record.definition.id, expected: pair.expected, observed },
   };
 }
 
-function eventMutation(records, kind) {
+function eventMutation(records: readonly RuntimeRecord[], kind: string): MutationOutcome | null {
   const record = recordFor(records, (candidate) => incomingEvents(candidate).length > 0);
   if (!record) return null;
   const baseline = incomingEvents(record);
   const target = baseline.at(-1);
+  if (!target) return null;
   const mutated = kind === 'drop_event'
     ? baseline.filter((entry) => entry !== target)
     : [...baseline, structuredClone(target)];
-  const targetCount = (entries) => entries.filter(({ message }) => (
+  const targetCount = (entries: readonly DdpEvent[]): number => entries.filter(({ message }) => (
     contractDigest(message) === contractDigest(target.message)
   )).length;
   return {
@@ -74,60 +155,62 @@ function eventMutation(records, kind) {
   };
 }
 
-function reorderedRevision(records) {
+function reorderedRevision(records: readonly RuntimeRecord[]): MutationOutcome | null {
   const record = recordFor(records, (candidate) => incomingEvents(candidate)
     .filter(({ message }) => Number.isSafeInteger(message.fields?.revision)).length >= 2);
   if (!record) return null;
   const revisions = incomingEvents(record)
     .map(({ message }) => message.fields?.revision)
-    .filter(Number.isSafeInteger);
+    .filter((revision): revision is number => Number.isSafeInteger(revision));
   const mutated = [...revisions].reverse();
   return {
-    detected: !DECLARATIVE_ORACLE_HANDLERS.revision_monotonic({ observed: mutated }),
+    detected: !evaluateMutation('revision_monotonic', undefined, mutated, record),
     evidence: { caseId: record.definition.id, revisions, mutated },
   };
 }
 
-function retainedField(records) {
+function retainedField(records: readonly RuntimeRecord[]): MutationOutcome | null {
   const record = recordFor(records, ({ definition }) => definition.id === 'data.field_removal_no_stale_residue');
   const pair = record && snapshotPair(record);
-  const document = pair?.observed?.[0];
+  const document = Array.isArray(pair?.observed) ? pair.observed[0] : undefined;
   if (!record || !document || Object.hasOwn(document, 'ephemeral')) return null;
   const mutated = { ...document, ephemeral: 'retained-by-negative-control' };
   return {
-    detected: !DECLARATIVE_ORACLE_HANDLERS.field_absent({ expected: 'ephemeral', observed: mutated }),
+    detected: !evaluateMutation('field_absent', 'ephemeral', mutated, record),
     evidence: { caseId: record.definition.id, observed: document, mutated },
   };
 }
 
-function substitutedOracle(records, family, ledger, replacement) {
+function substitutedOracle(records: readonly RuntimeRecord[], family: string, ledger: string, replacement: unknown): MutationOutcome | null {
   const record = oracleRecord(records, family);
   if (!record) return null;
   const oracle = record.definition.oracles.find((entry) => entry.family === family);
+  if (!oracle) return null;
   const expected = oracle.expected.kind === 'literal'
     ? oracle.expected.value
-    : record.execution.evidence.outputs[oracle.expected.stepId]?.[oracle.expected.output];
+    : oracle.expected.stepId === undefined || oracle.expected.output === undefined
+      ? undefined
+      : record.execution.evidence.outputs[oracle.expected.stepId]?.[oracle.expected.output];
   return {
-    detected: !DECLARATIVE_ORACLE_HANDLERS[family]({ expected, observed: replacement }),
+    detected: !evaluateMutation(family, expected, replacement, record),
     evidence: { caseId: record.definition.id, ledger, expected, replacement },
   };
 }
 
-function rejectedBy(gateResult, evidence) {
+function rejectedBy(gateResult: GateResult, evidence: unknown): MutationOutcome {
   const actualReason = gateResult?.reasons?.[0];
   return {
     detected: gateResult?.status !== 'passed' && typeof actualReason === 'string',
-    actualReason,
+    ...(actualReason === undefined ? {} : { actualReason }),
     evidence,
   };
 }
 
-function artifactMutation(records, kind, gates) {
+function artifactMutation(records: readonly RuntimeRecord[], kind: string, gates: ProductionGates): MutationOutcome | null {
   if (kind === 'suppress_fallback_record') {
     const record = recordFor(records, ({ result }) => result.observerEvidence.some(({ fallbackFrom }) => fallbackFrom));
     if (!record) return null;
-    const mutated = structuredClone(record.result);
-    mutated.observerEvidence = [];
+    const mutated = { ...structuredClone(record.result), observerEvidence: [] };
     return rejectedBy(
       gates.caseEvidenceStatus(mutated, RELEASE_CASE_CONTRACTS[record.definition.id]),
       { caseId: record.definition.id, observerEvidence: [] },
@@ -136,8 +219,9 @@ function artifactMutation(records, kind, gates) {
   if (kind === 'omit_fault_witness') {
     const record = recordFor(records, ({ result }) => result.faultWitness !== undefined);
     if (!record) return null;
-    const mutated = structuredClone(record.result);
-    delete mutated.faultWitness;
+    const mutated = Object.fromEntries(
+      Object.entries(structuredClone(record.result)).filter(([key]) => key !== 'faultWitness'),
+    );
     return rejectedBy(
       gates.caseEvidenceStatus(mutated, RELEASE_CASE_CONTRACTS[record.definition.id]),
       { caseId: record.definition.id, faultWitness: null },
@@ -154,7 +238,11 @@ function artifactMutation(records, kind, gates) {
   return null;
 }
 
-function executeMutation(control, context) {
+function executeMutation(control: NegativeControl, context: Readonly<{
+  records: readonly RuntimeRecord[];
+  recovery?: RecoveryEvidence | null;
+  gates: ProductionGates;
+}>): MutationOutcome | null {
   const { records, recovery, gates } = context;
   switch (control.mutation.kind) {
     case 'drop_event': return { ...eventMutation(records, 'drop_event'), reason: 'ddp_event_missing' };
@@ -194,9 +282,18 @@ function executeMutation(control, context) {
 /** Runs every catalog negative control against evidence from this exact audit. */
 export function runDeclarativeNegativeControls({
   controls, records, recovery, gates = PRODUCTION_GATES,
-}) {
+}: Readonly<{
+  controls: readonly NegativeControl[];
+  records: readonly RuntimeRecord[];
+  recovery?: RecoveryEvidence | null;
+  gates?: ProductionGates;
+}>) {
   return Object.freeze(controls.map((control) => {
-    const outcome = executeMutation(control, { records, recovery, gates });
+    const outcome = executeMutation(control, {
+      records,
+      gates,
+      ...(recovery === undefined ? {} : { recovery }),
+    });
     const detected = outcome?.detected === true;
     return validateNegativeControlResult({
       controlId: control.id,

@@ -4,8 +4,8 @@ import test from 'node:test';
 import { createFaultAdapter } from '../../../reliability/runtime/adapters/faults.js';
 
 test('primary stepdown begins on activation and is awaited on restoration', async () => {
-  let restore;
-  const recovery = new Promise((resolve) => { restore = resolve; });
+  let restore: () => void = () => undefined;
+  const recovery = new Promise<void>((resolve) => { restore = resolve; });
   const faults = createFaultAdapter({
     environment: { replicaSet: { stepDownPrimary: () => recovery } },
     clients: { clients: [] }, runId: 'run', caseExecutionId: 'case', ownershipToken: 'token',
