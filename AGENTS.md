@@ -9,7 +9,7 @@ operations tools and are not called by the CLI, npm, or GitHub Actions.
 The runtime flow is:
 
 1. `bench.js` parses CLI arguments and dispatches through `cli/`.
-2. `cli/run.js` resolves the Meteor source, validates the scenario and app,
+2. `cli/run.ts` resolves the Meteor source, validates the scenario and app,
    selects a driver, and persists the result.
 3. `drivers/` own workload-specific execution for Artillery, scripts, cold
    start, bundle size, and build profiling.
@@ -48,14 +48,14 @@ Repository areas:
 - `apps/dashboard` is a separate Meteor 3.4 Blaze application. It stores runs
   and baselines in MongoDB and renders Runs, Compare, Trends, Detail, and
   Scenario pages with Chart.js and Tailwind CSS.
-- `bench.config.js` is the scenario, app, threshold, port, dashboard, and
+- `bench.config.ts` is the scenario, app, threshold, port, dashboard, and
   results-path authority.
 - `.github/workflows/` runs nightly, PR, transport, and observer/transport
   matrix benchmarks against external Meteor branches.
 - `results/` is ignored generated output. Each run writes the requested output
   and an additional history record under `results/history/`.
 
-Read `README.md`, `bench.config.js`, and `scripts/SCRIPTS.md` before changing
+Read `README.md`, `bench.config.ts`, and `scripts/SCRIPTS.md` before changing
 benchmark behavior. `RUNTIME.md` and portions of `README.md` still describe
 legacy or removed paths; prefer executable code and `scripts/SCRIPTS.md` when
 they disagree.
@@ -91,7 +91,7 @@ npm test
 node bench.js list
 npx playwright test --list
 for file in scripts/*.sh; do bash -n "$file"; done
-for file in scripts/helpers/*.js; do node --check "$file"; done
+for file in dist/scripts/helpers/*.cjs; do node --check "$file"; done
 ```
 
 `node bench.js list` resolves and inspects the configured Meteor source. The
@@ -204,7 +204,7 @@ Never use `BENCH_CLEAR_CONFIRM=1` to bypass a deliberate target check.
 - Pass runtime variants through repeated `--env` flags. Important inputs
   include `METEOR_REACTIVITY_ORDER`, `DDP_TRANSPORT`, `DISABLE_SOCKJS`,
   `METEOR_SETTINGS`, `MONGO_OPLOG_URL`, and `SERVER_NODE_OPTIONS`.
-- Browser workloads share `tests/test-helpers.js`. `REMOTE_URL` defaults to
+- Browser workloads share `tests/test-helpers.ts`. `REMOTE_URL` defaults to
   `http://localhost:3000`, and `TASK_COUNT` defaults to 20. Preserve accessible
   labels, selectors, session isolation, and task sequencing when changing the
   fixture UI.
@@ -222,7 +222,7 @@ Never use `BENCH_CLEAR_CONFIRM=1` to bypass a deliberate target check.
 Meteor source precedence is explicit flag, environment, then config:
 
 - Checkout: `--meteor-checkout`, `METEOR_CHECKOUT_PATH`, then
-  `bench.config.js`.
+  `bench.config.ts`.
 - Published release: `--meteor-version`, `METEOR_RELEASE`, then config.
 - When the configured checkout lacks a Meteor binary, resolution falls back to
   the system Meteor installation.

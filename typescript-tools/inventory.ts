@@ -15,6 +15,9 @@ const IGNORED_SEGMENTS = new Set(['.git', '.meteor', '.typescript-tools', '_buil
 const NEGATIVE_FIXTURE_ROOT = 'types/type-tests/compile-negative/';
 const TYPESCRIPT_EXTENSIONS = /\.(?:cts|mts|tsx?|d\.ts)$/;
 const TYPESCRIPT_SUPPRESSION = new RegExp(`@ts-(?:expect-${'error'}|ignore|nocheck)\\b`, 'g');
+const TYPESCRIPT_CONFIG = /(?:^|\/)tsconfig(?:\.[^/]+)?\.json$/;
+const TOOL_REPOSITORY_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const TYPESCRIPT_COMPILER = path.join(TOOL_REPOSITORY_ROOT, 'node_modules/typescript/bin/tsc');
 
 interface InventoryViolation {
   readonly file: string;
@@ -31,6 +34,94 @@ interface SourceToken {
 interface SourceComment {
   readonly text: string;
   readonly start: number;
+}
+
+interface CompilerOwner {
+  readonly config: string;
+  readonly emits: boolean;
+}
+
+interface CompilerProject {
+  readonly files: readonly string[];
+  readonly noEmit: boolean;
+}
+
+function compilerProject(repositoryRoot: string, config: string): CompilerProject {
+  const output = execFileSync(process.execPath, [TYPESCRIPT_COMPILER, '--showConfig', '--project', config], {
+    cwd: repositoryRoot,
+    encoding: 'utf8',
+    stdio: 'pipe',
+  });
+  const value: unknown = JSON.parse(output);
+  if (typeof value !== 'object' || value === null) throw new Error(`${config} produced an invalid compiler project`);
+  const record = value as Record<string, unknown>;
+  const files = record.files;
+  const options = record.compilerOptions;
+  if (files !== undefined && (!Array.isArray(files) || files.some((file) => typeof file !== 'string'))) {
+    throw new Error(`${config} produced invalid compiler fileNames`);
+  }
+  const noEmit = typeof options === 'object' && options !== null
+    && (options as Record<string, unknown>).noEmit === true;
+  return { files: files === undefined ? [] : files, noEmit };
+}
+
+function repositoryPath(repositoryRoot: string, fileName: string): string | undefined {
+  const relativePath = path.relative(repositoryRoot, path.resolve(fileName));
+  if (relativePath.startsWith('..') || path.isAbsolute(relativePath)) return undefined;
+  return relativePath.split(path.sep).join('/');
+}
+
+function compilerOwnership(
+  repositoryRoot: string,
+  maintainedTypeScript: readonly string[],
+  maintainedFiles: readonly string[],
+): InventoryViolation[] {
+  const owners = new Map<string, CompilerOwner[]>();
+  for (const file of maintainedTypeScript) owners.set(file, []);
+
+  const diagnostics: string[] = [];
+  for (const config of maintainedFiles.filter((file) => (
+    TYPESCRIPT_CONFIG.test(file) && !file.endsWith('tsconfig.base.json')
+  ))) {
+    let project: CompilerProject;
+    try {
+      project = compilerProject(repositoryRoot, config);
+    } catch (error) {
+      diagnostics.push(error instanceof Error ? error.message : String(error));
+      continue;
+    }
+    for (const fileName of project.files) {
+      const relativePath = repositoryPath(repositoryRoot, path.join(repositoryRoot, path.dirname(config), fileName));
+      if (relativePath === undefined) continue;
+      const fileOwners = owners.get(relativePath);
+      if (fileOwners === undefined) continue;
+      fileOwners.push({
+        config,
+        emits: !project.noEmit && !relativePath.endsWith('.d.ts'),
+      });
+    }
+  }
+
+  const violations: InventoryViolation[] = diagnostics.map((message) => ({
+    file: '<tsconfig>',
+    line: 1,
+    message,
+  }));
+  for (const [file, fileOwners] of owners) {
+    if (fileOwners.length === 0) {
+      violations.push({ file, line: 1, message: 'maintained TypeScript has no compiler project owner' });
+      continue;
+    }
+    const emitOwners = fileOwners.filter((owner) => owner.emits);
+    if (emitOwners.length > 1) {
+      violations.push({
+        file,
+        line: 1,
+        message: `maintained TypeScript has multiple emit owners: ${emitOwners.map((owner) => owner.config).join(', ')}`,
+      });
+    }
+  }
+  return violations;
 }
 
 function sourceComments(sourceText: string): SourceComment[] {
@@ -210,6 +301,10 @@ export async function verifySourceInventory(repositoryRoot: string): Promise<voi
   }
 
   const violations: InventoryViolation[] = [];
+  const maintainedTypeScript = maintained.filter((candidate) => (
+    TYPESCRIPT_EXTENSIONS.test(candidate) && !candidate.startsWith(NEGATIVE_FIXTURE_ROOT)
+  ));
+  violations.push(...compilerOwnership(repositoryRoot, maintainedTypeScript, maintained));
   for (const file of maintained.filter((candidate) => TYPESCRIPT_EXTENSIONS.test(candidate))) {
     const sourceText = await readFile(path.join(repositoryRoot, file), 'utf8');
     violations.push(...scanTypeScript(repositoryRoot, file, sourceText));
@@ -222,7 +317,7 @@ export async function verifySourceInventory(repositoryRoot: string): Promise<voi
   }
 }
 
-const defaultRepositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const defaultRepositoryRoot = TOOL_REPOSITORY_ROOT;
 const repositoryRoot = path.resolve(process.argv[2] ?? defaultRepositoryRoot);
 await verifySourceInventory(repositoryRoot);
 console.log('Source inventory contains only the four declared JavaScript hosts.');

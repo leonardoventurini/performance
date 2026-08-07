@@ -52,7 +52,7 @@ test('Just verification gates preserve fast and all-workspace TypeScript coverag
     source,
     /^check: typecheck source-inventory test bench-list playwright-list syntax-check dashboard-css-check$/m,
   );
-  assert.match(source, /^check-all: check typecheck-all test-task test-dashboard$/m);
+  assert.match(source, /^check-all: install check typecheck-all test-task test-dashboard$/m);
   assert.match(source, /^typecheck:\n    npm run typecheck:node$/m);
   assert.match(source, /^typecheck-all:\n    npm run typecheck:all$/m);
   assert.match(source, /^source-inventory:\n    npm run test:source-inventory$/m);

@@ -1,5 +1,10 @@
 // CJS: injected via SERVER_NODE_OPTIONS=--require which is CJS-only. Do not convert.
 
+import type {
+  PerformanceEntry as NodePerformanceEntry,
+  PerformanceObserverEntryList as NodePerformanceObserverEntryList,
+} from 'node:perf_hooks';
+
 /**
  * GC Monitor
  *
@@ -19,6 +24,8 @@
 const { PerformanceObserver, constants } = require('node:perf_hooks');
 const fs = require('fs');
 
+type GcKind = 'minor' | 'major' | 'incremental' | 'weakcb';
+
 const gcStats = {
   totalPauseMs: 0,
   count: 0,
@@ -32,23 +39,31 @@ const gcStats = {
 };
 
 // Map GC flags to readable names
-const GC_KINDS = {
+const GC_KINDS: Readonly<Record<number, GcKind>> = {
   [constants.NODE_PERFORMANCE_GC_MINOR]: 'minor',
   [constants.NODE_PERFORMANCE_GC_MAJOR]: 'major',
   [constants.NODE_PERFORMANCE_GC_INCREMENTAL]: 'incremental',
   [constants.NODE_PERFORMANCE_GC_WEAKCB]: 'weakcb',
 };
 
-const observer = new PerformanceObserver((list) => {
+/** Resolves Node's runtime-only GC detail without weakening the entry contract. */
+function gcKind(entry: NodePerformanceEntry): GcKind | undefined {
+  const detail: unknown = Reflect.get(entry, 'detail');
+  if (typeof detail !== 'object' || detail === null) return undefined;
+  const kind: unknown = Reflect.get(detail, 'kind');
+  return typeof kind === 'number' ? GC_KINDS[kind] : undefined;
+}
+
+const observer = new PerformanceObserver((list: NodePerformanceObserverEntryList) => {
   for (const entry of list.getEntries()) {
     const durationMs = entry.duration;
-    const kind = GC_KINDS[entry.detail?.kind] || 'unknown';
+    const kind = gcKind(entry);
 
     gcStats.totalPauseMs += durationMs;
     gcStats.count++;
     gcStats.maxPauseMs = Math.max(gcStats.maxPauseMs, durationMs);
 
-    if (gcStats.byKind[kind]) {
+    if (kind !== undefined) {
       gcStats.byKind[kind].count++;
       gcStats.byKind[kind].totalMs += durationMs;
     }

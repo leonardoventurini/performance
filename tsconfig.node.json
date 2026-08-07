@@ -21,6 +21,7 @@
     "meteor-source.ts",
     "cli/**/*.ts",
     "collectors/**/*.ts",
+    "collectors/**/*.cts",
     "drivers/**/*.ts",
     "lib/**/*.ts",
     "reliability/**/*.ts",

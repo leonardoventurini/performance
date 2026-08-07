@@ -59,6 +59,25 @@ test('source inventory rejects unsafe TypeScript escape hatches and emitted impo
   });
 });
 
+test('source inventory rejects maintained TypeScript without a compiler project owner', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'strict-source-ownership-'));
+  await mkdir(path.join(root, 'src'));
+  await writeFile(path.join(root, 'tsconfig.json'), JSON.stringify({
+    compilerOptions: { strict: true, noEmit: true },
+    files: ['src/owned.ts'],
+  }), 'utf8');
+  await writeFile(path.join(root, 'src/owned.ts'), 'export const owned = true;\n', 'utf8');
+  await writeFile(path.join(root, 'src/orphan.ts'), 'export const orphan = true;\n', 'utf8');
+
+  assert.throws(() => execFileSync(process.execPath, [
+    path.join(repositoryRoot, '.typescript-tools/inventory.js'), root,
+  ], { encoding: 'utf8', stdio: 'pipe' }), (error: unknown) => {
+    assert.ok(error instanceof Error && 'stderr' in error);
+    assert.match(String(error.stderr), /src\/orphan\.ts:1: maintained TypeScript has no compiler project owner/);
+    return true;
+  });
+});
+
 test('stable launcher fails closed when the emitted CLI omits main', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'strict-launcher-'));
   await mkdir(path.join(root, 'dist/build'), { recursive: true });

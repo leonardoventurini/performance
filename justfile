@@ -37,7 +37,7 @@ install-dashboard:
 check: typecheck source-inventory test bench-list playwright-list syntax-check dashboard-css-check
 
 # Run root checks plus both Meteor application test suites.
-check-all: check typecheck-all test-task test-dashboard
+check-all: install check typecheck-all test-task test-dashboard
 
 # Type-check the root harness, browser scenarios, and JavaScript host contracts.
 typecheck:
