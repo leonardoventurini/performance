@@ -1,8 +1,22 @@
+import type { IncomingMessage } from 'node:http';
+
 const https = require('https');
 
+interface GalaxyMetricResponse {
+    readonly connections: readonly { readonly connections: number }[];
+    readonly cpu: readonly { readonly percentage: number }[];
+    readonly memory: readonly { readonly value: number }[];
+}
+
+interface GalaxyAverages {
+    readonly averageConnections: number;
+    readonly averageCpuPercentage: number;
+    readonly averageMemoryUsage: number;
+}
+
 // Function to fetch data from the API
-function fetchData() {
-    return new Promise((resolve, reject) => {
+function fetchData(): Promise<unknown> {
+    return new Promise<unknown>((resolve, reject) => {
         const requestBody = JSON.stringify({
             token: process.env.GALAXY_TOKEN,
             hostname: process.env.GALAXY_APP,
@@ -20,11 +34,11 @@ function fetchData() {
             },
         };
 
-        const req = https.request(options, (res) => {
+        const req = https.request(options, (res: IncomingMessage) => {
             let responseBody = '';
 
             // Collect response data
-            res.on('data', (chunk) => {
+            res.on('data', (chunk: Buffer | string) => {
                 responseBody += chunk;
             });
 
@@ -40,7 +54,7 @@ function fetchData() {
         });
 
         // Handle request errors
-        req.on('error', (error) => {
+        req.on('error', (error: Error) => {
             reject(new Error('Request failed: ' + error));
         });
 
@@ -51,21 +65,34 @@ function fetchData() {
 }
 
 // Function to calculate averages
-function calculateAverages(data) {
+function isMetricResponse(value: unknown): value is GalaxyMetricResponse {
+    if (typeof value !== 'object' || value === null) return false;
+    return 'connections' in value && Array.isArray(value.connections)
+        && value.connections.every((entry: unknown) => typeof entry === 'object' && entry !== null && 'connections' in entry && typeof entry.connections === 'number')
+        && 'cpu' in value && Array.isArray(value.cpu)
+        && value.cpu.every((entry: unknown) => typeof entry === 'object' && entry !== null && 'percentage' in entry && typeof entry.percentage === 'number')
+        && 'memory' in value && Array.isArray(value.memory)
+        && value.memory.every((entry: unknown) => typeof entry === 'object' && entry !== null && 'value' in entry && typeof entry.value === 'number');
+}
+
+function calculateAverages(data: unknown): GalaxyAverages {
+    if (!Array.isArray(data) || !isMetricResponse(data[0])) {
+        throw new TypeError('Galaxy metrics response has an invalid shape');
+    }
     const connectionsData = data[0].connections;
     const cpuData = data[0].cpu;
     const memoryData = data[0].memory;
 
     // Calculate average connections
-    const totalConnections = connectionsData.reduce((acc, conn) => acc + conn.connections, 0);
+    const totalConnections = connectionsData.reduce((acc: number, connection) => acc + connection.connections, 0);
     const averageConnections = totalConnections / connectionsData.length;
 
     // Calculate average CPU percentage
-    const totalCpuPercentage = cpuData.reduce((acc, cpu) => acc + cpu.percentage, 0);
+    const totalCpuPercentage = cpuData.reduce((acc: number, cpu) => acc + cpu.percentage, 0);
     const averageCpuPercentage = totalCpuPercentage / cpuData.length;
 
     // Calculate average memory usage
-    const totalMemoryUsage = memoryData.reduce((acc, mem) => acc + mem.value, 0);
+    const totalMemoryUsage = memoryData.reduce((acc: number, memory) => acc + memory.value, 0);
     const averageMemoryUsage = totalMemoryUsage / memoryData.length;
 
     return {
@@ -76,7 +103,7 @@ function calculateAverages(data) {
 }
 
 // Main function to execute the script
-async function main() {
+async function main(): Promise<void> {
     try {
         const data = await fetchData();
         const averages = calculateAverages(data);

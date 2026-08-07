@@ -16,7 +16,7 @@ import crypto from 'node:crypto';
 const TARGET = process.env.REMOTE_URL || 'http://localhost:3000';
 const TASK_COUNT = parseInt(process.env.TASK_COUNT || '20', 10);
 
-function wsUrl(httpUrl) {
+function wsUrl(httpUrl: string): string {
   return httpUrl.replace(/^http/, 'ws') + '/websocket';
 }
 
@@ -25,7 +25,8 @@ function wsUrl(httpUrl) {
 /**
  * Full reactive scenario: connect + subscribe + insert + remove + disconnect
  */
-async function reactiveCrud(context, events) {
+/** Runs the reactive raw-DDP workload used by Artillery. */
+async function reactiveCrud(_context: unknown, _events: unknown): Promise<void> {
   const ddp = new SimpleDDP({
     endpoint: wsUrl(TARGET),
     SocketConstructor: ws,
@@ -62,7 +63,8 @@ async function reactiveCrud(context, events) {
 /**
  * Non-reactive scenario: connect + methods only (no subscription) + disconnect
  */
-async function nonReactiveCrud(context, events) {
+/** Runs the non-reactive raw-DDP workload used by Artillery. */
+async function nonReactiveCrud(_context: unknown, _events: unknown): Promise<void> {
   const ddp = new SimpleDDP({
     endpoint: wsUrl(TARGET),
     SocketConstructor: ws,

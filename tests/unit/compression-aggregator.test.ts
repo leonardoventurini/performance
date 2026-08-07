@@ -30,6 +30,7 @@ describe('aggregateCompression', () => {
       frameSize: { in_sizes: [50, 50], out_sizes: [100, 100, 100] }, // 100 in, 300 out
       compression: { compressed_bytes_in: 50, compressed_bytes_out: 100 },
     });
+    assert.ok(r);
     assert.equal(r.metric, 'ddp_compression');
     assert.deepEqual(r.in, {
       uncompressed_bytes: 100,
@@ -54,6 +55,7 @@ describe('aggregateCompression', () => {
       frameSize: { in_sizes: [100, 200], out_sizes: [500] },
       compression: { compressed_bytes_in: 0, compressed_bytes_out: 0 },
     });
+    assert.ok(r);
     assert.equal(r.in.uncompressed_bytes, 300);
     assert.equal(r.in.compressed_bytes, 0);
     assert.equal(r.in.ratio, null);
@@ -69,6 +71,7 @@ describe('aggregateCompression', () => {
       frameSize: { in_sizes: [], out_sizes: [100] },
       compression: { compressed_bytes_in: 0, compressed_bytes_out: 50 },
     });
+    assert.ok(r);
     assert.equal(r.in.ratio, null);
     assert.equal(r.in.savings_pct, null);
     assert.equal(r.in.uncompressed_bytes, 0);
@@ -83,6 +86,7 @@ describe('aggregateCompression', () => {
       frameSize: { in_sizes: [10], out_sizes: [10] },
       compression: { compressed_bytes_in: 20, compressed_bytes_out: 25 },
     });
+    assert.ok(r);
     assert.equal(r.in.ratio, 2);
     assert.equal(r.in.savings_pct, -100);
     assert.equal(r.out.ratio, 2.5);
@@ -94,6 +98,7 @@ describe('aggregateCompression', () => {
       frameSize: { in_sizes: Array(7).fill(100) }, // 700
       compression: { compressed_bytes_in: 333 },
     });
+    assert.ok(r);
     assert.equal(r.in.ratio, 0.4757); // 333/700 = 0.47571428...
   });
 
@@ -102,6 +107,7 @@ describe('aggregateCompression', () => {
       frameSize: { out_sizes: [1000] },
       compression: { compressed_bytes_out: 333 },
     });
+    assert.ok(r);
     assert.equal(r.out.savings_pct, 66.7); // 1 - 0.333 = 0.667 → 66.7
   });
 
@@ -110,6 +116,7 @@ describe('aggregateCompression', () => {
       frameSize: { in_sizes: ['10', null, undefined, 20], out_sizes: [] },
       compression: { compressed_bytes_in: '15', compressed_bytes_out: 0 },
     });
+    assert.ok(r);
     assert.equal(r.in.uncompressed_bytes, 30); // '10' + 20 (null/undefined coerce to 0)
     assert.equal(r.in.compressed_bytes, 15);
     assert.equal(r.in.ratio, 0.5);
@@ -120,6 +127,7 @@ describe('aggregateCompression', () => {
       frameSize: { in_sizes: [10], out_sizes: [10] },
       compression: { compressed_bytes_in: 5, compressed_bytes_out: 5 },
     });
+    assert.ok(r);
     assert.deepEqual(Object.keys(r).sort(), ['in', 'metric', 'out']);
   });
 });

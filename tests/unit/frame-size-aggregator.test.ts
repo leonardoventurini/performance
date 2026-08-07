@@ -2,7 +2,7 @@ import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { aggregateFrameSize } from '../../runner/frame-size-aggregator.js';
 
-const range = (n) => Array.from({ length: n }, (_, i) => i + 1); // [1..n]
+const range = (n: number): number[] => Array.from({ length: n }, (_, i) => i + 1); // [1..n]
 
 describe('aggregateFrameSize', () => {
   test('null / undefined dump → null', () => {
@@ -21,6 +21,7 @@ describe('aggregateFrameSize', () => {
 
   test('single value → count 1, all percentiles equal that value', () => {
     const r = aggregateFrameSize({ in_sizes: [42], out_sizes: [] });
+    assert.ok(r);
     assert.deepEqual(r.in, {
       count: 1, avg_bytes: 42, p50_bytes: 42, p95_bytes: 42, p99_bytes: 42, max_bytes: 42,
     });
@@ -33,6 +34,7 @@ describe('aggregateFrameSize', () => {
 
   test('known input [1..100] → nearest-rank p50=50 p95=95 p99=99 max=100', () => {
     const r = aggregateFrameSize({ in_sizes: [], out_sizes: range(100) });
+    assert.ok(r);
     assert.equal(r.out.count, 100);
     assert.equal(r.out.p50_bytes, 50);
     assert.equal(r.out.p95_bytes, 95);
@@ -43,6 +45,7 @@ describe('aggregateFrameSize', () => {
 
   test('both directions populated independently', () => {
     const r = aggregateFrameSize({ in_sizes: [10, 20, 30], out_sizes: [100, 200] });
+    assert.ok(r);
     assert.equal(r.in.count, 3);
     assert.equal(r.in.max_bytes, 30);
     assert.equal(r.in.avg_bytes, 20);
@@ -54,6 +57,7 @@ describe('aggregateFrameSize', () => {
   test('avg_bytes rounds to one decimal', () => {
     // [1,2,2] → avg = 5/3 = 1.666… → 1.7
     const r = aggregateFrameSize({ in_sizes: [1, 2, 2], out_sizes: [] });
+    assert.ok(r);
     assert.equal(r.in.avg_bytes, 1.7);
   });
 
@@ -64,12 +68,14 @@ describe('aggregateFrameSize', () => {
       by_type_in_sum: { method: 312000, sub: 4500 },
       by_type_out_sum: { added: 1250000, result: 380000 },
     });
+    assert.ok(r);
     assert.deepEqual(r.by_type_bytes.in, { method: 312000, sub: 4500 });
     assert.deepEqual(r.by_type_bytes.out, { added: 1250000, result: 380000 });
   });
 
   test('missing by_type maps default to empty objects', () => {
     const r = aggregateFrameSize({ in_sizes: [10], out_sizes: [20] });
+    assert.ok(r);
     assert.deepEqual(r.by_type_bytes.in, {});
     assert.deepEqual(r.by_type_bytes.out, {});
   });
@@ -77,6 +83,7 @@ describe('aggregateFrameSize', () => {
   test('by_type_bytes is a copy, not a reference to the dump map', () => {
     const dump = { in_sizes: [10], out_sizes: [], by_type_in_sum: { method: 5 } };
     const r = aggregateFrameSize(dump);
+    assert.ok(r);
     r.by_type_bytes.in.method = 999;
     assert.equal(dump.by_type_in_sum.method, 5); // original untouched
   });
@@ -86,6 +93,7 @@ describe('aggregateFrameSize', () => {
       in_sizes: [1, 2, 3], out_sizes: [4, 5, 6],
       by_type_in_sum: { method: 6 }, by_type_out_sum: { added: 15 },
     });
+    assert.ok(r);
     assert.equal(r.metric, 'ddp_frame_size');
     assert.deepEqual(Object.keys(r).sort(), ['by_type_bytes', 'in', 'metric', 'out']);
     assert.deepEqual(
@@ -94,13 +102,14 @@ describe('aggregateFrameSize', () => {
     );
     assert.deepEqual(Object.keys(r.out).sort(), Object.keys(r.in).sort());
     // No bare ms-style percentile keys should leak in.
-    assert.equal(r.in.p50, undefined);
-    assert.equal(r.in.p95, undefined);
+    assert.equal(Reflect.get(r.in, 'p50'), undefined);
+    assert.equal(Reflect.get(r.in, 'p95'), undefined);
   });
 
   test('large array (50000 samples) computes without error', () => {
     const big = range(50000);
     const r = aggregateFrameSize({ in_sizes: big, out_sizes: [] });
+    assert.ok(r);
     assert.equal(r.in.count, 50000);
     assert.equal(r.in.max_bytes, 50000);
     assert.equal(r.in.p50_bytes, 25000);
@@ -108,6 +117,7 @@ describe('aggregateFrameSize', () => {
 
   test('out-only run: in direction zeroed, out populated', () => {
     const r = aggregateFrameSize({ in_sizes: [], out_sizes: [18, 72, 385, 890, 4520] });
+    assert.ok(r);
     assert.equal(r.in.count, 0);
     assert.equal(r.out.count, 5);
     assert.equal(r.out.max_bytes, 4520);

@@ -21,7 +21,8 @@
 // are integers straight from the samples.
 
 interface GaugeStats { min: number; max: number; avg: number; end: number }
-interface PoolDump { interval_ms?: number; samples?: readonly { current?: number; active?: number }[]; total_created_start?: number; total_created_end?: number }
+interface PoolSample { readonly current?: unknown; readonly active?: unknown }
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> { return typeof value === 'object' && value !== null; }
 function statsFor(values: readonly number[]): GaugeStats {
   let min = Infinity;
   let max = -Infinity;
@@ -39,19 +40,24 @@ function statsFor(values: readonly number[]): GaugeStats {
   };
 }
 
-export function aggregateConnectionPool(dump?: PoolDump | null) {
-  const { interval_ms, samples, total_created_start, total_created_end } = dump || {};
+/** Normalizes untrusted pool samples into the public metric contract. */
+export function aggregateConnectionPool(dump?: unknown) {
+  if (!isRecord(dump)) return null;
+  const { interval_ms, samples, total_created_start, total_created_end } = dump;
   if (!Array.isArray(samples) || samples.length === 0) return null;
+  const normalizedSamples: PoolSample[] = samples.map((sample) => isRecord(sample)
+    ? { current: sample.current, active: sample.active }
+    : {});
 
   const start = Number(total_created_start ?? 0);
   const end = Number(total_created_end ?? start);
 
   return {
     metric: 'mongo_pool',
-    samples: samples.length,
-    interval_ms,
-    current: statsFor(samples.map((s) => Number(s.current ?? 0))),
-    active: statsFor(samples.map((s) => Number(s.active ?? 0))),
+    samples: normalizedSamples.length,
+    interval_ms: typeof interval_ms === 'number' ? interval_ms : undefined,
+    current: statsFor(normalizedSamples.map((sample) => Number(sample.current ?? 0))),
+    active: statsFor(normalizedSamples.map((sample) => Number(sample.active ?? 0))),
     total_created: { start, end, delta: end - start },
   };
 }

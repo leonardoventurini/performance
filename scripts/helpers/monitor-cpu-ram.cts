@@ -1,28 +1,42 @@
 const pidusage = require('pidusage');
-const path = require('path');
 const minimist = require('minimist');
 
 const MONITOR_INTERVAL = 1000;
 
 // Parse and initialize args
 const args = minimist(process.argv.slice(2), {});
-let pid = args._[0] || process.pid;
-let name = args._[1];
+const pid: string | number | undefined = args._[0] || process.pid;
+const name: string | undefined = args._[1];
 if (pid == null || name == null) {
     console.error('Usage: node monitor_cpu_ram.js <PID> <name>');
     process.exit(1);
 }
 
 // Initialize process state
-const metrics = [];
+interface ProcessMetrics {
+    readonly cpu: number;
+    readonly memory: number;
+}
+
+interface PrettyBytesOptions {
+    readonly bits?: boolean;
+    readonly binary?: boolean;
+    readonly space?: boolean;
+    readonly signed?: boolean;
+    readonly locale?: Intl.LocalesArgument | true;
+    readonly minimumFractionDigits?: number;
+    readonly maximumFractionDigits?: number;
+}
+
+const metrics: ProcessMetrics[] = [];
 let totalCpu = 0;
 let totalMemory = 0;
 let count = 0;
 
 /* Helpers -------------------------------- */
-const getCpuRamMetrics = async (pid) => {
+const getCpuRamMetrics = async (processId: string | number): Promise<void> => {
     try {
-        const stats = await pidusage(pid);
+        const stats: ProcessMetrics = await pidusage(processId);
         metrics.push(stats);
         totalCpu += stats.cpu;
         totalMemory += stats.memory;
@@ -33,18 +47,18 @@ const getCpuRamMetrics = async (pid) => {
         count++;
     } catch (err) {
         logAverageMetrics();
-        process.exit();
+        process.exit(0);
     }
 };
 
-const logAverageMetrics = () => {
+const logAverageMetrics = (): void => {
     const avgCpu = totalCpu / count;
     const avgMemory = totalMemory / count;
 
     console.log(`----------\n${name}\nAverage CPU usage (%): ${avgCpu.toFixed(2)}\nAverage Memory usage (bytes): ${prettyBytes(avgMemory)}\n----------`);
 };
 
-const monitorCpuRam = () => {
+const monitorCpuRam = (): void => {
     const intervalId = setInterval(() => {
         getCpuRamMetrics(pid);
     }, MONITOR_INTERVAL);
@@ -109,8 +123,8 @@ const BIBIT_UNITS = [
     'Yibit',
 ];
 
-const toLocaleString = (number, locale, options) => {
-    let result = number;
+const toLocaleString = (number: number, locale: Intl.LocalesArgument | true | undefined, options: Intl.NumberFormatOptions | undefined): string | number => {
+    let result: string | number = number;
     if (typeof locale === 'string' || Array.isArray(locale)) {
         result = number.toLocaleString(locale, options);
     } else if (locale === true || options !== undefined) {
@@ -120,7 +134,7 @@ const toLocaleString = (number, locale, options) => {
     return result;
 };
 
-function prettyBytes(number, options) {
+function prettyBytes(number: number, options: PrettyBytesOptions = {}): string {
     if (!Number.isFinite(number)) {
         throw new TypeError(`Expected a finite number, got ${typeof number}: ${number}`);
     }
@@ -149,7 +163,7 @@ function prettyBytes(number, options) {
         number = -number;
     }
 
-    let localeOptions;
+    let localeOptions: Intl.NumberFormatOptions | undefined;
 
     if (options.minimumFractionDigits !== undefined) {
         localeOptions = {minimumFractionDigits: options.minimumFractionDigits};
@@ -167,11 +181,8 @@ function prettyBytes(number, options) {
     const exponent = Math.min(Math.floor(options.binary ? Math.log(number) / Math.log(1024) : Math.log10(number) / 3), UNITS.length - 1);
     number /= (options.binary ? 1024 : 1000) ** exponent;
 
-    if (!localeOptions) {
-        number = number.toPrecision(3);
-    }
-
-    const numberString = toLocaleString(Number(number), options.locale, localeOptions);
+    const displayNumber = localeOptions ? number : Number(number.toPrecision(3));
+    const numberString = toLocaleString(displayNumber, options.locale, localeOptions);
 
     const unit = UNITS[exponent];
 
@@ -180,4 +191,4 @@ function prettyBytes(number, options) {
 /* End Helpers -------------------------------- */
 
 // Start monitoring
-monitorCpuRam({ pid });
+monitorCpuRam();

@@ -1,6 +1,15 @@
+import type { Page } from '@playwright/test';
+
 const timeout = 120000;
 
-const addAndRemoveTasks = async ({ page, reactive, taskCount }) => {
+interface TaskJourneyOptions {
+  readonly page: Page;
+  readonly reactive: boolean;
+  readonly taskCount: number;
+}
+
+/** Runs the shared task creation and removal journey. */
+const addAndRemoveTasks = async ({ page, reactive, taskCount }: TaskJourneyOptions): Promise<void> => {
   page.setDefaultTimeout(timeout);
 
   await page.goto(process.env.REMOTE_URL || 'http://localhost:3000/');
@@ -27,13 +36,15 @@ const addAndRemoveTasks = async ({ page, reactive, taskCount }) => {
   await page.getByRole('button', { name: 'Remove all tasks' }).click();
 };
 
-async function reactiveAddAndRemoveTasks(page) {
-  const taskCount = parseFloat(process.env.TASK_COUNT || 20);
+/** Runs the task journey with reactive data enabled. */
+async function reactiveAddAndRemoveTasks(page: Page): Promise<void> {
+  const taskCount = parseFloat(process.env.TASK_COUNT ?? '20');
   await addAndRemoveTasks({ page, reactive: true, taskCount });
 }
 
-async function nonReactiveAddAndRemoveTasks(page) {
-  const taskCount = parseFloat(process.env.TASK_COUNT || 20);
+/** Runs the task journey with reactive data disabled. */
+async function nonReactiveAddAndRemoveTasks(page: Page): Promise<void> {
+  const taskCount = parseFloat(process.env.TASK_COUNT ?? '20');
   await addAndRemoveTasks({ page, reactive: false, taskCount });
 }
 

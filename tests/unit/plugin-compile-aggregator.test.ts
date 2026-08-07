@@ -2,7 +2,13 @@ import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { aggregatePluginCompile } from '../../runner/plugin-compile-aggregator.js';
 
-const node = (name, self_ms, count = 1, depth = 0) => ({ name, self_ms, count, depth });
+const node = (name: string, self_ms: number, count = 1, depth = 0) => ({ name, self_ms, count, depth });
+
+function plugin(metric: NonNullable<ReturnType<typeof aggregatePluginCompile>>, name: string): { self_ms: number; count: number } {
+  const value = metric.plugins[name];
+  assert.ok(value);
+  return value;
+}
 
 describe('aggregatePluginCompile', () => {
   test('null / non-array nodes → null', () => {
@@ -26,8 +32,9 @@ describe('aggregatePluginCompile', () => {
       ],
     };
     const r = aggregatePluginCompile(parsed);
+    assert.ok(r);
     assert.deepEqual(Object.keys(r.plugins).sort(), ['ecmascript', 'static-html', 'typescript']);
-    assert.deepEqual(r.plugins.ecmascript, { self_ms: 3, count: 3 });
+    assert.deepEqual(plugin(r, 'ecmascript'), { self_ms: 3, count: 3 });
     assert.deepEqual(r.plugins['static-html'], { self_ms: 1, count: 2 });
   });
 
@@ -36,13 +43,15 @@ describe('aggregatePluginCompile', () => {
       nodes: [node('plugin ecmascript', 3, 3), node('plugin standard-minifier-js', 1850, 1), node('plugin static-html', 1, 2)],
     };
     const r = aggregatePluginCompile(parsed);
+    assert.ok(r);
     assert.equal(r.total_plugin_ms, 1854);
   });
 
   test('count preserved per plugin', () => {
     const parsed = { nodes: [node('plugin ecmascript', 1350, 47)] };
     const r = aggregatePluginCompile(parsed);
-    assert.equal(r.plugins.ecmascript.count, 47);
+    assert.ok(r);
+    assert.equal(plugin(r, 'ecmascript').count, 47);
   });
 
   test('recurring plugin name → self_ms and count summed into one entry', () => {
@@ -50,7 +59,8 @@ describe('aggregatePluginCompile', () => {
       nodes: [node('plugin ecmascript', 3, 3), node('plugin ecmascript', 5, 2)],
     };
     const r = aggregatePluginCompile(parsed);
-    assert.deepEqual(r.plugins.ecmascript, { self_ms: 8, count: 5 });
+    assert.ok(r);
+    assert.deepEqual(plugin(r, 'ecmascript'), { self_ms: 8, count: 5 });
     assert.equal(r.total_plugin_ms, 8);
   });
 
@@ -65,18 +75,21 @@ describe('aggregatePluginCompile', () => {
   test('plugin node with null count treated as 0', () => {
     const parsed = { nodes: [{ name: 'plugin meteor', self_ms: 0, count: null, depth: 0 }] };
     const r = aggregatePluginCompile(parsed);
+    assert.ok(r);
     assert.deepEqual(r.plugins.meteor, { self_ms: 0, count: 0 });
   });
 
   test('zero-ms plugins still listed (they ran, count > 0)', () => {
     const parsed = { nodes: [node('plugin typescript', 0, 3)] };
     const r = aggregatePluginCompile(parsed);
+    assert.ok(r);
     assert.deepEqual(r.plugins.typescript, { self_ms: 0, count: 3 });
     assert.equal(r.total_plugin_ms, 0);
   });
 
   test('shape contract: metric name + exact top-level key set', () => {
     const r = aggregatePluginCompile({ nodes: [node('plugin ecmascript', 3, 3)] });
+    assert.ok(r);
     assert.equal(r.metric, 'plugin_compile');
     assert.deepEqual(Object.keys(r).sort(), ['metric', 'plugins', 'total_plugin_ms']);
   });

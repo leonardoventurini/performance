@@ -3,8 +3,24 @@ import assert from 'node:assert/strict';
 import { aggregateSlowQueries } from '../../runner/slow-query-aggregator.js';
 
 // Minimal system.profile-shaped entry factory.
-function entry({ op = 'query', ns = 'meteor.tasks', millis = 100, filter, planSummary } = {}) {
-  const e = { op, ns, millis };
+interface EntryOptions {
+  readonly op?: string;
+  readonly ns?: string;
+  readonly millis?: number | string;
+  readonly filter?: Readonly<Record<string, unknown>>;
+  readonly planSummary?: string;
+}
+
+interface ProfileEntry {
+  readonly op: string;
+  readonly ns: string;
+  readonly millis: number | string;
+  command?: { readonly filter: Readonly<Record<string, unknown>> };
+  planSummary?: string;
+}
+
+function entry({ op = 'query', ns = 'meteor.tasks', millis = 100, filter, planSummary }: EntryOptions = {}): ProfileEntry {
+  const e: ProfileEntry = { op, ns, millis };
   if (filter !== undefined) e.command = { filter };
   if (planSummary !== undefined) e.planSummary = planSummary;
   return e;
@@ -31,14 +47,16 @@ describe('aggregateSlowQueries', () => {
       entry({ op: 'getmore', millis: 120 }),
     ];
     const r = aggregateSlowQueries(entries);
+    assert.ok(r);
     assert.equal(r.total_slow, 5);
     assert.deepEqual(r.by_op, { query: 2, update: 1, getmore: 2 });
   });
 
   test('by_op only contains op types actually present (no fixed key set)', () => {
     const r = aggregateSlowQueries([entry({ op: 'insert', millis: 105 })]);
+    assert.ok(r);
     assert.deepEqual(r.by_op, { insert: 1 });
-    assert.equal(r.by_op.query, undefined);
+    assert.equal(Reflect.get(r.by_op, 'query'), undefined);
   });
 
   test('slowest identified by millis; slowest_ms + slowest_sample match', () => {
@@ -48,6 +66,8 @@ describe('aggregateSlowQueries', () => {
       entry({ op: 'getmore', ns: 'meteor.c', millis: 130 }),
     ];
     const r = aggregateSlowQueries(entries);
+    assert.ok(r);
+    assert.ok(r.slowest_sample);
     assert.equal(r.slowest_ms, 1820);
     assert.equal(r.slowest_sample.ns, 'meteor.b');
     assert.equal(r.slowest_sample.op, 'update');
@@ -64,6 +84,8 @@ describe('aggregateSlowQueries', () => {
       }),
     ];
     const r = aggregateSlowQueries(entries);
+    assert.ok(r);
+    assert.ok(r.slowest_sample);
     assert.deepEqual(r.slowest_sample.filter_keys.sort(), ['age', 'sessionId', 'userEmail']);
     // Ensure no values leaked anywhere in the serialized sample.
     const serialized = JSON.stringify(r.slowest_sample);
@@ -73,8 +95,12 @@ describe('aggregateSlowQueries', () => {
 
   test('missing command / command.filter → filter_keys is empty array', () => {
     const noCmd = aggregateSlowQueries([entry({ op: 'query', millis: 200 })]);
+    assert.ok(noCmd);
+    assert.ok(noCmd.slowest_sample);
     assert.deepEqual(noCmd.slowest_sample.filter_keys, []);
     const emptyFilter = aggregateSlowQueries([entry({ op: 'query', millis: 200, filter: {} })]);
+    assert.ok(emptyFilter);
+    assert.ok(emptyFilter.slowest_sample);
     assert.deepEqual(emptyFilter.slowest_sample.filter_keys, []);
   });
 
@@ -84,30 +110,37 @@ describe('aggregateSlowQueries', () => {
       entry({ op: 'update', ns: 'meteor.second', millis: 500 }),
     ];
     const r = aggregateSlowQueries(entries);
+    assert.ok(r);
+    assert.ok(r.slowest_sample);
     assert.equal(r.slowest_sample.ns, 'meteor.first');
     assert.equal(r.slowest_sample.op, 'query');
   });
 
   test('threshold_ms and duration_s pass through from opts', () => {
     const r = aggregateSlowQueries([entry({ millis: 120 })], { thresholdMs: 250, durationMs: 30200 });
+    assert.ok(r);
     assert.equal(r.threshold_ms, 250);
     assert.equal(r.duration_s, 30.2);
   });
 
   test('opts default: threshold_ms=100, duration_s=0 when omitted', () => {
     const r = aggregateSlowQueries([entry({ millis: 120 })]);
+    assert.ok(r);
     assert.equal(r.threshold_ms, 100);
     assert.equal(r.duration_s, 0);
   });
 
   test('negative durationMs coerced to 0 (defensive)', () => {
     const r = aggregateSlowQueries([entry({ millis: 120 })], { durationMs: -5000 });
+    assert.ok(r);
     assert.equal(r.duration_s, 0);
   });
 
   test('entry missing op → counted under "unknown"', () => {
     const e = { ns: 'meteor.x', millis: 300 }; // no op field
     const r = aggregateSlowQueries([e]);
+    assert.ok(r);
+    assert.ok(r.slowest_sample);
     assert.equal(r.by_op.unknown, 1);
     assert.equal(r.slowest_sample.op, null);
   });
@@ -115,6 +148,7 @@ describe('aggregateSlowQueries', () => {
   test('non-numeric millis coerced via Number (defensive)', () => {
     const entries = [entry({ op: 'query', millis: '900' }), entry({ op: 'query', millis: '150' })];
     const r = aggregateSlowQueries(entries);
+    assert.ok(r);
     assert.equal(r.slowest_ms, 900);
   });
 
@@ -123,6 +157,8 @@ describe('aggregateSlowQueries', () => {
       thresholdMs: 100,
       durationMs: 5000,
     });
+    assert.ok(r);
+    assert.ok(r.slowest_sample);
     assert.equal(r.metric, 'mongo_slow_queries');
     assert.deepEqual(
       Object.keys(r).sort(),
@@ -135,11 +171,12 @@ describe('aggregateSlowQueries', () => {
   });
 
   test('large array (1000 entries) aggregates correctly', () => {
-    const entries = [];
+    const entries: ProfileEntry[] = [];
     for (let i = 0; i < 1000; i++) {
       entries.push(entry({ op: i % 2 === 0 ? 'query' : 'update', millis: i + 100 }));
     }
     const r = aggregateSlowQueries(entries, { durationMs: 60000 });
+    assert.ok(r);
     assert.equal(r.total_slow, 1000);
     assert.equal(r.by_op.query, 500);
     assert.equal(r.by_op.update, 500);

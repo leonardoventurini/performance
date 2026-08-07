@@ -15,7 +15,7 @@
 // one decimal; min/max/end are integers straight from the samples.
 
 interface GaugeStats { min: number; max: number; avg: number; end: number }
-interface ObserverPoolDump { interval_ms?: number; samples?: readonly { muxCount: number; handleCount: number }[] }
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> { return typeof value === 'object' && value !== null; }
 function statsFor(values: readonly number[]): GaugeStats {
   let min = Infinity;
   let max = -Infinity;
@@ -33,14 +33,17 @@ function statsFor(values: readonly number[]): GaugeStats {
   };
 }
 
-export function aggregateObserverPool(dump?: ObserverPoolDump | null) {
-  const { interval_ms, samples } = dump || {};
+/** Aggregates untrusted observer-pool samples. */
+export function aggregateObserverPool(dump?: unknown) {
+  if (!isRecord(dump)) return null;
+  const { interval_ms, samples } = dump;
   if (!Array.isArray(samples) || samples.length === 0) return null;
+  const normalized = samples.map((sample) => isRecord(sample) ? sample : {});
   return {
     metric: 'observer_pool',
-    samples: samples.length,
-    interval_ms,
-    multiplexer_count: statsFor(samples.map((s) => s.muxCount)),
-    handle_count: statsFor(samples.map((s) => s.handleCount)),
+    samples: normalized.length,
+    interval_ms: typeof interval_ms === 'number' ? interval_ms : undefined,
+    multiplexer_count: statsFor(normalized.map((sample) => Number(sample.muxCount ?? 0))),
+    handle_count: statsFor(normalized.map((sample) => Number(sample.handleCount ?? 0))),
   };
 }

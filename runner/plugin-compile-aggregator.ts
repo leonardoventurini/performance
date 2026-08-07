@@ -21,15 +21,22 @@
 
 const PLUGIN_PREFIX = 'plugin ';
 interface PluginNode { name: string; self_ms?: number; count?: number | null }
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> { return typeof value === 'object' && value !== null; }
 
-export function aggregatePluginCompile(parsed?: { nodes?: readonly PluginNode[] } | null) {
-  const nodes = parsed?.nodes;
+/** Aggregates an untrusted profile-parser payload. */
+export function aggregatePluginCompile(parsed?: unknown) {
+  const nodes = isRecord(parsed) ? parsed.nodes : undefined;
   if (!Array.isArray(nodes)) return null;
 
   const plugins: Record<string, { self_ms: number; count: number }> = {};
   let totalPluginMs = 0;
-  for (const node of nodes) {
-    if (typeof node?.name !== 'string' || !node.name.startsWith(PLUGIN_PREFIX)) continue;
+  for (const candidate of nodes) {
+    if (!isRecord(candidate) || typeof candidate.name !== 'string' || !candidate.name.startsWith(PLUGIN_PREFIX)) continue;
+    const node: PluginNode = {
+      name: candidate.name,
+      ...(typeof candidate.self_ms === 'number' ? { self_ms: candidate.self_ms } : {}),
+      ...((typeof candidate.count === 'number' || candidate.count === null) ? { count: candidate.count } : {}),
+    };
     const name = node.name.slice(PLUGIN_PREFIX.length).trim();
     if (!name) continue;
     const selfMs = Number(node.self_ms ?? 0);

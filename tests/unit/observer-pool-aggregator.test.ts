@@ -2,7 +2,7 @@ import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { aggregateObserverPool } from '../../runner/observer-pool-aggregator.js';
 
-function sample(muxCount, handleCount, ts = Date.now()) {
+function sample(muxCount: number, handleCount: number, ts = Date.now()): { ts: number; muxCount: number; handleCount: number } {
   return { ts, muxCount, handleCount };
 }
 
@@ -23,6 +23,7 @@ describe('aggregateObserverPool', () => {
 
   test('single sample → min/max/avg/end all equal that value', () => {
     const r = aggregateObserverPool({ interval_ms: 1000, samples: [sample(3, 42)] });
+    assert.ok(r);
     assert.deepEqual(r.multiplexer_count, { min: 3, max: 3, avg: 3, end: 3 });
     assert.deepEqual(r.handle_count, { min: 42, max: 42, avg: 42, end: 42 });
   });
@@ -35,6 +36,7 @@ describe('aggregateObserverPool', () => {
       sample(2, 150),
     ];
     const r = aggregateObserverPool({ interval_ms: 1000, samples });
+    assert.ok(r);
     // mux: [1,5,3,2] → min 1, max 5, avg 2.75, end 2
     assert.deepEqual(r.multiplexer_count, { min: 1, max: 5, avg: 2.8, end: 2 });
     // handles: [0,100,50,150] → min 0, max 150, avg 75, end 150
@@ -47,6 +49,7 @@ describe('aggregateObserverPool', () => {
       interval_ms: 1000,
       samples: [sample(1, 1), sample(2, 2), sample(1, 2)],
     });
+    assert.ok(r);
     // mux [1,2,1] avg = 4/3 = 1.333… → 1.3
     assert.equal(r.multiplexer_count.avg, 1.3);
     // handles [1,2,2] avg = 5/3 = 1.666… → 1.7
@@ -58,6 +61,7 @@ describe('aggregateObserverPool', () => {
       interval_ms: 1000,
       samples: [sample(0, 0), sample(0, 0), sample(0, 0)],
     });
+    assert.ok(r);
     assert.deepEqual(r.multiplexer_count, { min: 0, max: 0, avg: 0, end: 0 });
     assert.deepEqual(r.handle_count, { min: 0, max: 0, avg: 0, end: 0 });
   });
@@ -66,6 +70,7 @@ describe('aggregateObserverPool', () => {
     // simulates handle count climbing then dropping to 0 after VUs disconnect
     const samples = [sample(2, 10), sample(4, 150), sample(4, 80), sample(1, 0)];
     const r = aggregateObserverPool({ interval_ms: 1000, samples });
+    assert.ok(r);
     assert.equal(r.handle_count.max, 150);
     assert.equal(r.handle_count.end, 0);
     assert.equal(r.multiplexer_count.end, 1);
@@ -75,6 +80,7 @@ describe('aggregateObserverPool', () => {
     const samples = [];
     for (let i = 0; i < 1000; i++) samples.push(sample(i % 10, i));
     const r = aggregateObserverPool({ interval_ms: 250, samples });
+    assert.ok(r);
     assert.equal(r.samples, 1000);
     // mux cycles 0..9 → min 0, max 9
     assert.equal(r.multiplexer_count.min, 0);
@@ -91,6 +97,7 @@ describe('aggregateObserverPool', () => {
       interval_ms: 500,
       samples: [sample(1, 1), sample(2, 2)],
     });
+    assert.ok(r);
     assert.equal(r.metric, 'observer_pool');
     assert.equal(r.samples, 2);
     assert.equal(r.interval_ms, 500);
@@ -104,6 +111,7 @@ describe('aggregateObserverPool', () => {
 
   test('interval_ms passes through even when undefined', () => {
     const r = aggregateObserverPool({ samples: [sample(1, 1)] });
+    assert.ok(r);
     assert.equal(r.interval_ms, undefined);
     assert.equal(r.metric, 'observer_pool');
   });

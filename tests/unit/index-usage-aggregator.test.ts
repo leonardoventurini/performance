@@ -4,8 +4,28 @@ import { aggregateIndexUsage } from '../../runner/index-usage-aggregator.js';
 
 // $indexStats row factory. accesses.ops is the lifetime counter; since is
 // when Mongo began tracking (a BSON Date in prod, a Date or ISO string here).
-function idx(name, ops, { since = '2026-06-02T12:00:00.000Z', key } = {}) {
+interface IndexOptions {
+  readonly since?: Date | string | number | null;
+  readonly key?: unknown;
+}
+
+type IndexMetric = NonNullable<ReturnType<typeof aggregateIndexUsage>>;
+type IndexMetricRow = IndexMetric['collections'][string][number];
+
+function idx(name: string, ops: number, { since = '2026-06-02T12:00:00.000Z', key }: IndexOptions = {}) {
   return { name, accesses: { ops, since }, key: key ?? { [name.replace(/_-?1$/, '')]: 1 } };
+}
+
+function rows(metric: IndexMetric, collection: string): IndexMetricRow[] {
+  const result = metric.collections[collection];
+  assert.ok(result);
+  return result;
+}
+
+function row(metric: IndexMetric, collection: string, index = 0): IndexMetricRow {
+  const result = rows(metric, collection)[index];
+  assert.ok(result);
+  return result;
 }
 
 describe('aggregateIndexUsage', () => {
@@ -13,8 +33,9 @@ describe('aggregateIndexUsage', () => {
     const start = { tasks: [idx('_id_', 100), idx('sessionId_1', 1000)] };
     const end = { tasks: [idx('_id_', 4620), idx('sessionId_1', 2850)] };
     const r = aggregateIndexUsage({ start, end, collections: ['tasks'] });
+    assert.ok(r);
     assert.equal(r.metric, 'mongo_index_usage');
-    const byName = Object.fromEntries(r.collections.tasks.map((x) => [x.name, x.ops_in_window]));
+    const byName = Object.fromEntries(rows(r, 'tasks').map((x) => [x.name, x.ops_in_window]));
     assert.equal(byName._id_, 4520);
     assert.equal(byName.sessionId_1, 1850);
   });
@@ -23,7 +44,8 @@ describe('aggregateIndexUsage', () => {
     const start = { tasks: [idx('_id_', 500), idx('createdAt_-1', 42)] };
     const end = { tasks: [idx('_id_', 900), idx('createdAt_-1', 42)] };
     const r = aggregateIndexUsage({ start, end, collections: ['tasks'] });
-    const dead = r.collections.tasks.find((x) => x.name === 'createdAt_-1');
+    assert.ok(r);
+    const dead = rows(r, 'tasks').find((x) => x.name === 'createdAt_-1');
     assert.ok(dead, 'unused index should still appear');
     assert.equal(dead.ops_in_window, 0);
   });
@@ -32,7 +54,9 @@ describe('aggregateIndexUsage', () => {
     const start = { tasks: [idx('_id_', 100)] };
     const end = { tasks: [idx('_id_', 150), idx('newIndex_1', 30)] };
     const r = aggregateIndexUsage({ start, end, collections: ['tasks'] });
-    const created = r.collections.tasks.find((x) => x.name === 'newIndex_1');
+    assert.ok(r);
+    const created = rows(r, 'tasks').find((x) => x.name === 'newIndex_1');
+    assert.ok(created);
     assert.equal(created.ops_in_window, 30);
   });
 
@@ -40,30 +64,34 @@ describe('aggregateIndexUsage', () => {
     const start = { tasks: [idx('_id_', 100), idx('staleIndex_1', 77)] };
     const end = { tasks: [idx('_id_', 200)] };
     const r = aggregateIndexUsage({ start, end, collections: ['tasks'] });
-    assert.equal(r.collections.tasks.length, 1);
-    assert.equal(r.collections.tasks[0].name, '_id_');
+    assert.ok(r);
+    assert.equal(rows(r, 'tasks').length, 1);
+    assert.equal(row(r, 'tasks').name, '_id_');
   });
 
   test('counter reset (end < start) → ops_in_window = end (server restart)', () => {
     const start = { tasks: [idx('_id_', 5000)] };
     const end = { tasks: [idx('_id_', 200)] };
     const r = aggregateIndexUsage({ start, end, collections: ['tasks'] });
-    assert.equal(r.collections.tasks[0].ops_in_window, 200);
+    assert.ok(r);
+    assert.equal(row(r, 'tasks').ops_in_window, 200);
   });
 
   test('multiple collections each aggregated independently', () => {
     const start = { tasks: [idx('_id_', 10)], sessions: [idx('_id_', 5)] };
     const end = { tasks: [idx('_id_', 60)], sessions: [idx('_id_', 25)] };
     const r = aggregateIndexUsage({ start, end, collections: ['tasks', 'sessions'] });
-    assert.equal(r.collections.tasks[0].ops_in_window, 50);
-    assert.equal(r.collections.sessions[0].ops_in_window, 20);
+    assert.ok(r);
+    assert.equal(row(r, 'tasks').ops_in_window, 50);
+    assert.equal(row(r, 'sessions').ops_in_window, 20);
   });
 
   test('since is emitted as an ISO string', () => {
     const start = { tasks: [idx('_id_', 0, { since: '2026-06-02T12:00:00.000Z' })] };
     const end = { tasks: [idx('_id_', 1, { since: '2026-06-02T12:00:00.000Z' })] };
     const r = aggregateIndexUsage({ start, end, collections: ['tasks'] });
-    assert.equal(r.collections.tasks[0].since, '2026-06-02T12:00:00.000Z');
+    assert.ok(r);
+    assert.equal(row(r, 'tasks').since, '2026-06-02T12:00:00.000Z');
   });
 
   test('since given as a Date is coerced to ISO string', () => {
@@ -73,7 +101,8 @@ describe('aggregateIndexUsage', () => {
       end: { tasks: [idx('_id_', 1, { since: d })] },
       collections: ['tasks'],
     });
-    assert.equal(r.collections.tasks[0].since, '2026-06-02T08:30:00.000Z');
+    assert.ok(r);
+    assert.equal(row(r, 'tasks').since, '2026-06-02T08:30:00.000Z');
   });
 
   test('key is passed through verbatim for compound indexes', () => {
@@ -83,7 +112,8 @@ describe('aggregateIndexUsage', () => {
       end: { tasks: [idx('sessionId_1_createdAt_-1', 12, { key })] },
       collections: ['tasks'],
     });
-    assert.deepEqual(r.collections.tasks[0].key, key);
+    assert.ok(r);
+    assert.deepEqual(row(r, 'tasks').key, key);
   });
 
   test('empty input → null (absence convention CC-5)', () => {
@@ -98,8 +128,9 @@ describe('aggregateIndexUsage', () => {
       end: { tasks: [], sessions: [idx('_id_', 9)] },
       collections: ['tasks', 'sessions'],
     });
-    assert.equal(r.collections.tasks, undefined);
-    assert.ok(r.collections.sessions);
+    assert.ok(r);
+    assert.equal(Reflect.get(r.collections, 'tasks'), undefined);
+    assert.ok(rows(r, 'sessions'));
   });
 
   test('collections defaults to end snapshot keys when not provided', () => {
@@ -107,13 +138,15 @@ describe('aggregateIndexUsage', () => {
       start: { tasks: [idx('_id_', 0)] },
       end: { tasks: [idx('_id_', 7)] },
     });
-    assert.equal(r.collections.tasks[0].ops_in_window, 7);
+    assert.ok(r);
+    assert.equal(row(r, 'tasks').ops_in_window, 7);
   });
 
   test('missing accesses.ops coerces to 0 (defensive)', () => {
     const start = { tasks: [{ name: '_id_', accesses: { since: '2026-06-02T12:00:00.000Z' }, key: { _id: 1 } }] };
     const end = { tasks: [{ name: '_id_', accesses: { ops: 5, since: '2026-06-02T12:00:00.000Z' }, key: { _id: 1 } }] };
     const r = aggregateIndexUsage({ start, end, collections: ['tasks'] });
-    assert.equal(r.collections.tasks[0].ops_in_window, 5);
+    assert.ok(r);
+    assert.equal(row(r, 'tasks').ops_in_window, 5);
   });
 });

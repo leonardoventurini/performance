@@ -18,6 +18,7 @@ describe('aggregateWiredTiger', () => {
     const start = cache({ requested: 1000, readIn: 500, written: 100, bytes: 1000 });
     const end = cache({ requested: 11000, readIn: 600, written: 8600, bytes: 134217728 });
     const r = aggregateWiredTiger({ start, end });
+    assert.ok(r);
     assert.equal(r.metric, 'mongo_wiredtiger');
     assert.equal(r.pages_requested_in_window, 10000);
     assert.equal(r.pages_read_into_cache, 100);
@@ -31,6 +32,7 @@ describe('aggregateWiredTiger', () => {
     const start = cache({ requested: 0, readIn: 0 });
     const end = cache({ requested: 152840, readIn: 120 });
     const r = aggregateWiredTiger({ start, end });
+    assert.ok(r);
     // (152840 - 120) / 152840 = 0.99921...
     assert.equal(r.cache_hit_ratio, 0.9992);
   });
@@ -50,6 +52,7 @@ describe('aggregateWiredTiger', () => {
     const start = cache({ requested: 50000, readIn: 4000, written: 9000 });
     const end = cache({ requested: 1200, readIn: 30, written: 80, bytes: 4096 });
     const r = aggregateWiredTiger({ start, end });
+    assert.ok(r);
     assert.equal(r.pages_requested_in_window, 1200);
     assert.equal(r.pages_read_into_cache, 30);
     assert.equal(r.pages_written_from_cache, 80);
@@ -61,6 +64,7 @@ describe('aggregateWiredTiger', () => {
     const start = cache({ requested: 0, readIn: 0 });
     const end = cache({ requested: 100, readIn: 250 });
     const r = aggregateWiredTiger({ start, end });
+    assert.ok(r);
     assert.equal(r.cache_hit_ratio, 0);
   });
 
@@ -68,6 +72,7 @@ describe('aggregateWiredTiger', () => {
     const start = cache({ requested: 0, bytes: 1000 });
     const end = cache({ requested: 10, bytes: 8388608 });
     const r = aggregateWiredTiger({ start, end });
+    assert.ok(r);
     assert.equal(r.bytes_in_cache_end, 8388608);
   });
 
@@ -88,6 +93,7 @@ describe('aggregateWiredTiger', () => {
     const start = cache({ requested: 100, readIn: 5 });
     const end = cache({ requested: 1100, readIn: 5 });
     const r = aggregateWiredTiger({ start, end });
+    assert.ok(r);
     assert.equal(r.pages_read_into_cache, 0);
     assert.equal(r.cache_hit_ratio, 1);
   });
@@ -97,6 +103,7 @@ describe('aggregateWiredTiger', () => {
     const start = { 'pages requested from the cache': 100 };
     const end = { 'pages requested from the cache': 1100, 'pages read into cache': 100 };
     const r = aggregateWiredTiger({ start, end });
+    assert.ok(r);
     assert.equal(r.pages_requested_in_window, 1000);
     assert.equal(r.pages_read_into_cache, 100);
     assert.equal(r.pages_written_from_cache, 0);

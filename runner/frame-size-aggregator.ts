@@ -24,7 +24,12 @@
 
 import { summarize } from '../lib/percentiles.js';
 
-interface FrameSizeDump { in_sizes?: readonly number[]; out_sizes?: readonly number[]; by_type_in_sum?: Readonly<Record<string, number>>; by_type_out_sum?: Readonly<Record<string, number>> }
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> { return typeof value === 'object' && value !== null; }
+function numericArray(value: unknown): number[] { return Array.isArray(value) ? value.map((entry) => Number(entry) || 0) : []; }
+function numericRecord(value: unknown): Record<string, number> {
+  if (!isRecord(value)) return {};
+  return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, Number(entry) || 0]));
+}
 function directionStats(sizes: readonly number[]) {
   const stats = summarize(sizes);
   if (!stats) return { count: 0, avg_bytes: 0, p50_bytes: 0, p95_bytes: 0, p99_bytes: 0, max_bytes: 0 };
@@ -38,10 +43,11 @@ function directionStats(sizes: readonly number[]) {
   };
 }
 
-export function aggregateFrameSize(dump?: FrameSizeDump | null) {
-  if (!dump) return null;
-  const inSizes = Array.isArray(dump.in_sizes) ? dump.in_sizes : [];
-  const outSizes = Array.isArray(dump.out_sizes) ? dump.out_sizes : [];
+/** Aggregates an untrusted frame-size monitor payload. */
+export function aggregateFrameSize(dump?: unknown) {
+  if (!isRecord(dump)) return null;
+  const inSizes = numericArray(dump.in_sizes);
+  const outSizes = numericArray(dump.out_sizes);
   if (inSizes.length === 0 && outSizes.length === 0) return null;
 
   return {
@@ -49,8 +55,8 @@ export function aggregateFrameSize(dump?: FrameSizeDump | null) {
     in: directionStats(inSizes),
     out: directionStats(outSizes),
     by_type_bytes: {
-      in: { ...(dump.by_type_in_sum || {}) },
-      out: { ...(dump.by_type_out_sum || {}) },
+      in: numericRecord(dump.by_type_in_sum),
+      out: numericRecord(dump.by_type_out_sum),
     },
   };
 }

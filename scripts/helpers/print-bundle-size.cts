@@ -1,6 +1,16 @@
-function calculateSize(node) {
+interface BundleNode {
+  readonly name: string;
+  readonly type?: string;
+  readonly size?: number;
+  readonly children?: readonly BundleNode[];
+}
+
+type PackageSize = readonly [packageName: string, size: number];
+type SizeSummary = Record<string, Record<string, string>>;
+
+function calculateSize(node: BundleNode): { totalSize: number; packageSizes: PackageSize[] } {
   let totalSize = 0;
-  let packageSizes = [];
+  const packageSizes: PackageSize[] = [];
 
   // If the node is a package and hasn't been visited, calculate its size
   if (node.size) {
@@ -9,7 +19,7 @@ function calculateSize(node) {
 
   // If the node has children, process each child
   if (node.children && node.children.length > 0) {
-    for (let child of node.children) {
+    for (const child of node.children) {
       const { totalSize: childSize, packageSizes: childPackageSizes } = calculateSize(child);
 
       // Add the child's size to the total size
@@ -27,10 +37,10 @@ function calculateSize(node) {
   return { totalSize, packageSizes };
 }
 
-function processRoot(node) {
-  let sizeSummary = {};
+function processRoot(node: BundleNode): SizeSummary {
+  const sizeSummary: SizeSummary = {};
   if (node.children && node.children.length > 0) {
-    for (let child of node.children) {
+    for (const child of node.children) {
       if (child.type === 'bundle') {
 
         // Calculate the size of each "bundle" and print its total size
@@ -58,16 +68,20 @@ function processRoot(node) {
 const https = require('https');
 const http = require('http');
 
-function fetchData() {
-  return new Promise((resolve, reject) => {
+function fetchData(): Promise<unknown> {
+  return new Promise<unknown>((resolve, reject) => {
     const url = process.env.MONITOR_SIZE_URL;
+    if (url === undefined) {
+      reject(new Error('MONITOR_SIZE_URL is required'));
+      return;
+    }
     const protocol = url.startsWith('https') ? https : http; // Check if URL starts with https
 
-    const req = protocol.request(url, (res) => {
+    const req = protocol.request(url, (res: IncomingMessage) => {
       let responseBody = '';
 
       // Collect response data
-      res.on('data', (chunk) => {
+      res.on('data', (chunk: Buffer | string) => {
         responseBody += chunk;
       });
 
@@ -83,7 +97,7 @@ function fetchData() {
     });
 
     // Handle request errors
-    req.on('error', (error) => {
+    req.on('error', (error: Error) => {
       reject(new Error('Request failed: ' + error));
     });
 
@@ -91,9 +105,19 @@ function fetchData() {
   });
 }
 
-async function main() {
+function isBundleNode(value: unknown): value is BundleNode {
+  if (typeof value !== 'object' || value === null || !('name' in value) || typeof value.name !== 'string') return false;
+  if ('type' in value && value.type !== undefined && typeof value.type !== 'string') return false;
+  if ('size' in value && value.size !== undefined && typeof value.size !== 'number') return false;
+  return !('children' in value)
+    || value.children === undefined
+    || (Array.isArray(value.children) && value.children.every(isBundleNode));
+}
+
+async function main(): Promise<void> {
   try {
     const data = await fetchData();
+    if (!isBundleNode(data)) throw new TypeError('Bundle visualizer response has an invalid shape');
     const sizeSummary = processRoot(data);
     console.table(sizeSummary);
   } catch (error) {
@@ -102,3 +126,4 @@ async function main() {
 }
 
 main();
+import type { IncomingMessage } from 'node:http';

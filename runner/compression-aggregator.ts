@@ -19,10 +19,8 @@
 //     savings_pct are null (divide-by-zero, per the README absence
 //     convention for ratios)
 
-interface FrameSizeDump { in_sizes?: readonly number[]; out_sizes?: readonly number[] }
-interface CompressionDump { compressed_bytes_in?: number; compressed_bytes_out?: number }
-interface CompressionInputs { frameSize?: FrameSizeDump | null; compression?: CompressionDump | null }
-function sumArray(arr: readonly number[] | undefined): number {
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> { return typeof value === 'object' && value !== null; }
+function sumArray(arr: unknown): number {
   if (!Array.isArray(arr)) return 0;
   let total = 0;
   for (const v of arr) total += Number(v) || 0;
@@ -64,8 +62,11 @@ function directionStats(uncompressed: number, compressed: number) {
   };
 }
 
-export function aggregateCompression({ frameSize, compression }: CompressionInputs = {}) {
-  if (!frameSize || !compression) return null;
+/** Aggregates untrusted frame and socket-byte collector payloads. */
+export function aggregateCompression(inputs: unknown = {}) {
+  if (!isRecord(inputs)) return null;
+  const { frameSize, compression } = inputs;
+  if (!isRecord(frameSize) || !isRecord(compression)) return null;
   const outUncompressed = sumArray(frameSize.out_sizes);
   const inUncompressed = sumArray(frameSize.in_sizes);
   const outCompressed = Number(compression.compressed_bytes_out) || 0;

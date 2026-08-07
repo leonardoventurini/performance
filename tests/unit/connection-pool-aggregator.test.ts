@@ -27,6 +27,7 @@ describe('aggregateConnectionPool', () => {
       total_created_start: 8,
       total_created_end: 8,
     });
+    assert.ok(r);
     assert.equal(r.metric, 'mongo_pool');
     assert.equal(r.samples, 1);
     assert.equal(r.interval_ms, 1000);
@@ -46,6 +47,7 @@ describe('aggregateConnectionPool', () => {
       total_created_start: 8,
       total_created_end: 14,
     });
+    assert.ok(r);
     assert.equal(r.samples, 3);
     assert.equal(r.current.min, 1);
     assert.equal(r.current.max, 8);
@@ -68,6 +70,7 @@ describe('aggregateConnectionPool', () => {
       total_created_start: 5,
       total_created_end: 12,
     });
+    assert.ok(r);
     assert.deepEqual(r.total_created, { start: 5, end: 12, delta: 7 });
   });
 
@@ -78,6 +81,7 @@ describe('aggregateConnectionPool', () => {
       total_created_start: null,
       total_created_end: null,
     });
+    assert.ok(r);
     assert.deepEqual(r.total_created, { start: 0, end: 0, delta: 0 });
   });
 
@@ -87,6 +91,7 @@ describe('aggregateConnectionPool', () => {
       samples: [{ ts: 1, current: 1, active: 0 }],
       total_created_start: 9,
     });
+    assert.ok(r);
     assert.deepEqual(r.total_created, { start: 9, end: 9, delta: 0 });
   });
 
@@ -100,6 +105,7 @@ describe('aggregateConnectionPool', () => {
       total_created_start: 0,
       total_created_end: 0,
     });
+    assert.ok(r);
     assert.equal(r.current.max, 10);
     assert.equal(r.current.min, 2);
     assert.equal(r.active.max, 9);
@@ -116,6 +122,7 @@ describe('aggregateConnectionPool', () => {
       total_created_start: 0,
       total_created_end: 0,
     });
+    assert.ok(r);
     assert.equal(r.current.avg, 1.5);
   });
 
@@ -126,6 +133,7 @@ describe('aggregateConnectionPool', () => {
       total_created_start: 0,
       total_created_end: 0,
     });
+    assert.ok(r);
     assert.deepEqual(Object.keys(r).sort(), [
       'active', 'current', 'interval_ms', 'metric', 'samples', 'total_created',
     ]);
@@ -142,6 +150,7 @@ describe('aggregateConnectionPool', () => {
       total_created_start: 1000,
       total_created_end: 1099,
     });
+    assert.ok(r);
     assert.equal(r.samples, 100);
     assert.equal(r.current.min, 500);
     assert.equal(r.current.max, 599);
@@ -157,6 +166,7 @@ describe('aggregateConnectionPool', () => {
       total_created_start: '10',
       total_created_end: '15',
     });
+    assert.ok(r);
     assert.equal(r.current.max, 6);
     assert.equal(r.active.max, 3);
     assert.deepEqual(r.total_created, { start: 10, end: 15, delta: 5 });

@@ -23,8 +23,11 @@
 // across samples). avg rounds to one decimal; min/max/end are integers.
 
 interface GaugeStats { min: number; max: number; avg: number; end: number }
-interface ChangestreamSample { cursorCount?: number; perNs?: Readonly<Record<string, number | undefined>> }
-interface ChangestreamDump { interval_ms?: number; samples?: readonly ChangestreamSample[] }
+interface ChangestreamSample { cursorCount?: unknown; perNs?: Readonly<Record<string, unknown>> }
+
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === 'object' && value !== null;
+}
 
 function statsFor(values: readonly number[]): GaugeStats {
   let min = Infinity;
@@ -43,16 +46,25 @@ function statsFor(values: readonly number[]): GaugeStats {
   };
 }
 
-export function aggregateChangestream(dump?: ChangestreamDump | null): { metric: 'mongo_changestream'; samples: number; interval_ms: number | undefined; cursor_count: GaugeStats; by_namespace: Record<string, { max: number; avg: number }> } | null {
-  const { interval_ms, samples } = dump || {};
+/** Normalizes untrusted collector output into the public metric contract. */
+export function aggregateChangestream(dump?: unknown): { metric: 'mongo_changestream'; samples: number; interval_ms: number | undefined; cursor_count: GaugeStats; by_namespace: Record<string, { max: number; avg: number }> } | null {
+  const interval_ms = isRecord(dump) && typeof dump.interval_ms === 'number' ? dump.interval_ms : undefined;
+  const samples = isRecord(dump) ? dump.samples : undefined;
   if (!Array.isArray(samples) || samples.length === 0) return null;
 
-  const counts = samples.map((s) => Number(s.cursorCount ?? 0));
+  const normalizedSamples: ChangestreamSample[] = samples.map((sample) => {
+    if (!isRecord(sample)) return {};
+    return {
+      cursorCount: sample.cursorCount,
+      ...(isRecord(sample.perNs) ? { perNs: sample.perNs } : {}),
+    };
+  });
+  const counts = normalizedSamples.map((sample) => Number(sample.cursorCount ?? 0));
 
   // Per-namespace: max in any single sample + avg over all samples.
   const nsMax: Record<string, number> = {};
   const nsSum: Record<string, number> = {};
-  for (const s of samples) {
+  for (const s of normalizedSamples) {
     const perNs = s.perNs || {};
     for (const ns of Object.keys(perNs)) {
       const c = Number(perNs[ns] ?? 0);
@@ -64,13 +76,13 @@ export function aggregateChangestream(dump?: ChangestreamDump | null): { metric:
   for (const ns of Object.keys(nsMax)) {
     by_namespace[ns] = {
       max: nsMax[ns] ?? 0,
-      avg: +((nsSum[ns] ?? 0) / samples.length).toFixed(1),
+      avg: +((nsSum[ns] ?? 0) / normalizedSamples.length).toFixed(1),
     };
   }
 
   return {
     metric: 'mongo_changestream',
-    samples: samples.length,
+    samples: normalizedSamples.length,
     interval_ms,
     cursor_count: statsFor(counts),
     by_namespace,

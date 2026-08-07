@@ -28,27 +28,33 @@ const { values } = parseArgs({
   strict: false,
   allowPositionals: true,
 });
-const TARGET = values.url || process.env.REMOTE_URL || 'http://localhost:3000';
-const NUM_SUBSCRIBERS = parseInt(values.subscribers || '100', 10);
-const NUM_WRITES = parseInt(values.writes || '50', 10);
+const stringOption = (value: string | boolean | undefined, fallback: string): string =>
+  typeof value === 'string' ? value : fallback;
+const TARGET = stringOption(values.url, process.env.REMOTE_URL ?? 'http://localhost:3000');
+const NUM_SUBSCRIBERS = parseInt(stringOption(values.subscribers, '100'), 10);
+const NUM_WRITES = parseInt(stringOption(values.writes, '50'), 10);
 
-function wsUrl(httpUrl) {
+function wsUrl(httpUrl: string): string {
   return httpUrl.replace(/^http/, 'ws') + '/websocket';
 }
 
-function percentile(sorted, p) {
+function percentile(sorted: readonly number[], p: number): number {
   const idx = Math.ceil((p / 100) * sorted.length) - 1;
-  return sorted[Math.max(0, idx)];
+  return sorted[Math.max(0, idx)] ?? 0;
 }
 
-async function run() {
+function isSessionDocument(value: unknown): value is Readonly<{ sessionId?: string }> {
+  return typeof value === 'object' && value !== null && (!('sessionId' in value) || typeof value.sessionId === 'string');
+}
+
+async function run(): Promise<void> {
   const endpoint = wsUrl(TARGET);
   console.error(`Fanout benchmark: ${NUM_SUBSCRIBERS} subscribers, ${NUM_WRITES} writes`);
   console.error(`Target: ${endpoint}`);
 
   // Phase 1: Connect subscribers
   console.error('Connecting subscribers...');
-  const subscribers = [];
+  const subscribers: SimpleDDP[] = [];
   for (let i = 0; i < NUM_SUBSCRIBERS; i++) {
     const ddp = new SimpleDDP({ endpoint, SocketConstructor: ws, reconnectInterval: 5000 });
     await ddp.connect();
@@ -67,7 +73,7 @@ async function run() {
   // Phase 3: Measure fanout latency
   // For each write, measure how long until the last subscriber sees the change
   console.error('Starting write phase...');
-  const fanoutLatencies = [];
+  const fanoutLatencies: number[] = [];
 
   for (let w = 0; w < NUM_WRITES; w++) {
     // Track when each subscriber receives the added event
@@ -75,14 +81,14 @@ async function run() {
     const writeStart = process.hrtime.bigint();
     let lastReceived = writeStart;
 
-    const waitPromise = new Promise((resolve) => {
+    const waitPromise = new Promise<void>((resolve) => {
       for (const sub of subscribers) {
         const reactiveCol = sub.collection('taskCollection').reactive();
-        const handler = reactiveCol.onChange((newData) => {
+        const handler = reactiveCol.onChange((newData: unknown) => {
           // Check if any new document matches our session
           const found = Array.isArray(newData)
-            ? newData.some(doc => doc.sessionId === sessionId)
-            : newData && newData.sessionId === sessionId;
+            ? newData.some((document: unknown) => isSessionDocument(document) && document.sessionId === sessionId)
+            : isSessionDocument(newData) && newData.sessionId === sessionId;
           if (found) {
             receivedCount++;
             lastReceived = process.hrtime.bigint();
@@ -95,7 +101,7 @@ async function run() {
       }
 
       // Timeout after 10s
-      setTimeout(() => resolve(), 10000);
+      setTimeout(resolve, 10000);
     });
 
     // Insert a task
@@ -132,9 +138,9 @@ async function run() {
     fanout_p50_ms: Math.round(percentile(sorted, 50) * 100) / 100,
     fanout_p95_ms: Math.round(percentile(sorted, 95) * 100) / 100,
     fanout_p99_ms: Math.round(percentile(sorted, 99) * 100) / 100,
-    fanout_max_ms: Math.round(sorted[sorted.length - 1] * 100) / 100,
-    fanout_min_ms: Math.round(sorted[0] * 100) / 100,
-    raw_latencies: fanoutLatencies.map(l => Math.round(l * 100) / 100),
+    fanout_max_ms: Math.round((sorted.at(-1) ?? 0) * 100) / 100,
+    fanout_min_ms: Math.round((sorted[0] ?? 0) * 100) / 100,
+    raw_latencies: fanoutLatencies.map((latency) => Math.round(latency * 100) / 100),
   };
 
   console.error(`\nFanout results: avg=${result.fanout_avg_ms}ms p50=${result.fanout_p50_ms}ms p95=${result.fanout_p95_ms}ms max=${result.fanout_max_ms}ms`);

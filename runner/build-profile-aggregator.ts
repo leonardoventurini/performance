@@ -39,8 +39,22 @@ function childrenMsAt(nodes: readonly ProfileNode[], i: number): number {
   return sum;
 }
 
-export function aggregateBuildProfile(parsed: ParsedProfile | null | undefined, { topN = 5 }: { topN?: number } = {}) {
-  const nodes = parsed?.nodes;
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === 'object' && value !== null;
+}
+
+function isProfileNode(value: unknown): value is ProfileNode {
+  return isRecord(value)
+    && typeof value.name === 'string'
+    && typeof value.self_ms === 'number'
+    && (typeof value.count === 'number' || value.count === null)
+    && typeof value.depth === 'number';
+}
+
+/** Aggregates a raw parser payload after validating its load-bearing nodes. */
+export function aggregateBuildProfile(parsed: unknown, { topN = 5 }: { topN?: number } = {}) {
+  const rawNodes = isRecord(parsed) ? parsed.nodes : undefined;
+  const nodes = Array.isArray(rawNodes) && rawNodes.every(isProfileNode) ? rawNodes : undefined;
   if (!Array.isArray(nodes) || nodes.length === 0) return null;
 
   // Index map so we can find each node's original position (for childrenMsAt)
@@ -56,7 +70,7 @@ export function aggregateBuildProfile(parsed: ParsedProfile | null | undefined, 
   }));
 
   const topNTotalMs = top.reduce((acc, n) => acc + n.self_ms, 0);
-  const totalMs = Number(parsed?.total_ms ?? 0);
+  const totalMs = Number(isRecord(parsed) ? (parsed.total_ms ?? 0) : 0);
   const longTailMs = Math.max(0, totalMs - topNTotalMs);
 
   return {

@@ -6,16 +6,22 @@
 // Returns null when no observes were recorded (CC-5: collector ran but
 // nothing happened → caller omits the key entirely).
 
-interface DriverFallbackDump { total_cursors?: number; no_fallback?: number; configured_first?: string | null; fallbacks?: Readonly<Record<string, number>> }
-export function aggregateDriverFallback(dump?: DriverFallbackDump | null) {
-  const total = Number(dump?.total_cursors) || 0;
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> { return typeof value === 'object' && value !== null; }
+function fallbackCounts(value: unknown): Record<string, number> {
+  if (!isRecord(value)) return {};
+  return Object.fromEntries(Object.entries(value).map(([transition, count]) => [transition, Number(count) || 0]));
+}
+/** Aggregates an untrusted driver-fallback counter payload. */
+export function aggregateDriverFallback(dump?: unknown) {
+  if (!isRecord(dump)) return null;
+  const total = Number(dump.total_cursors) || 0;
   if (total === 0) return null;
-  const noFallback = Number(dump?.no_fallback) || 0;
+  const noFallback = Number(dump.no_fallback) || 0;
   return {
     metric: 'driver_fallbacks',
     total_cursors: total,
     no_fallback: noFallback,
-    configured_first: dump?.configured_first ?? null,
-    fallbacks: { ...(dump?.fallbacks || {}) },
+    configured_first: typeof dump.configured_first === 'string' ? dump.configured_first : null,
+    fallbacks: fallbackCounts(dump.fallbacks),
   };
 }

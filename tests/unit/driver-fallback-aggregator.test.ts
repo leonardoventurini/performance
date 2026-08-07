@@ -17,6 +17,7 @@ describe('aggregateDriverFallback', () => {
       configured_first: 'changeStreams',
       fallbacks: {},
     });
+    assert.ok(r);
     assert.deepEqual(r, {
       metric: 'driver_fallbacks',
       total_cursors: 5,
@@ -33,6 +34,7 @@ describe('aggregateDriverFallback', () => {
       configured_first: 'oplog',
       fallbacks: { oplog_to_polling: 4 },
     });
+    assert.ok(r);
     assert.equal(r.metric, 'driver_fallbacks');
     assert.equal(r.total_cursors, 42);
     assert.equal(r.no_fallback, 38);
@@ -50,6 +52,7 @@ describe('aggregateDriverFallback', () => {
         changeStreams_to_polling: 2,
       },
     });
+    assert.ok(r);
     assert.equal(r.fallbacks.changeStreams_to_oplog, 4);
     assert.equal(r.fallbacks.changeStreams_to_polling, 2);
     assert.equal(r.no_fallback, 4);
@@ -62,6 +65,7 @@ describe('aggregateDriverFallback', () => {
       no_fallback: 3,
       fallbacks: {},
     });
+    assert.ok(r);
     assert.equal(r.configured_first, null);
   });
 
@@ -71,6 +75,7 @@ describe('aggregateDriverFallback', () => {
       no_fallback: '5',
       fallbacks: { changeStreams_to_oplog: 2 },
     });
+    assert.ok(r);
     assert.equal(r.total_cursors, 7);
     assert.equal(r.no_fallback, 5);
   });
@@ -82,6 +87,7 @@ describe('aggregateDriverFallback', () => {
       fallbacks: { changeStreams_to_oplog: 1 },
     };
     const r = aggregateDriverFallback(input);
+    assert.ok(r);
     input.fallbacks.changeStreams_to_oplog = 99;
     assert.equal(r.fallbacks.changeStreams_to_oplog, 1);
   });
@@ -93,6 +99,7 @@ describe('aggregateDriverFallback', () => {
       configured_first: 'oplog',
       fallbacks: {},
     });
+    assert.ok(r);
     assert.deepEqual(
       Object.keys(r).sort(),
       ['configured_first', 'fallbacks', 'metric', 'no_fallback', 'total_cursors'],

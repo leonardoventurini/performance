@@ -45,12 +45,14 @@ function filterKeysOf(entry: SlowQueryEntry): string[] {
   return Object.keys(filter);
 }
 
-export function aggregateSlowQueries(rawEntries: readonly unknown[] | null | undefined, { thresholdMs = 100, durationMs = 0 }: { thresholdMs?: number; durationMs?: number } = {}) {
+/** Aggregates the untrusted profiler payload after normalizing each entry. */
+export function aggregateSlowQueries(rawEntries: unknown, { thresholdMs = 100, durationMs = 0 }: { thresholdMs?: number; durationMs?: number } = {}) {
   if (!Array.isArray(rawEntries) || rawEntries.length === 0) return null;
+  const entries: readonly unknown[] = rawEntries;
 
   const byOp: Record<string, number> = {};
   let slowest: SlowQueryEntry | null = null;
-  for (const rawEntry of rawEntries) {
+  for (const rawEntry of entries) {
     const entry = normalizeEntry(rawEntry);
     const op = entry?.op ?? 'unknown';
     byOp[op] = (byOp[op] || 0) + 1;
@@ -67,7 +69,7 @@ export function aggregateSlowQueries(rawEntries: readonly unknown[] | null | und
     metric: 'mongo_slow_queries',
     threshold_ms: thresholdMs,
     duration_s: +(Math.max(0, durationMs) / 1000).toFixed(2),
-    total_slow: rawEntries.length,
+    total_slow: entries.length,
     by_op: byOp,
     slowest_ms: slowestMs,
     slowest_sample: slowest

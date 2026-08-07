@@ -1,6 +1,7 @@
 const fs = require('fs');
 
-function printMeteorConfig(appPath) {
+/** Prints the app-local Meteor package configuration for legacy diagnostics. */
+function printMeteorConfig(appPath: string): void {
   const rawData = fs.readFileSync(`${appPath}/package.json`);
   const jsonData = JSON.parse(rawData);
   const meteorConfig = jsonData?.meteor;
@@ -10,6 +11,7 @@ function printMeteorConfig(appPath) {
 
 if (require.main === module) {
   const appPath = process.argv[2];
+  if (appPath === undefined) throw new Error('missing application path');
   printMeteorConfig(appPath);
 }
 

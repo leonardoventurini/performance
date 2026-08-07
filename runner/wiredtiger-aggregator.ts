@@ -42,7 +42,17 @@ function delta(start: CacheSnapshot, end: CacheSnapshot, key: string): number {
   return e < s ? e : e - s;
 }
 
-export function aggregateWiredTiger({ start, end }: { start?: CacheSnapshot | null; end?: CacheSnapshot | null } = {}) {
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> { return typeof value === 'object' && value !== null; }
+function cacheSnapshot(value: unknown): CacheSnapshot | null {
+  if (!isRecord(value)) return null;
+  return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, typeof entry === 'number' ? entry : undefined]));
+}
+
+/** Aggregates untrusted WiredTiger cache snapshots. */
+export function aggregateWiredTiger(input: unknown = {}) {
+  if (!isRecord(input)) return null;
+  const start = cacheSnapshot(input.start);
+  const end = cacheSnapshot(input.end);
   if (!start || !end) return null;
 
   const requested = delta(start, end, REQUESTED);
