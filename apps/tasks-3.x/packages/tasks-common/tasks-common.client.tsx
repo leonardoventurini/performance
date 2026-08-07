@@ -4,6 +4,7 @@ import type { Dispatch, SetStateAction } from 'react';
 import { useFind, useSubscribe } from 'meteor/react-meteor-data';
 import { Random } from 'meteor/random';
 import { Meteor } from 'meteor/meteor';
+import { parseTaskDocuments } from './tasks-collection';
 import type { TaskDocument } from './tasks-collection';
 
 interface TaskListProps { tasks: readonly TaskDocument[] }
@@ -48,8 +49,7 @@ const App = (): React.JSX.Element => {
   const fetchTasks = useCallback(async () => {
     if (reactive) return;
     const fetched: unknown = await Meteor.callAsync('fetchTasks');
-    if (!Array.isArray(fetched)) throw new TypeError('fetchTasks returned a non-array payload');
-    setTasks(fetched as TaskDocument[]);
+    setTasks(parseTaskDocuments(fetched));
   }, [reactive, tasks.length]);
 
   return (

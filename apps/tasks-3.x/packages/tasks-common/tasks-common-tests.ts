@@ -4,6 +4,41 @@ import {
   normalizeReliabilityQueryRequest,
   RELIABILITY_QUERY_IDS,
 } from './reliability-query-descriptors';
+import { parseTaskDocuments } from './tasks-collection';
+
+it('validates task documents returned by the method boundary', () => {
+  const createdAt = new Date('2026-08-07T12:00:00.000Z');
+  const [document] = parseTaskDocuments([{
+    _id: 'task-1',
+    sessionId: 'session-1',
+    description: 'Validated task',
+    createdAt,
+  }]);
+
+  if (!document) throw new Error('valid task payload must produce one document');
+  assert.equal(document._id, 'task-1');
+  assert.equal(document.sessionId, 'session-1');
+  assert.equal(document.description, 'Validated task');
+  assert.equal(document.createdAt, createdAt);
+});
+
+it('rejects malformed task entries returned by the method boundary', () => {
+  const validTask = {
+    _id: 'task-1',
+    sessionId: 'session-1',
+    description: 'Validated task',
+    createdAt: new Date('2026-08-07T12:00:00.000Z'),
+  };
+
+  assert.throws(() => parseTaskDocuments({}), /non-array payload/);
+  assert.throws(() => parseTaskDocuments([null]), /index 0: expected an object/);
+  assert.throws(() => parseTaskDocuments([{ ...validTask, _id: 42 }]), /_id must be a string/);
+  assert.throws(() => parseTaskDocuments([{ ...validTask, sessionId: 42 }]), /sessionId must be a string/);
+  assert.throws(() => parseTaskDocuments([{ ...validTask, description: undefined }]), /description must be a string/);
+  assert.throws(() => parseTaskDocuments([{ ...validTask, createdAt: '2026-08-07' }]), /createdAt must be a valid Date/);
+  assert.throws(() => parseTaskDocuments([{ ...validTask, createdAt: new Date('invalid') }]), /createdAt must be a valid Date/);
+  assert.throws(() => parseTaskDocuments([{ ...validTask, unexpected: true }]), /unknown field unexpected/);
+});
 
 it('preserves the legacy run-scoped query', () => {
   const [plan] = buildReliabilityCursorPlans('run-1');

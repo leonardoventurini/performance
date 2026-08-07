@@ -1,5 +1,5 @@
 {
   "extends": "./tsconfig.base.json",
   "compilerOptions": { "types": ["node", "meteor", "mocha"] },
-  "include": ["tests/**/*.ts", "packages/tasks-common/**/*-tests.ts", "packages/tasks-common/reliability-query-descriptors.ts", "packages/tasks-common/test-assertions.ts", "packages/bench-monitors/*-tests.ts", "packages/bench-monitors/audit-observer-contract.ts", "packages/bench-monitors/test-assertions.ts", "types/**/*.d.ts"]
+  "include": ["tests/**/*.ts", "packages/tasks-common/**/*-tests.ts", "packages/tasks-common/reliability-query-descriptors.ts", "packages/tasks-common/tasks-collection.ts", "packages/tasks-common/test-assertions.ts", "packages/bench-monitors/*-tests.ts", "packages/bench-monitors/audit-observer-contract.ts", "packages/bench-monitors/test-assertions.ts", "types/**/*.d.ts"]
 }
