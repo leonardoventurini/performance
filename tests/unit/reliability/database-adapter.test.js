@@ -1,7 +1,25 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { createDatabaseAdapter } from '../../../reliability/runtime/adapters/database.js';
+import {
+  buildDeclarativeFixture,
+  createDatabaseAdapter,
+} from '../../../reliability/runtime/adapters/database.js';
+
+function fixtureInput(caseExecutionId) {
+  return {
+    definition: {
+      fixture: {
+        documents: { kind: 'literal', value: 1 },
+        payloadBytes: { kind: 'literal', value: 0 },
+        generator: 'field_removal_no_stale_residue-v1',
+      },
+    },
+    plan: { coordinate: { seed: 42 }, resolvedParameters: { subscribers: 1 } },
+    runId: 'shared-run',
+    caseExecutionId,
+  };
+}
 
 function collection() {
   const documents = new Map();
@@ -56,6 +74,15 @@ test('cleanup proves no run-scoped documents remain', async () => {
   });
 });
 
+test('fixture identity is isolated by case execution', () => {
+  const first = buildDeclarativeFixture(fixtureInput('case-one'));
+  const second = buildDeclarativeFixture(fixtureInput('case-two'));
+
+  assert.notEqual(first.documents[0]._id, second.documents[0]._id);
+  assert.equal(first.documents[0]._id, 'shared-run:case-one:0');
+  assert.equal(Object.hasOwn(first.documents[0], 'ephemeral'), true);
+});
+
 test('replacement mutations preserve audit scope without retaining stale fields', async () => {
   const store = collection();
   const fixture = { documents: [{
@@ -74,7 +101,7 @@ test('replacement mutations preserve audit scope without retaining stale fields'
   const output = await adapter.write({
     step: {
       operation: 'replace_one', selector: { index: 0 },
-      mutation: { kind: 'generated_document', generator: 'replacement_no_stale_residue-v1' },
+      mutation: { kind: 'generated_document', generator: 'field_removal_no_stale_residue-v1' },
       expectedTransition: { kind: 'replace' },
     },
     resolve,
@@ -83,7 +110,7 @@ test('replacement mutations preserve audit scope without retaining stale fields'
   const replacement = store.documents.get('run:0');
   assert.equal(replacement.runId, 'run');
   assert.equal(replacement.caseExecutionId, 'case');
-  assert.equal(replacement.retained, 'new');
+  assert.equal(replacement.retained, true);
   assert.equal(Object.hasOwn(replacement, 'ephemeral'), false);
   assert.deepEqual(output.expectedState, [replacement]);
 });

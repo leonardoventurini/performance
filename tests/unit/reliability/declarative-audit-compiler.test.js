@@ -110,3 +110,27 @@ test('checked-in catalog covers and compiles every required default coordinate',
   assert.equal(plans.length, 112);
   assert.equal(new Set(plans.map(({ digest }) => digest)).size, plans.length);
 });
+
+test('compiler rejects barrier participant counts that cannot release their concurrency group', () => {
+  const loaded = loadDeclarativeAuditCatalog();
+  const source = loaded.casesById.get('recovery.stream_restart_concurrent_writes');
+  const invalidDefinition = structuredClone(source);
+  const barrier = invalidDefinition.steps.find(({ kind }) => kind === 'barrier');
+  barrier.participants = { kind: 'literal', value: 3 };
+  const invalidCatalog = {
+    ...loaded,
+    casesById: new Map(loaded.casesById).set(invalidDefinition.id, invalidDefinition),
+  };
+  const matchingCoordinate = resolveReleaseAuditMatrix({
+    topologyScope: ['replica_set'],
+    transportScope: ['sockjs'],
+    seed: 42,
+  }).coordinates.find(({ caseId }) => caseId === invalidDefinition.id);
+
+  assert.throws(() => compileDeclarativeCase({
+    catalog: invalidCatalog,
+    caseId: invalidDefinition.id,
+    profileId: 'smoke',
+    coordinate: matchingCoordinate,
+  }), /participant count does not match its concurrency group/u);
+});

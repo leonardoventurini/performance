@@ -155,8 +155,8 @@
       "kind": "barrier",
       "barrier": "live-race",
       "participants": {
-        "kind": "parameter",
-        "name": "subscribers"
+        "kind": "literal",
+        "value": 2
       },
       "schedule": "concurrent",
       "onFailure": "fail_case"
