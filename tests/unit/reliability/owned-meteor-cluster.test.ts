@@ -73,7 +73,11 @@ test('fault targeting refuses unknown or exited instances', () => {
   assert.throws(() => cluster.assertOwnedInstance('meteor-0'), /not a live owned target/);
 });
 
-function createClusterHarness(context: TestContext): {
+function createClusterHarness(context: TestContext, options: Readonly<{
+  readinessProbe?: (identity: ReadinessContext) => Promise<void>;
+  startupTimeoutMs?: number;
+  readinessAttemptTimeoutMs?: number;
+}> = {}): {
   readonly cluster: OwnedMeteorCluster; readonly readiness: ReadinessContext[]; readonly rootPath: string;
 } {
   const appPath = fs.mkdtempSync(path.join(os.tmpdir(), 'meteor-cluster-app-'));
@@ -106,13 +110,36 @@ function createClusterHarness(context: TestContext): {
     auditId: 'audit-1', appPath, meteorCommand: '/owned/meteor',
     mongoUrl: 'mongodb://127.0.0.1:27017/meteor', rootPath,
     spawnProcess,
-    readinessProbe: async (identity: ReadinessContext) => { readiness.push(identity); },
+    readinessProbe: options.readinessProbe ?? (async (identity: ReadinessContext) => { readiness.push(identity); }),
+    ...(options.startupTimeoutMs === undefined ? {} : { startupTimeoutMs: options.startupTimeoutMs }),
+    ...(options.readinessAttemptTimeoutMs === undefined ? {} : {
+      readinessAttemptTimeoutMs: options.readinessAttemptTimeoutMs,
+    }),
     inspectProcess: (pid: number) => processes.get(pid) ?? null,
     signalProcess,
     groupExists: (pid) => liveGroups.has(pid),
   });
   return { cluster, readiness, rootPath };
 }
+
+test('bounded readiness retries a connected probe that never answers and remains cleanable', async (context) => {
+  let attempts = 0;
+  const { cluster } = createClusterHarness(context, {
+    readinessProbe: () => {
+      attempts += 1;
+      return new Promise<void>(() => undefined);
+    },
+    startupTimeoutMs: 600,
+    readinessAttemptTimeoutMs: 20,
+  });
+
+  await assert.rejects(cluster.start(), /did not pass its authenticated readiness probe/u);
+  assert.ok(attempts >= 4, `expected readiness retries for both instances, received ${attempts} attempts`);
+  const restoration = await cluster.stop();
+  assert.equal(restoration.restored, true);
+  assert.equal(restoration.processGroupsTerminated, true);
+  assert.equal(restoration.workspaceRemoved, true);
+});
 
 test('cluster writes exact process markers, authenticates readiness, and restarts an owned instance', async (context) => {
   const { cluster, readiness } = createClusterHarness(context);

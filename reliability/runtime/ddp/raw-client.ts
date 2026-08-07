@@ -4,6 +4,7 @@ import { ObjectId } from 'mongodb';
 import { immutableClone } from '../immutable.js';
 
 const DDP_VERSION = '1';
+const DEFAULT_OPERATION_TIMEOUT_MS = 30_000;
 const IGNORED_RESUMPTION_MESSAGES = new Set(['ping', 'pong']);
 
 type MessageDirection = 'in' | 'out';
@@ -64,6 +65,20 @@ interface RawDdpClientOptions {
   readonly webSocketFactory: (endpoint: string) => WebSocketLike;
   readonly clientId: string;
   readonly maximumLedgerEntries: number;
+  readonly operationTimeoutMs?: number;
+}
+
+/** Identifies a DDP operation that exceeded its local wire-response deadline. */
+export class RawDdpTimeoutError extends Error {
+  readonly operation: string;
+  readonly timeoutMs: number;
+
+  constructor(operation: string, timeoutMs: number) {
+    super(`DDP ${operation} exceeded its ${timeoutMs}ms response deadline`);
+    this.name = 'RawDdpTimeoutError';
+    this.operation = operation;
+    this.timeoutMs = timeoutMs;
+  }
 }
 
 /** One immutable raw DDP wire-ledger entry. */
@@ -77,7 +92,13 @@ export interface RawDdpLedgerEntry {
   readonly message: DdpMessage;
 }
 
-interface ConnectOptions {
+/** Per-operation cancellation and deadline overrides for raw DDP waits. */
+export interface DdpOperationOptions {
+  readonly signal?: AbortSignal;
+  readonly timeoutMs?: number;
+}
+
+interface ConnectOptions extends DdpOperationOptions {
   readonly sessionId?: string | null;
   readonly receivedCount?: number | null;
 }
@@ -236,6 +257,7 @@ export class RawDdpClient {
   readonly webSocketFactory: (endpoint: string) => WebSocketLike;
   readonly clientId: string;
   readonly maximumLedgerEntries: number;
+  readonly operationTimeoutMs: number;
   state: RawDdpState;
   sessionId: string | null;
   receivedCount: number;
@@ -249,17 +271,24 @@ export class RawDdpClient {
   readonly subscriptions: Map<string, Subscription>;
 
   /** Creates a raw client around an injected WebSocket-compatible factory. */
-  constructor({ endpoint, webSocketFactory, clientId, maximumLedgerEntries }: RawDdpClientOptions) {
+  constructor({
+    endpoint, webSocketFactory, clientId, maximumLedgerEntries,
+    operationTimeoutMs = DEFAULT_OPERATION_TIMEOUT_MS,
+  }: RawDdpClientOptions) {
     if (typeof endpoint !== 'string' || endpoint.length === 0) throw new TypeError('endpoint must be a non-empty string');
     if (typeof webSocketFactory !== 'function') throw new TypeError('webSocketFactory must be a function');
     if (typeof clientId !== 'string' || clientId.length === 0) throw new TypeError('clientId must be a non-empty string');
     if (!Number.isSafeInteger(maximumLedgerEntries) || maximumLedgerEntries < 1) {
       throw new TypeError('maximumLedgerEntries must be a positive integer');
     }
+    if (!Number.isSafeInteger(operationTimeoutMs) || operationTimeoutMs < 1) {
+      throw new TypeError('operationTimeoutMs must be a positive integer');
+    }
     this.endpoint = endpoint;
     this.webSocketFactory = webSocketFactory;
     this.clientId = clientId;
     this.maximumLedgerEntries = maximumLedgerEntries;
+    this.operationTimeoutMs = operationTimeoutMs;
     this.state = RAW_DDP_STATES.DISCONNECTED;
     this.sessionId = null;
     this.receivedCount = 0;
@@ -285,7 +314,9 @@ export class RawDdpClient {
   }
 
   /** Opens one connection attempt and resolves after DDP negotiation. */
-  connect({ sessionId = null, receivedCount = null }: ConnectOptions = {}): Promise<ConnectResult> {
+  connect({
+    sessionId = null, receivedCount = null, signal, timeoutMs,
+  }: ConnectOptions = {}): Promise<ConnectResult> {
     if (this.state !== RAW_DDP_STATES.DISCONNECTED) {
       throw new Error(`cannot connect while ${this.state}`);
     }
@@ -325,7 +356,10 @@ export class RawDdpClient {
       for (const pending of this.pendingMessages) pending.reject(new Error('socket closed while awaiting DDP message'));
       this.pendingMessages.clear();
     });
-    return outcome.promise;
+    return this.#withDeadline(outcome.promise, 'connect', {}, {
+      ...(signal === undefined ? {} : { signal }),
+      ...(timeoutMs === undefined ? {} : { timeoutMs }),
+    });
   }
 
   /** Reconnects using the last accepted session and exact DDP receive count. */
@@ -335,13 +369,17 @@ export class RawDdpClient {
   }
 
   /** Sends a subscription and resolves on its matching ready message. */
-  async subscribe(name: string, params: readonly unknown[] = []): Promise<Subscription> {
+  async subscribe(
+    name: string,
+    params: readonly unknown[] = [],
+    options: DdpOperationOptions = {},
+  ): Promise<Subscription> {
     this.#assertConnected();
     const id = this.#operationId('sub');
-    const ready = this.#waitFor((message) => (
+    const ready = this.#waitFor('subscribe', (message) => (
       (message.msg === 'ready' && message.subs?.includes(id))
       || (message.msg === 'nosub' && message.id === id)
-    ));
+    ), options);
     this.#send({ msg: 'sub', id, name, params });
     const message = await ready;
     if (message.msg === 'nosub') throw new Error(`subscription ${name} failed`);
@@ -351,20 +389,28 @@ export class RawDdpClient {
   }
 
   /** Stops one exact subscription and waits until the server acknowledges it. */
-  async unsubscribe(id: string): Promise<void> {
+  async unsubscribe(id: string, options: DdpOperationOptions = {}): Promise<void> {
     this.#assertConnected();
     if (!this.subscriptions.has(id)) throw new Error(`subscription ${id} is not active`);
-    const stopped = this.#waitFor((message) => message.msg === 'nosub' && message.id === id);
+    const stopped = this.#waitFor(
+      'unsubscribe',
+      (message) => message.msg === 'nosub' && message.id === id,
+      options,
+    );
     this.#send({ msg: 'unsub', id });
     await stopped;
     this.subscriptions.delete(id);
   }
 
   /** Sends a method invocation and resolves with its matching result. */
-  async call(method: string, params: readonly unknown[] = []): Promise<unknown> {
+  async call(method: string, params: readonly unknown[] = [], options: DdpOperationOptions = {}): Promise<unknown> {
     this.#assertConnected();
     const id = this.#operationId('method');
-    const result = this.#waitFor((message) => message.msg === 'result' && message.id === id);
+    const result = this.#waitFor(
+      'method call',
+      (message) => message.msg === 'result' && message.id === id,
+      options,
+    );
     this.#send({ msg: 'method', id, method, params });
     const message = await result;
     if (message.error) throw new Error(message.error.reason || `method ${method} failed`);
@@ -459,11 +505,75 @@ export class RawDdpClient {
     }
   }
 
-  #waitFor(predicate: (message: DdpMessage) => boolean): Promise<DdpMessage> {
+  #waitFor(
+    operation: string,
+    predicate: (message: DdpMessage) => boolean,
+    options: DdpOperationOptions,
+  ): Promise<DdpMessage> {
     const result = deferred<DdpMessage>();
     const pending = { predicate, resolve: result.resolve, reject: result.reject };
     this.pendingMessages.add(pending);
-    return result.promise;
+    return this.#withDeadline(
+      result.promise,
+      operation,
+      { beforeAbort: () => this.pendingMessages.delete(pending) },
+      options,
+    );
+  }
+
+  #withDeadline<Value>(
+    promise: Promise<Value>,
+    operation: string,
+    hooks: Readonly<{ beforeAbort?: () => void }>,
+    options: DdpOperationOptions,
+  ): Promise<Value> {
+    const timeoutMs = options.timeoutMs ?? this.operationTimeoutMs;
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1) {
+      return Promise.reject(new TypeError('DDP operation timeoutMs must be a positive integer'));
+    }
+    if (options.signal?.aborted) {
+      hooks.beforeAbort?.();
+      this.#terminateTimedOutSocket();
+      return Promise.reject(options.signal.reason ?? new Error(`DDP ${operation} aborted`));
+    }
+    return new Promise<Value>((resolve, reject) => {
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        options.signal?.removeEventListener('abort', abort);
+        hooks.beforeAbort?.();
+        reject(new RawDdpTimeoutError(operation, timeoutMs));
+        this.#terminateTimedOutSocket();
+      }, timeoutMs);
+      const abort = (): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        hooks.beforeAbort?.();
+        reject(options.signal?.reason ?? new Error(`DDP ${operation} aborted`));
+        this.#terminateTimedOutSocket();
+      };
+      options.signal?.addEventListener('abort', abort, { once: true });
+      const settle = (action: () => void): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        options.signal?.removeEventListener('abort', abort);
+        action();
+      };
+      promise.then(
+        (value) => settle(() => resolve(value)),
+        (error: unknown) => settle(() => reject(error)),
+      );
+    });
+  }
+
+  #terminateTimedOutSocket(): void {
+    const socket = this.socket;
+    if (!socket) return;
+    if (typeof socket.terminate === 'function') socket.terminate();
+    else socket.close(1011, 'DDP operation deadline exceeded');
   }
 
   #applyCollectionMessage(message: DdpMessage): void {

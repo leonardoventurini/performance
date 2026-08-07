@@ -14,6 +14,7 @@ const INSTANCE_COUNT = 2;
 const CLUSTER_PREFIX = 'meteor-audit-cluster-';
 const MARKER_NAME = '.audit-process-owner.json';
 const STARTUP_TIMEOUT_MS = 180_000;
+const READINESS_ATTEMPT_TIMEOUT_MS = 5_000;
 const SHUTDOWN_TIMEOUT_MS = 15_000;
 const STDERR_LIMIT = 32_768;
 const MAXIMUM_PROBE_LEDGER_ENTRIES = 32;
@@ -23,6 +24,7 @@ export interface ProcessIdentity { readonly pid: number; readonly argv: string }
 /** Authenticated inputs used to prove a Meteor instance is application-ready. */
 export interface ReadinessContext {
   readonly auditId: string; readonly instanceId: string; readonly port: number; readonly ownershipToken: string;
+  readonly signal?: AbortSignal;
 }
 /** Loopback endpoint pair exposed to the owned audit proxy. */
 export interface MeteorBackend {
@@ -80,6 +82,8 @@ interface OwnedMeteorClusterOptions {
   readonly inspectProcess?: InspectProcess;
   readonly signalProcess?: SignalProcess;
   readonly groupExists?: GroupExists;
+  readonly startupTimeoutMs?: number;
+  readonly readinessAttemptTimeoutMs?: number;
 }
 /** Inputs accepted by the safe temporary-root cluster factory. */
 export type OwnedMeteorClusterCreateOptions = Omit<OwnedMeteorClusterOptions, 'rootPath'>;
@@ -194,22 +198,51 @@ function defaultGroupExists(pid: number): boolean {
   }
 }
 
-async function authenticatedReadinessProbe({ auditId, instanceId, port, ownershipToken }: ReadinessContext): Promise<void> {
+async function authenticatedReadinessProbe({
+  auditId, instanceId, port, ownershipToken, signal,
+}: ReadinessContext): Promise<void> {
   const client = new RawDdpClient({
     endpoint: `ws://127.0.0.1:${port}/websocket`,
     webSocketFactory: createReadinessSocket,
     clientId: `readiness-${instanceId}`,
     maximumLedgerEntries: MAXIMUM_PROBE_LEDGER_ENTRIES,
+    operationTimeoutMs: READINESS_ATTEMPT_TIMEOUT_MS,
   });
   try {
-    await client.connect();
-    await client.call('audit.monitorSnapshot', [{ runId: auditId, ownershipToken }]);
+    const operationOptions = signal === undefined ? {} : { signal };
+    await client.connect(operationOptions);
+    await client.call('audit.monitorSnapshot', [{ runId: auditId, ownershipToken }], operationOptions);
   } finally {
-    client.close(1000, 'readiness probe complete');
+    client.terminate();
   }
 }
 
-async function waitForReadiness(instance: MeteorInstance, cluster: OwnedMeteorCluster, timeoutMs = STARTUP_TIMEOUT_MS): Promise<void> {
+async function boundedReadinessAttempt(
+  operation: (signal: AbortSignal) => Promise<void>,
+  timeoutMs: number,
+  instanceId: string,
+): Promise<void> {
+  const controller = new AbortController();
+  let timer: NodeJS.Timeout | undefined;
+  const deadline = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      const error = new Error(`Managed Meteor instance ${instanceId} readiness attempt exceeded ${timeoutMs}ms`);
+      controller.abort(error);
+      reject(error);
+    }, timeoutMs);
+  });
+  try {
+    await Promise.race([operation(controller.signal), deadline]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function waitForReadiness(
+  instance: MeteorInstance,
+  cluster: OwnedMeteorCluster,
+  timeoutMs = cluster.startupTimeoutMs,
+): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const child = instance.child;
@@ -218,12 +251,14 @@ async function waitForReadiness(instance: MeteorInstance, cluster: OwnedMeteorCl
       throw new Error(`Managed Meteor instance exited during startup: ${instance.stdout}\n${instance.stderr}`);
     }
     try {
-      await cluster.readinessProbe({
+      const remainingMs = deadline - Date.now();
+      await boundedReadinessAttempt((signal) => cluster.readinessProbe({
         auditId: cluster.auditId,
         instanceId: instance.id,
         port: instance.port,
         ownershipToken: cluster.token,
-      });
+        signal,
+      }), Math.min(cluster.readinessAttemptTimeoutMs, remainingMs), instance.id);
       return;
     } catch {
       // The authenticated method is unavailable until the fixture is fully initialized.
@@ -290,6 +325,8 @@ export class OwnedMeteorCluster {
   readonly inspectProcess: InspectProcess;
   readonly signalProcess: SignalProcess;
   readonly groupExists: GroupExists;
+  readonly startupTimeoutMs: number;
+  readonly readinessAttemptTimeoutMs: number;
   readonly ownerId: string;
   readonly token: string;
   instances: MeteorInstance[];
@@ -299,6 +336,7 @@ export class OwnedMeteorCluster {
     auditId, appPath, meteorCommand, meteorArgsPrefix = [], mongoUrl, environment = {}, rootPath,
     spawnProcess = defaultSpawnProcess, readinessProbe = authenticatedReadinessProbe,
     inspectProcess = defaultInspectProcess, signalProcess = process.kill, groupExists = defaultGroupExists,
+    startupTimeoutMs = STARTUP_TIMEOUT_MS, readinessAttemptTimeoutMs = READINESS_ATTEMPT_TIMEOUT_MS,
   }: OwnedMeteorClusterOptions) {
     if (!auditId) throw new TypeError('auditId is required');
     if (!path.isAbsolute(appPath)) throw new TypeError('appPath must be absolute');
@@ -309,6 +347,12 @@ export class OwnedMeteorCluster {
     }
     if (typeof mongoUrl !== 'string' || !mongoUrl.startsWith('mongodb://127.0.0.1:')) {
       throw new TypeError('Owned Meteor cluster requires a loopback MongoDB URL');
+    }
+    if (!Number.isSafeInteger(startupTimeoutMs) || startupTimeoutMs < 1) {
+      throw new TypeError('startupTimeoutMs must be a positive integer');
+    }
+    if (!Number.isSafeInteger(readinessAttemptTimeoutMs) || readinessAttemptTimeoutMs < 1) {
+      throw new TypeError('readinessAttemptTimeoutMs must be a positive integer');
     }
     this.auditId = auditId;
     this.appPath = appPath;
@@ -322,6 +366,8 @@ export class OwnedMeteorCluster {
     this.inspectProcess = inspectProcess;
     this.signalProcess = signalProcess;
     this.groupExists = groupExists;
+    this.startupTimeoutMs = startupTimeoutMs;
+    this.readinessAttemptTimeoutMs = readinessAttemptTimeoutMs;
     this.ownerId = crypto.randomUUID();
     this.token = crypto.randomBytes(32).toString('hex');
     this.instances = [];

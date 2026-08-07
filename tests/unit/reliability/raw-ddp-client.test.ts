@@ -3,7 +3,12 @@ import { EventEmitter } from 'node:events';
 import test from 'node:test';
 import { ObjectId } from 'mongodb';
 
-import { RawDdpClient, RAW_DDP_STATES, type DdpMessage } from '../../../reliability/runtime/ddp/raw-client.js';
+import {
+  RawDdpClient,
+  RawDdpTimeoutError,
+  RAW_DDP_STATES,
+  type DdpMessage,
+} from '../../../reliability/runtime/ddp/raw-client.js';
 
 type TestMessage = Record<string, unknown> & { msg: string };
 
@@ -31,12 +36,13 @@ class FakeSocket extends EventEmitter {
   receiveRaw(raw: string): void { this.emit('message', raw); }
 }
 
-function fixture(maximumLedgerEntries = 100) {
+function fixture(maximumLedgerEntries = 100, operationTimeoutMs?: number) {
   const sockets: FakeSocket[] = [];
   const client = new RawDdpClient({
     endpoint: 'ws://audit.invalid/websocket',
     clientId: 'client-a',
     maximumLedgerEntries,
+    ...(operationTimeoutMs === undefined ? {} : { operationTimeoutMs }),
     webSocketFactory: () => {
       const socket = new FakeSocket();
       sockets.push(socket);
@@ -45,6 +51,60 @@ function fixture(maximumLedgerEntries = 100) {
   });
   return { client, sockets };
 }
+
+test('times out every unanswered DDP operation and terminates its socket', async (context) => {
+  const timeoutMs = 10;
+  await context.test('connect', async () => {
+    const { client, sockets } = fixture(100, timeoutMs);
+    const operation = client.connect();
+    assert.equal(sockets.length, 1);
+    await assert.rejects(operation, (error: unknown) => (
+      error instanceof RawDdpTimeoutError && error.operation === 'connect'
+    ));
+    assert.equal(client.state, RAW_DDP_STATES.DISCONNECTED);
+  });
+
+  for (const operationName of ['method call', 'subscribe'] as const) {
+    await context.test(operationName, async () => {
+      const { client, sockets } = fixture(100, timeoutMs);
+      await establish(client, sockets);
+      const operation = operationName === 'method call'
+        ? client.call('audit.monitorSnapshot')
+        : client.subscribe('reliability.documents');
+      await assert.rejects(operation, (error: unknown) => (
+        error instanceof RawDdpTimeoutError && error.operation === operationName
+      ));
+      assert.equal(client.state, RAW_DDP_STATES.DISCONNECTED);
+      assert.equal(client.pendingMessages.size, 0);
+    });
+  }
+
+  await context.test('unsubscribe', async () => {
+    const { client, sockets } = fixture(100, timeoutMs);
+    const socket = await establish(client, sockets);
+    const subscribing = client.subscribe('reliability.documents');
+    const subscriptionId = messageId(lastSent(socket));
+    socket.receive({ msg: 'ready', subs: [subscriptionId] });
+    const subscription = await subscribing;
+    await assert.rejects(client.unsubscribe(subscription.id), (error: unknown) => (
+      error instanceof RawDdpTimeoutError && error.operation === 'unsubscribe'
+    ));
+    assert.equal(client.state, RAW_DDP_STATES.DISCONNECTED);
+    assert.equal(client.pendingMessages.size, 0);
+  });
+});
+
+test('an AbortSignal cancels an unanswered operation and clears its waiter', async () => {
+  const { client, sockets } = fixture();
+  await establish(client, sockets);
+  const controller = new AbortController();
+  const reason = new Error('readiness attempt expired');
+  const operation = client.call('audit.monitorSnapshot', [], { signal: controller.signal });
+  controller.abort(reason);
+  await assert.rejects(operation, reason);
+  assert.equal(client.state, RAW_DDP_STATES.DISCONNECTED);
+  assert.equal(client.pendingMessages.size, 0);
+});
 
 function socketAt(sockets: readonly FakeSocket[], index: number): FakeSocket {
   const socket = sockets.at(index);
