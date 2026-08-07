@@ -5,8 +5,9 @@ import path from 'node:path';
 import { compare, toMarkdown } from '../../reporters/regression-detector.js';
 
 const FIXTURES = path.join(import.meta.dirname, 'fixtures');
-const load = (name) => JSON.parse(fs.readFileSync(path.join(FIXTURES, name), 'utf8'));
-const clone = (obj) => JSON.parse(JSON.stringify(obj));
+
+const load = (name: string) => JSON.parse(fs.readFileSync(path.join(FIXTURES, name), 'utf8'));
+const clone = (obj: object) => JSON.parse(JSON.stringify(obj));
 
 describe('compare() — happy paths', () => {
   test('a failed reliability oracle always fails comparison', () => {
@@ -18,6 +19,7 @@ describe('compare() — happy paths', () => {
     } };
     const report = compare(baseline, target);
     assert.equal(report.summary.passed, false);
+    assert.ok(report.details[0]);
     assert.equal(report.summary.failures, 1);
     assert.deepEqual(report.details[0], {
       metric: 'Reliability correctness',
@@ -33,6 +35,7 @@ describe('compare() — happy paths', () => {
     const target = { tag: 'target', scenario: 'change-stream-audit-smoke', wall_clock_ms: 100, metrics: {} };
     const report = compare(baseline, target);
     assert.equal(report.summary.passed, false);
+    assert.ok(report.details[0]);
     assert.equal(report.details[0].target, 'incomplete');
   });
 
@@ -47,6 +50,7 @@ describe('compare() — happy paths', () => {
     for (const d of report.details) assert.equal(d.status, 'ok');
     // deltas are rounded to 2 decimals
     for (const d of report.details) {
+      assert.ok(d.delta !== null && d.delta !== undefined);
       assert.equal(d.delta, +d.delta.toFixed(2));
     }
   });
@@ -57,14 +61,17 @@ describe('compare() — happy paths', () => {
     assert.ok(report.summary.failures >= 3, `expected >=3 failures, got ${report.summary.failures}`);
     // wall_clock_ms 40000 -> 52000 is +30% (threshold fail=25)
     const wall = report.details.find((d) => d.metric === 'wall_clock_ms');
+    assert.ok(wall);
     assert.equal(wall.status, 'FAIL');
     assert.equal(wall.delta, 30);
     // APP CPU avg 20 -> 28 is +40% (threshold fail=30)
     const cpu = report.details.find((d) => d.metric === 'APP CPU avg');
+    assert.ok(cpu);
     assert.equal(cpu.status, 'FAIL');
     assert.equal(cpu.delta, 40);
     // GC total pause 200 -> 320 is +60% (threshold fail=50)
     const gc = report.details.find((d) => d.metric === 'GC total pause');
+    assert.ok(gc);
     assert.equal(gc.status, 'FAIL');
     assert.equal(gc.delta, 60);
   });
@@ -75,6 +82,7 @@ describe('compare() — happy paths', () => {
     assert.equal(report.summary.failures, 0);
     assert.equal(report.summary.warnings, 0);
     for (const d of report.details) {
+      assert.ok(d.delta !== null && d.delta !== undefined);
       assert.ok(d.delta < 0, `${d.metric} delta ${d.delta} should be negative`);
       assert.equal(d.status, 'ok');
     }
@@ -90,6 +98,7 @@ describe('compare() — happy paths', () => {
     assert.equal(report.summary.passed, true);
     assert.equal(report.summary.warnings, 1);
     assert.equal(report.summary.failures, 0);
+    assert.ok(report.details[0]);
     assert.equal(report.details[0].status, 'WARN');
   });
 
@@ -148,6 +157,7 @@ describe('compare() — edge cases (no metric pair produced at all)', () => {
     target.metrics = {};
     const report = compare(load('baseline.json'), target);
     assert.equal(report.details.length, 1);
+    assert.ok(report.details[0]);
     assert.equal(report.details[0].metric, 'wall_clock_ms');
   });
 
@@ -156,6 +166,7 @@ describe('compare() — edge cases (no metric pair produced at all)', () => {
     delete target.metrics;
     const report = compare(load('baseline.json'), target);
     assert.equal(report.details.length, 1);
+    assert.ok(report.details[0]);
     assert.equal(report.details[0].metric, 'wall_clock_ms');
   });
 });
@@ -194,6 +205,7 @@ describe('compare() — skip rows (commit 11 bug fix)', () => {
     assert.equal(row.target, null);
     // RAM and GC are still finite → normal ok rows.
     const ram = report.details.find((d) => d.metric === 'APP RAM avg');
+    assert.ok(ram);
     assert.equal(ram.status, 'ok');
   });
 
@@ -239,6 +251,7 @@ describe('compare() — skip rows (commit 11 bug fix)', () => {
     target.metrics.gc.total_pause_ms = null;
     const report = compare(baseline, target);
     const row = report.details.find((d) => d.metric === 'GC total pause');
+    assert.ok(row);
     assert.equal(row.status, 'skip');
     assert.equal(row.reason, 'missing_target');
   });

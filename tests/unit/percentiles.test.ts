@@ -5,8 +5,8 @@ import { percentile, summarize } from '../../lib/percentiles.js';
 describe('percentile (nearest-rank)', () => {
   test('returns null for empty input', () => {
     assert.equal(percentile([], 50), null);
-    assert.equal(percentile(null, 50), null);
-    assert.equal(percentile(undefined, 50), null);
+    assert.equal(Reflect.apply(percentile, undefined, [null, 50]), null);
+    assert.equal(Reflect.apply(percentile, undefined, [undefined, 50]), null);
   });
 
   test('returns the single value for one-sample arrays at any p', () => {
@@ -45,12 +45,13 @@ describe('percentile (nearest-rank)', () => {
 describe('summarize', () => {
   test('returns null for empty input (per absence convention)', () => {
     assert.equal(summarize([]), null);
-    assert.equal(summarize(null), null);
-    assert.equal(summarize(undefined), null);
+    assert.equal(Reflect.apply(summarize, undefined, [null]), null);
+    assert.equal(Reflect.apply(summarize, undefined, [undefined]), null);
   });
 
   test('returns the standard shape for [10, 20, 30]', () => {
     const s = summarize([10, 20, 30]);
+    assert.ok(s);
     assert.deepEqual(s, {
       count: 3,
       avg: 20,
@@ -63,6 +64,7 @@ describe('summarize', () => {
 
   test('single sample collapses all stats to that value', () => {
     const s = summarize([42]);
+    assert.ok(s);
     assert.deepEqual(s, {
       count: 1,
       avg: 42,
@@ -76,6 +78,7 @@ describe('summarize', () => {
   test('handles a large array (1000 samples) consistently', () => {
     const arr = Array.from({ length: 1000 }, (_, i) => i + 1);
     const s = summarize(arr);
+    assert.ok(s);
     assert.equal(s.count, 1000);
     assert.equal(s.avg, 500.5);
     assert.equal(s.p50, 500);

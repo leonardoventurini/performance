@@ -7,8 +7,8 @@ import { parseMeteorProfile } from '../../runner/meteor-profile-parser.js';
 describe('parseMeteorProfile', () => {
   test('empty / non-string input → empty nodes, null total', () => {
     assert.deepEqual(parseMeteorProfile(''), { total_ms: null, nodes: [] });
-    assert.deepEqual(parseMeteorProfile(null), { total_ms: null, nodes: [] });
-    assert.deepEqual(parseMeteorProfile(undefined), { total_ms: null, nodes: [] });
+    assert.deepEqual(Reflect.apply(parseMeteorProfile, undefined, [null]), { total_ms: null, nodes: [] });
+    assert.deepEqual(Reflect.apply(parseMeteorProfile, undefined, [undefined]), { total_ms: null, nodes: [] });
   });
 
   test('single top-level node with count', () => {
@@ -19,6 +19,7 @@ describe('parseMeteorProfile', () => {
 
   test('dot-leader padding is stripped from the name (parent-with-children style)', () => {
     const { nodes } = parseMeteorProfile('| bundler.readJsImage...............................................7 ms (7)');
+    assert.ok(nodes[0]);
     assert.equal(nodes[0].name, 'bundler.readJsImage');
     assert.equal(nodes[0].self_ms, 7);
     assert.equal(nodes[0].count, 7);
@@ -26,6 +27,7 @@ describe('parseMeteorProfile', () => {
 
   test('count is optional (synthetic "other X" roll-up lines omit it)', () => {
     const { nodes } = parseMeteorProfile('| │  └─ other safeWatcher.watch                                     4 ms');
+    assert.ok(nodes[0]);
     assert.equal(nodes[0].name, 'other safeWatcher.watch');
     assert.equal(nodes[0].self_ms, 4);
     assert.equal(nodes[0].count, null);
@@ -33,6 +35,7 @@ describe('parseMeteorProfile', () => {
 
   test('thousands commas stripped from ms and count', () => {
     const { nodes } = parseMeteorProfile('| files.readFile...........................................1,931 ms (40873)');
+    assert.ok(nodes[0]);
     assert.equal(nodes[0].self_ms, 1931);
     assert.equal(nodes[0].count, 40873);
   });
@@ -46,6 +49,11 @@ describe('parseMeteorProfile', () => {
       '| │  ├─ files.watchFile                                         10 ms (1984)',
     ].join('\n');
     const { nodes } = parseMeteorProfile(text);
+    assert.ok(nodes[0]);
+    assert.ok(nodes[1]);
+    assert.ok(nodes[2]);
+    assert.ok(nodes[3]);
+    assert.ok(nodes[4]);
     assert.equal(nodes[0].depth, 0); // top-level
     assert.equal(nodes[1].depth, 1); // ├─
     assert.equal(nodes[2].depth, 1); // └─
@@ -62,6 +70,7 @@ describe('parseMeteorProfile', () => {
       '| ',
     ].join('\n');
     const { nodes, total_ms } = parseMeteorProfile(text);
+    assert.ok(nodes[0]);
     assert.equal(total_ms, 6202);
     assert.equal(nodes.length, 1);
     assert.equal(nodes[0].name, 'files.chmod');
@@ -74,6 +83,7 @@ describe('parseMeteorProfile', () => {
       '| meteor build                                                      7 ms (1)',
     ].join('\n');
     const { nodes } = parseMeteorProfile(text);
+    assert.ok(nodes[0]);
     assert.equal(nodes.length, 1);
     assert.equal(nodes[0].name, 'meteor build');
   });
@@ -89,6 +99,7 @@ describe('parseMeteorProfile', () => {
       '| (#1) Total: 6,202 ms (meteor build)',
     ].join('\n');
     const { nodes } = parseMeteorProfile(text);
+    assert.ok(nodes[0]);
     // Only the in-tree files.readFile (134ms) — NOT the 1,931ms top-leaf dup.
     assert.equal(nodes.length, 1);
     assert.equal(nodes[0].self_ms, 134);
@@ -100,6 +111,7 @@ describe('parseMeteorProfile', () => {
       '| plugin ecmascript                                                 3 ms (3)',
     ].join('\n');
     const { nodes } = parseMeteorProfile(text);
+    assert.ok(nodes[0]);
     assert.equal(nodes.length, 1);
     assert.equal(nodes[0].name, 'plugin ecmascript');
   });
@@ -111,6 +123,8 @@ describe('parseMeteorProfile', () => {
       '| plugin static-html                                                1 ms (2)',
     ].join('\n');
     const { nodes } = parseMeteorProfile(text);
+    assert.ok(nodes[0]);
+    assert.ok(nodes[1]);
     assert.deepEqual(nodes.map((n) => n.name), ['plugin ecmascript', 'plugin typescript', 'plugin static-html']);
     assert.equal(nodes[0].self_ms, 3);
     assert.equal(nodes[1].self_ms, 0);
@@ -122,8 +136,10 @@ describe('parseMeteorProfile', () => {
       '| another | weird || line',
       '| files.stat                                                      55 ms (1984)',
     ].join('\n');
-    let parsed;
+    let parsed: ReturnType<typeof parseMeteorProfile> | undefined;
     assert.doesNotThrow(() => { parsed = parseMeteorProfile(text); });
+    assert.ok(parsed);
+    assert.ok(parsed.nodes[0]);
     assert.equal(parsed.nodes.length, 1);
     assert.equal(parsed.nodes[0].name, 'files.stat');
   });

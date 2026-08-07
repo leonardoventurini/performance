@@ -16,6 +16,7 @@ describe('aggregateSubTiming', () => {
 
   test('produces canonical shape for { fetchTasks: [10, 20, 30] }', () => {
     const result = aggregateSubTiming({ fetchTasks: [10, 20, 30] });
+    assert.ok(result);
     assert.deepEqual(result, {
       metric: 'ddp_subscriptions',
       publications: {
@@ -34,6 +35,7 @@ describe('aggregateSubTiming', () => {
 
   test('single sample collapses all stats to that value', () => {
     const result = aggregateSubTiming({ fetchTasks: [42] });
+    assert.ok(result);
     assert.deepEqual(result.publications.fetchTasks, {
       count: 1,
       avg_ms: 42,
@@ -50,27 +52,38 @@ describe('aggregateSubTiming', () => {
       userProfile: [5, 15],
       notifications: [3],
     });
+    assert.ok(result);
+    const fetchTasks = result.publications.fetchTasks;
+    const userProfile = result.publications.userProfile;
+    const notifications = result.publications.notifications;
+    assert.ok(fetchTasks);
+    assert.ok(userProfile);
+    assert.ok(notifications);
     assert.equal(result.total_subs, 8);
-    assert.equal(result.publications.fetchTasks.count, 5);
-    assert.equal(result.publications.userProfile.count, 2);
-    assert.equal(result.publications.notifications.count, 1);
-    assert.equal(result.publications.fetchTasks.p50, 30);
-    assert.equal(result.publications.userProfile.avg_ms, 10);
+    assert.equal(fetchTasks.count, 5);
+    assert.equal(userProfile.count, 2);
+    assert.equal(notifications.count, 1);
+    assert.equal(fetchTasks.p50, 30);
+    assert.equal(userProfile.avg_ms, 10);
   });
 
   test('large array (1000 samples) computes percentiles correctly', () => {
     const samples = Array.from({ length: 1000 }, (_, i) => i + 1);
     const result = aggregateSubTiming({ fetchTasks: samples });
-    assert.equal(result.publications.fetchTasks.count, 1000);
-    assert.equal(result.publications.fetchTasks.avg_ms, 500.5);
-    assert.equal(result.publications.fetchTasks.p50, 500);
-    assert.equal(result.publications.fetchTasks.p95, 950);
-    assert.equal(result.publications.fetchTasks.p99, 990);
-    assert.equal(result.publications.fetchTasks.max_ms, 1000);
+    assert.ok(result);
+    const fetchTasks = result.publications.fetchTasks;
+    assert.ok(fetchTasks);
+    assert.equal(fetchTasks.count, 1000);
+    assert.equal(fetchTasks.avg_ms, 500.5);
+    assert.equal(fetchTasks.p50, 500);
+    assert.equal(fetchTasks.p95, 950);
+    assert.equal(fetchTasks.p99, 990);
+    assert.equal(fetchTasks.max_ms, 1000);
   });
 
   test('publication names with dots (e.g. meteor.loginServiceConfiguration) survive as object keys', () => {
     const result = aggregateSubTiming({ 'meteor.loginServiceConfiguration': [100, 200] });
+    assert.ok(result);
     assert.ok(result.publications['meteor.loginServiceConfiguration']);
     assert.equal(result.publications['meteor.loginServiceConfiguration'].count, 2);
   });
@@ -80,6 +93,7 @@ describe('aggregateSubTiming', () => {
       fetchTasks: [10, 20],
       neverReady: [],
     });
+    assert.ok(result);
     assert.equal(result.total_subs, 2);
     assert.ok(result.publications.fetchTasks);
     assert.equal(result.publications.neverReady, undefined);
@@ -87,7 +101,10 @@ describe('aggregateSubTiming', () => {
 
   test('output uses BARE percentile suffix (CC-4: p50, p95, p99 — no _ms)', () => {
     const result = aggregateSubTiming({ fetchTasks: [10] });
-    const fields = Object.keys(result.publications.fetchTasks);
+    assert.ok(result);
+    const fetchTasks = result.publications.fetchTasks;
+    assert.ok(fetchTasks);
+    const fields = Object.keys(fetchTasks);
     assert.ok(fields.includes('p50'), 'expected bare p50');
     assert.ok(fields.includes('p95'), 'expected bare p95');
     assert.ok(fields.includes('p99'), 'expected bare p99');
@@ -96,13 +113,17 @@ describe('aggregateSubTiming', () => {
 
   test('output uses _ms suffix on non-percentile latency scalars', () => {
     const result = aggregateSubTiming({ fetchTasks: [10] });
-    const fields = Object.keys(result.publications.fetchTasks);
+    assert.ok(result);
+    const fetchTasks = result.publications.fetchTasks;
+    assert.ok(fetchTasks);
+    const fields = Object.keys(fetchTasks);
     assert.ok(fields.includes('avg_ms'), 'expected avg_ms suffix');
     assert.ok(fields.includes('max_ms'), 'expected max_ms suffix');
   });
 
   test('top-level metric field is "ddp_subscriptions" (collector self-identifies)', () => {
     const result = aggregateSubTiming({ fetchTasks: [10] });
+    assert.ok(result);
     assert.equal(result.metric, 'ddp_subscriptions');
   });
 
@@ -111,6 +132,7 @@ describe('aggregateSubTiming', () => {
       fetchTasks: [1, 2, 3],
       userProfile: [4, 5],
     });
+    assert.ok(result);
     assert.equal(result.total_subs, 5);
   });
 });

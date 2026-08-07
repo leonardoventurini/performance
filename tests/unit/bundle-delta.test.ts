@@ -1,5 +1,6 @@
 import { describe, test, mock, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
+import path from 'node:path';
 import { io } from '../../runner/_io.js';
 import {
   loadBundleRuns,
@@ -11,7 +12,18 @@ import {
 // Minimal bundle-size result fixture. Only the fields bundle-delta reads
 // are populated; everything else a real result carries is intentionally
 // absent to prove the tool ignores it.
-function run({ tag, ts, client = 1000, server = 8000, total = 9000, scenario = 'bundle-size' }) {
+type BundleRun = Parameters<typeof computeTrend>[0][number];
+
+interface RunOptions {
+  readonly tag: string;
+  readonly ts: string;
+  readonly client?: number;
+  readonly server?: number;
+  readonly total?: number;
+  readonly scenario?: 'bundle-size';
+}
+
+function run({ tag, ts, client = 1000, server = 8000, total = 9000, scenario = 'bundle-size' }: RunOptions): BundleRun {
   return {
     timestamp: ts,
     tag,
@@ -28,6 +40,7 @@ describe('computeTrend', () => {
   test('single run → one row, delta_kb null', () => {
     const trend = computeTrend([run({ tag: 'r1', ts: '2026-01-01T00:00:00Z', total: 9000 })]);
     assert.equal(trend.length, 1);
+    assert.ok(trend[0]);
     assert.equal(trend[0].delta_kb, null);
     assert.equal(trend[0].total_kb, 9000);
   });
@@ -38,6 +51,8 @@ describe('computeTrend', () => {
       run({ tag: 'r1', ts: '2026-01-02T00:00:00Z', total: 9042 }),
     ]);
     assert.equal(trend.length, 2);
+    assert.ok(trend[0]);
+    assert.ok(trend[1]);
     assert.equal(trend[0].delta_kb, null);
     assert.equal(trend[1].delta_kb, 42);
   });
@@ -59,6 +74,7 @@ describe('computeTrend', () => {
       run({ tag: 'r1', ts: '2026-01-01T00:00:00Z', total: 9000 }),
       run({ tag: 'r1', ts: '2026-01-02T00:00:00Z', total: 8900 }),
     ]);
+    assert.ok(trend[1]);
     assert.equal(trend[1].delta_kb, -100);
   });
 
@@ -72,6 +88,8 @@ describe('computeTrend', () => {
     ], { limit: 2 });
     assert.deepEqual(trend.map((r) => r.tag), ['t4', 't5']);
     // First row of the window resets to null; second is curr-prev within window.
+    assert.ok(trend[0]);
+    assert.ok(trend[1]);
     assert.equal(trend[0].delta_kb, null);
     assert.equal(trend[1].delta_kb, 70);
   });
@@ -90,11 +108,11 @@ describe('loadBundleRuns', () => {
   test('reads only *.json files and parses them', () => {
     mock.method(io, 'existsSync', () => true);
     mock.method(io, 'readdirSync', () => ['a.json', 'README.md', 'b.json']);
-    const files = {
+    const files: Readonly<Record<string, string>> = {
       'a.json': JSON.stringify(run({ tag: 'a', ts: '2026-01-01T00:00:00Z' })),
       'b.json': JSON.stringify(run({ tag: 'b', ts: '2026-01-02T00:00:00Z' })),
     };
-    mock.method(io, 'readFileSync', (p) => files[p.split('/').pop()]);
+    mock.method(io, 'readFileSync', (filePath: string) => files[path.basename(filePath)] ?? '');
     const runs = loadBundleRuns('/hist', io);
     assert.equal(runs.length, 2);
     assert.deepEqual(runs.map((r) => r.tag).sort(), ['a', 'b']);
@@ -103,13 +121,14 @@ describe('loadBundleRuns', () => {
   test('excludes files whose scenario is not bundle-size', () => {
     mock.method(io, 'existsSync', () => true);
     mock.method(io, 'readdirSync', () => ['bundle.json', 'other.json']);
-    const files = {
+    const files: Readonly<Record<string, string>> = {
       'bundle.json': JSON.stringify(run({ tag: 'b', ts: '2026-01-01T00:00:00Z' })),
-      'other.json': JSON.stringify(run({ tag: 'x', ts: '2026-01-02T00:00:00Z', scenario: 'cold-start' })),
+      'other.json': JSON.stringify({ ...run({ tag: 'x', ts: '2026-01-02T00:00:00Z' }), scenario: 'cold-start' }),
     };
-    mock.method(io, 'readFileSync', (p) => files[p.split('/').pop()]);
+    mock.method(io, 'readFileSync', (filePath: string) => files[path.basename(filePath)] ?? '');
     const runs = loadBundleRuns('/hist', io);
     assert.equal(runs.length, 1);
+    assert.ok(runs[0]);
     assert.equal(runs[0].tag, 'b');
   });
 
@@ -122,26 +141,28 @@ describe('loadBundleRuns', () => {
       scenario: 'bundle-size',
       metrics: { bundle_size: { client_js_kb: 1000, server_kb: 8000 } }, // total_kb gone
     };
-    const files = {
+    const files: Readonly<Record<string, string>> = {
       'good.json': JSON.stringify(run({ tag: 'g', ts: '2026-01-01T00:00:00Z' })),
       'noTotal.json': JSON.stringify(noTotal),
     };
-    mock.method(io, 'readFileSync', (p) => files[p.split('/').pop()]);
+    mock.method(io, 'readFileSync', (filePath: string) => files[path.basename(filePath)] ?? '');
     const runs = loadBundleRuns('/hist', io);
     assert.equal(runs.length, 1);
+    assert.ok(runs[0]);
     assert.equal(runs[0].tag, 'g');
   });
 
   test('a single malformed JSON file is skipped, not fatal', () => {
     mock.method(io, 'existsSync', () => true);
     mock.method(io, 'readdirSync', () => ['ok.json', 'broken.json']);
-    const files = {
+    const files: Readonly<Record<string, string>> = {
       'ok.json': JSON.stringify(run({ tag: 'ok', ts: '2026-01-01T00:00:00Z' })),
       'broken.json': '{ not valid json',
     };
-    mock.method(io, 'readFileSync', (p) => files[p.split('/').pop()]);
+    mock.method(io, 'readFileSync', (filePath: string) => files[path.basename(filePath)] ?? '');
     const runs = loadBundleRuns('/hist', io);
     assert.equal(runs.length, 1);
+    assert.ok(runs[0]);
     assert.equal(runs[0].tag, 'ok');
   });
 });

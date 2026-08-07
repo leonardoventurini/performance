@@ -74,7 +74,7 @@ describe('computeOpRates', () => {
   });
 
   test('null/undefined start treats every end value as raw count', () => {
-    const r = computeOpRates(null, { insert: 100, query: 500 }, 10_000);
+    const r = Reflect.apply(computeOpRates, undefined, [null, { insert: 100, query: 500 }, 10_000]);
     assert.equal(r.totals.insert, 100);
     assert.equal(r.totals.query, 500);
     assert.equal(r.ops_per_sec.insert, 10);
@@ -94,7 +94,7 @@ describe('computeOpRates', () => {
 
   test('non-numeric counter values coerced via Number()', () => {
     // serverStatus shape is always numeric, but defensive in case of NaN/string
-    const r = computeOpRates({ insert: '10' }, { insert: '50' }, 1_000);
+    const r = Reflect.apply(computeOpRates, undefined, [{ insert: '10' }, { insert: '50' }, 1_000]);
     assert.equal(r.totals.insert, 40);
     assert.equal(r.ops_per_sec.insert, 40);
   });
