@@ -140,8 +140,8 @@ export async function runDeclarativeCase({
   const mongoClient = new mongoClientClass(environment.replicaSet.uri, {
     serverSelectionTimeoutMS: plan.budget.stepTimeoutMs,
   });
-  await mongoClient.connect();
   try {
+    await mongoClient.connect();
     return await executeConnectedCase({
       environment, definition, plan, release, attemptId, mongoClient,
       ...(captureExecution ? { captureExecution } : {}),

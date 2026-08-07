@@ -76,3 +76,48 @@ test('closes Mongo when post-connect database setup fails', async () => {
   }), /database setup failed/);
   assert.equal(closed, true);
 });
+
+test('closes Mongo when connection establishment rejects', async () => {
+  const catalog = loadDeclarativeAuditCatalog();
+  const definition = catalog.casesById.get('event.insert');
+  assert.ok(definition);
+  const plan = compileDeclarativeCase({
+    catalog,
+    caseId: definition.id,
+    profileId: 'smoke',
+    coordinate: {
+      caseId: definition.id, transport: 'sockjs', topology: 'replica_set', seed: 42,
+      observerOrder: ['changeStreams', 'oplog', 'polling'],
+    },
+  });
+  let closed = false;
+  class ConnectionFailureMongoClient extends MongoClient {
+    override async connect(): Promise<this> { throw new Error('connection failed'); }
+    override async close(): Promise<void> { closed = true; }
+  }
+  const environment: RuntimeEnvironment = {
+    auditId: 'audit',
+    ddpUrl: 'ws://127.0.0.1:3000/websocket',
+    proxy: {
+      backendIdForConnection: () => 'backend',
+      setRoutePolicy: () => undefined,
+    },
+    cluster: {
+      token: 'token',
+      backends: [{ id: 'backend' }],
+      stopInstance: async () => undefined,
+      restartInstance: async () => undefined,
+    },
+    replicaSet: { uri: 'mongodb://127.0.0.1:27017', stepDownPrimary: async () => undefined },
+  };
+
+  await assert.rejects(runDeclarativeCase({
+    environment,
+    definition,
+    plan,
+    release: {},
+    attemptId: 'attempt',
+    mongoClientClass: ConnectionFailureMongoClient,
+  }), /connection failed/);
+  assert.equal(closed, true);
+});
