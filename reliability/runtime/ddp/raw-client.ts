@@ -6,7 +6,78 @@ import { immutableClone } from '../immutable.js';
 const DDP_VERSION = '1';
 const IGNORED_RESUMPTION_MESSAGES = new Set(['ping', 'pong']);
 
-EJSON.addType('oid', (hex) => {
+type MessageDirection = 'in' | 'out';
+
+interface DdpError {
+  readonly reason?: string;
+}
+
+interface DdpMessage {
+  msg: string;
+  id?: string;
+  session?: string;
+  version?: string;
+  receivedCount?: number | null;
+  support?: readonly string[];
+  subs?: readonly string[];
+  name?: string;
+  method?: string;
+  params?: readonly unknown[];
+  error?: DdpError;
+  result?: unknown;
+  collection?: string;
+  fields?: Readonly<Record<string, unknown>>;
+  cleared?: readonly string[];
+}
+
+interface WebSocketLike {
+  on?(event: string, listener: (event?: unknown) => void): void;
+  onopen?: (event?: unknown) => void;
+  onmessage?: (event?: unknown) => void;
+  onerror?: (event?: unknown) => void;
+  onclose?: (event?: unknown) => void;
+  send(data: string): void;
+  close(code?: number, reason?: string): void;
+  terminate?(): void;
+}
+
+interface Deferred<Value> {
+  readonly promise: Promise<Value>;
+  readonly resolve: (value: Value | PromiseLike<Value>) => void;
+  readonly reject: (reason?: unknown) => void;
+}
+
+interface PendingMessage {
+  readonly predicate: (message: DdpMessage) => boolean;
+  readonly resolve: Deferred<DdpMessage>['resolve'];
+  readonly reject: Deferred<DdpMessage>['reject'];
+}
+
+interface Subscription {
+  readonly id: string;
+  readonly name: string;
+  readonly params: readonly unknown[];
+}
+
+interface RawDdpClientOptions {
+  readonly endpoint: string;
+  readonly webSocketFactory: (endpoint: string) => WebSocketLike;
+  readonly clientId: string;
+  readonly maximumLedgerEntries: number;
+}
+
+interface ConnectOptions {
+  readonly sessionId?: string | null;
+  readonly receivedCount?: number | null;
+}
+
+interface ConnectResult {
+  readonly classification: 'initial' | 'resumed' | 'fresh';
+  readonly sessionId: string;
+  readonly receivedCount: number;
+}
+
+EJSON.addType('oid', (hex: unknown) => {
   if (typeof hex !== 'string' || !/^[a-f0-9]{24}$/iu.test(hex)) {
     throw new TypeError('DDP ObjectID payload is invalid');
   }
@@ -21,11 +92,12 @@ export const RAW_DDP_STATES = Object.freeze({
   CONNECTED: 'connected',
   CLOSING: 'closing',
 });
+type RawDdpState = typeof RAW_DDP_STATES[keyof typeof RAW_DDP_STATES];
 
-function deferred() {
-  let resolve;
-  let reject;
-  const promise = new Promise((resolvePromise, rejectPromise) => {
+function deferred<Value>(): Deferred<Value> {
+  let resolve: Deferred<Value>['resolve'] = () => undefined;
+  let reject: Deferred<Value>['reject'] = () => undefined;
+  const promise = new Promise<Value>((resolvePromise, rejectPromise) => {
     resolve = resolvePromise;
     reject = rejectPromise;
   });
@@ -36,38 +108,111 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
-function immutable(value) {
+function immutable<Value>(value: Value): Value {
   return immutableClone(value);
 }
 
-function normalizeIncoming(event) {
+function normalizeIncoming(event: unknown): string {
   const data = event && typeof event === 'object' && Object.hasOwn(event, 'data')
-    ? event.data
+    ? Reflect.get(event, 'data')
     : event;
   return Buffer.isBuffer(data) ? data.toString('utf8') : String(data);
 }
 
-function addListener(socket, event, listener) {
+function addListener(socket: WebSocketLike, event: string, listener: (event?: unknown) => void): void {
   if (typeof socket.on === 'function') socket.on(event, listener);
-  else socket[`on${event}`] = listener;
+  else if (event === 'open') socket.onopen = listener;
+  else if (event === 'message') socket.onmessage = listener;
+  else if (event === 'error') socket.onerror = listener;
+  else if (event === 'close') socket.onclose = listener;
+  else throw new Error(`unsupported socket event ${event}`);
 }
 
-function redactLedgerMessage(message) {
+function redactLedgerMessage(message: DdpMessage): DdpMessage {
   if (message?.msg !== 'method' || !message.method?.startsWith('audit.')) return message;
+  if (message.params === undefined) return message;
   return {
     ...message,
-    params: message.params?.map((parameter) => (
+    params: message.params.map((parameter) => (
       parameter && typeof parameter === 'object'
         ? {
-          ...parameter,
+          ...Object.fromEntries(Object.entries(parameter)),
           ownershipToken: '[redacted]',
           ...(Object.hasOwn(parameter, 'payload') ? {
             payload: '[redacted]',
-            payloadBytes: Buffer.byteLength(JSON.stringify(parameter.payload)),
+            payloadBytes: Buffer.byteLength(JSON.stringify(Reflect.get(parameter, 'payload'))),
           } : {}),
         }
         : parameter
     )),
+  };
+}
+
+function parseDdpMessage(value: unknown): DdpMessage {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError('DDP message must be an object');
+  }
+  const msg = Reflect.get(value, 'msg');
+  if (typeof msg !== 'string' || msg.length === 0) throw new TypeError('DDP message type is invalid');
+  const optionalString = (key: string): string | undefined => {
+    const candidate = Reflect.get(value, key);
+    if (candidate === undefined) return undefined;
+    if (typeof candidate !== 'string') throw new TypeError(`DDP message ${key} is invalid`);
+    return candidate;
+  };
+  const optionalStrings = (key: string): readonly string[] | undefined => {
+    const candidate = Reflect.get(value, key);
+    if (candidate === undefined) return undefined;
+    if (!Array.isArray(candidate) || !candidate.every((entry) => typeof entry === 'string')) {
+      throw new TypeError(`DDP message ${key} is invalid`);
+    }
+    return candidate;
+  };
+  const errorValue = Reflect.get(value, 'error');
+  let error: DdpError | undefined;
+  if (errorValue !== undefined) {
+    if (!errorValue || typeof errorValue !== 'object' || Array.isArray(errorValue)) throw new TypeError('DDP error is invalid');
+    const reason = Reflect.get(errorValue, 'reason');
+    if (reason !== undefined && typeof reason !== 'string') throw new TypeError('DDP error reason is invalid');
+    error = reason === undefined ? {} : { reason };
+  }
+  const fieldsValue = Reflect.get(value, 'fields');
+  let fields: Readonly<Record<string, unknown>> | undefined;
+  if (fieldsValue !== undefined) {
+    if (!fieldsValue || typeof fieldsValue !== 'object' || Array.isArray(fieldsValue)) throw new TypeError('DDP fields are invalid');
+    fields = Object.fromEntries(Object.entries(fieldsValue));
+  }
+  const paramsValue = Reflect.get(value, 'params');
+  if (paramsValue !== undefined && !Array.isArray(paramsValue)) throw new TypeError('DDP params are invalid');
+  const params: readonly unknown[] | undefined = Array.isArray(paramsValue)
+    ? paramsValue.map((entry: unknown) => entry)
+    : undefined;
+  const receivedCountValue = Reflect.get(value, 'receivedCount');
+  if (receivedCountValue !== undefined && receivedCountValue !== null && typeof receivedCountValue !== 'number') {
+    throw new TypeError('DDP receivedCount is invalid');
+  }
+  const receivedCount: number | null | undefined = typeof receivedCountValue === 'number' || receivedCountValue === null
+    ? receivedCountValue
+    : undefined;
+  const support = optionalStrings('support');
+  const subs = optionalStrings('subs');
+  const cleared = optionalStrings('cleared');
+  const result: unknown = Reflect.get(value, 'result');
+  return {
+    msg,
+    ...Object.fromEntries(
+      ['id', 'session', 'version', 'name', 'method', 'collection']
+        .map((key) => [key, optionalString(key)] as const)
+        .filter((entry): entry is readonly [string, string] => entry[1] !== undefined),
+    ),
+    ...(support === undefined ? {} : { support }),
+    ...(subs === undefined ? {} : { subs }),
+    ...(cleared === undefined ? {} : { cleared }),
+    ...(params === undefined ? {} : { params }),
+    ...(error === undefined ? {} : { error }),
+    ...(fields === undefined ? {} : { fields }),
+    ...(receivedCount === undefined ? {} : { receivedCount }),
+    ...(Object.hasOwn(value, 'result') ? { result } : {}),
   };
 }
 
@@ -76,8 +221,24 @@ function redactLedgerMessage(message) {
  * Lifecycle timing and reconnect policy intentionally belong to the caller.
  */
 export class RawDdpClient {
+  readonly endpoint: string;
+  readonly webSocketFactory: (endpoint: string) => WebSocketLike;
+  readonly clientId: string;
+  readonly maximumLedgerEntries: number;
+  state: RawDdpState;
+  sessionId: string | null;
+  receivedCount: number;
+  socket: WebSocketLike | null;
+  connectionAttempt: number;
+  sequence: number;
+  nextOperationId: number;
+  readonly ledgerEntries: unknown[];
+  readonly collections: Map<string, Map<string, Record<string, unknown>>>;
+  readonly pendingMessages: Set<PendingMessage>;
+  readonly subscriptions: Map<string, Subscription>;
+
   /** Creates a raw client around an injected WebSocket-compatible factory. */
-  constructor({ endpoint, webSocketFactory, clientId, maximumLedgerEntries }) {
+  constructor({ endpoint, webSocketFactory, clientId, maximumLedgerEntries }: RawDdpClientOptions) {
     if (typeof endpoint !== 'string' || endpoint.length === 0) throw new TypeError('endpoint must be a non-empty string');
     if (typeof webSocketFactory !== 'function') throw new TypeError('webSocketFactory must be a function');
     if (typeof clientId !== 'string' || clientId.length === 0) throw new TypeError('clientId must be a non-empty string');
@@ -102,29 +263,29 @@ export class RawDdpClient {
   }
 
   /** Returns an immutable copy of the bounded wire ledger. */
-  ledger() {
+  ledger(): readonly unknown[] {
     return immutable(this.ledgerEntries);
   }
 
   /** Returns an immutable snapshot of a DDP collection. */
-  snapshot(collectionName) {
+  snapshot(collectionName: string): readonly Readonly<Record<string, unknown>>[] {
     const collection = this.collections.get(collectionName);
     return immutable(collection ? [...collection.values()] : []);
   }
 
   /** Opens one connection attempt and resolves after DDP negotiation. */
-  connect({ sessionId = null, receivedCount = null } = {}) {
+  connect({ sessionId = null, receivedCount = null }: ConnectOptions = {}): Promise<ConnectResult> {
     if (this.state !== RAW_DDP_STATES.DISCONNECTED) {
       throw new Error(`cannot connect while ${this.state}`);
     }
     if (sessionId !== null && (typeof sessionId !== 'string' || sessionId.length === 0)) {
       throw new TypeError('sessionId must be null or a non-empty string');
     }
-    if (sessionId !== null && (!Number.isSafeInteger(receivedCount) || receivedCount < 0)) {
+    if (sessionId !== null && (!Number.isSafeInteger(receivedCount) || typeof receivedCount !== 'number' || receivedCount < 0)) {
       throw new TypeError('receivedCount must be a non-negative integer when resuming');
     }
 
-    const outcome = deferred();
+    const outcome = deferred<ConnectResult>();
     const requestedSessionId = sessionId;
     this.connectionAttempt += 1;
     const socket = this.webSocketFactory(this.endpoint);
@@ -133,7 +294,7 @@ export class RawDdpClient {
     addListener(socket, 'open', () => {
       if (socket !== this.socket) return;
       this.state = RAW_DDP_STATES.SOCKET_OPEN;
-      const message = { msg: 'connect', version: DDP_VERSION, support: [DDP_VERSION] };
+      const message: DdpMessage = { msg: 'connect', version: DDP_VERSION, support: [DDP_VERSION] };
       if (requestedSessionId !== null) {
         message.session = requestedSessionId;
         message.receivedCount = receivedCount;
@@ -157,13 +318,13 @@ export class RawDdpClient {
   }
 
   /** Reconnects using the last accepted session and exact DDP receive count. */
-  resume() {
+  resume(): Promise<ConnectResult> {
     if (this.sessionId === null) throw new Error('cannot resume before a session has been established');
     return this.connect({ sessionId: this.sessionId, receivedCount: this.receivedCount });
   }
 
   /** Sends a subscription and resolves on its matching ready message. */
-  async subscribe(name, params = []) {
+  async subscribe(name: string, params: readonly unknown[] = []): Promise<Subscription> {
     this.#assertConnected();
     const id = this.#operationId('sub');
     const ready = this.#waitFor((message) => (
@@ -179,7 +340,7 @@ export class RawDdpClient {
   }
 
   /** Stops one exact subscription and waits until the server acknowledges it. */
-  async unsubscribe(id) {
+  async unsubscribe(id: string): Promise<void> {
     this.#assertConnected();
     if (!this.subscriptions.has(id)) throw new Error(`subscription ${id} is not active`);
     const stopped = this.#waitFor((message) => message.msg === 'nosub' && message.id === id);
@@ -189,7 +350,7 @@ export class RawDdpClient {
   }
 
   /** Sends a method invocation and resolves with its matching result. */
-  async call(method, params = []) {
+  async call(method: string, params: readonly unknown[] = []): Promise<unknown> {
     this.#assertConnected();
     const id = this.#operationId('method');
     const result = this.#waitFor((message) => message.msg === 'result' && message.id === id);
@@ -200,29 +361,29 @@ export class RawDdpClient {
   }
 
   /** Performs a graceful WebSocket close without reconnecting. */
-  close(code, reason) {
+  close(code?: number, reason?: string): void {
     if (!this.socket) return;
     this.state = RAW_DDP_STATES.CLOSING;
     this.socket.close(code, reason);
   }
 
   /** Abruptly destroys the current transport when supported by the socket. */
-  terminate() {
+  terminate(): void {
     if (!this.socket) return;
     if (typeof this.socket.terminate !== 'function') throw new Error('socket does not support abrupt termination');
     this.socket.terminate();
   }
 
-  #assertConnected() {
+  #assertConnected(): void {
     if (this.state !== RAW_DDP_STATES.CONNECTED) throw new Error(`DDP client is ${this.state}`);
   }
 
-  #operationId(prefix) {
+  #operationId(prefix: string): string {
     this.nextOperationId += 1;
     return `${prefix}-${this.nextOperationId}`;
   }
 
-  #record(direction, raw, message) {
+  #record(direction: MessageDirection, raw: string, message: DdpMessage): void {
     const entry = immutable({
       sequence: ++this.sequence,
       timestampNs: process.hrtime.bigint().toString(),
@@ -236,19 +397,19 @@ export class RawDdpClient {
     if (this.ledgerEntries.length > this.maximumLedgerEntries) this.ledgerEntries.shift();
   }
 
-  #send(message) {
+  #send(message: DdpMessage): void {
     if (!this.socket) throw new Error('socket is not open');
     const raw = EJSON.stringify(message);
     this.socket.send(raw);
     this.#record('out', raw, message);
   }
 
-  #receive(socket, event, requestedSessionId, outcome) {
+  #receive(socket: WebSocketLike, event: unknown, requestedSessionId: string | null, outcome: Deferred<ConnectResult>): void {
     if (socket !== this.socket) return;
     const raw = normalizeIncoming(event);
     let message;
     try {
-      message = EJSON.parse(raw);
+      message = parseDdpMessage(EJSON.parse(raw));
     } catch {
       this.#record('in', raw, { msg: 'malformed' });
       return;
@@ -259,6 +420,10 @@ export class RawDdpClient {
     if (message.msg === 'ping') {
       this.#send(message.id === undefined ? { msg: 'pong' } : { msg: 'pong', id: message.id });
     } else if (message.msg === 'connected') {
+      if (typeof message.session !== 'string' || message.session.length === 0) {
+        outcome.reject(new Error('DDP connected message omitted its session identity'));
+        return;
+      }
       const classification = requestedSessionId === null
         ? 'initial'
         : message.session === requestedSessionId ? 'resumed' : 'fresh';
@@ -283,15 +448,16 @@ export class RawDdpClient {
     }
   }
 
-  #waitFor(predicate) {
-    const result = deferred();
+  #waitFor(predicate: (message: DdpMessage) => boolean): Promise<DdpMessage> {
+    const result = deferred<DdpMessage>();
     const pending = { predicate, resolve: result.resolve, reject: result.reject };
     this.pendingMessages.add(pending);
     return result.promise;
   }
 
-  #applyCollectionMessage(message) {
+  #applyCollectionMessage(message: DdpMessage): void {
     if (!['added', 'changed', 'removed'].includes(message.msg)) return;
+    if (typeof message.collection !== 'string' || typeof message.id !== 'string') return;
     let collection = this.collections.get(message.collection);
     if (!collection) {
       collection = new Map();
@@ -301,8 +467,8 @@ export class RawDdpClient {
       collection.delete(message.id);
       return;
     }
-    const previous = collection.get(message.id) || { _id: message.id };
-    const next = { ...previous, ...(message.fields || {}), _id: message.id };
+    const previous: Record<string, unknown> = collection.get(message.id) || { _id: message.id };
+    const next: Record<string, unknown> = { ...previous, ...(message.fields || {}), _id: message.id };
     for (const field of message.cleared || []) delete next[field];
     collection.set(message.id, next);
   }

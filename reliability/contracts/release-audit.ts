@@ -14,6 +14,19 @@ const AUDIT_ORACLE_FAMILIES = Object.freeze([
   'required_coordinate',
 ]);
 
+type UnknownRecord = Record<string, unknown>;
+type EnumerationValue = string | number | boolean | null;
+
+/** One validated release-audit coordinate. */
+export interface CaseCoordinate {
+  readonly caseId: string;
+  readonly transport: typeof DDP_TRANSPORTS[number];
+  readonly observerOrder: readonly (typeof OBSERVER_DRIVERS[number])[];
+  readonly topology: typeof MONGO_TOPOLOGIES[number];
+  readonly seed: number;
+  readonly faultId?: string;
+}
+
 export const RELEASE_AUDIT_STATUSES = Object.freeze([
   'conformant',
   'non_conformant',
@@ -53,11 +66,11 @@ export const ORACLE_PRODUCERS = Object.freeze([
   'fault_controller',
 ]);
 
-function fail(path, message) {
+function fail(path: string, message: string): never {
   throw new TypeError(`${path} ${message}`);
 }
 
-function object(value, path, allowedKeys, requiredKeys = allowedKeys) {
+function object(value: unknown, path: string, allowedKeys: readonly string[], requiredKeys: readonly string[] = allowedKeys): asserts value is UnknownRecord {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     fail(path, 'must be an object');
   }
@@ -67,10 +80,9 @@ function object(value, path, allowedKeys, requiredKeys = allowedKeys) {
   for (const key of requiredKeys) {
     if (!Object.hasOwn(value, key)) fail(`${path}.${key}`, 'is required');
   }
-  return value;
 }
 
-function string(value, path, { max = MAX_REASON_LENGTH, pattern } = {}) {
+function string(value: unknown, path: string, { max = MAX_REASON_LENGTH, pattern }: { max?: number; pattern?: RegExp } = {}): string {
   if (typeof value !== 'string' || value.length === 0 || value.length > max) {
     fail(path, `must be a non-empty string of at most ${max} characters`);
   }
@@ -78,27 +90,27 @@ function string(value, path, { max = MAX_REASON_LENGTH, pattern } = {}) {
   return value;
 }
 
-function identifier(value, path) {
+function identifier(value: unknown, path: string): string {
   return string(value, path, { max: 128, pattern: IDENTIFIER_PATTERN });
 }
 
-function digest(value, path) {
+function digest(value: unknown, path: string): string {
   return string(value, path, { max: 64, pattern: DIGEST_PATTERN });
 }
 
-function enumeration(value, path, values) {
-  if (!values.includes(value)) fail(path, `must be one of: ${values.join(', ')}`);
-  return value;
+function enumeration<const Value extends EnumerationValue>(value: unknown, path: string, values: readonly Value[]): Value {
+  if (!values.includes(value as Value)) fail(path, `must be one of: ${values.join(', ')}`);
+  return value as Value;
 }
 
-function boundedArray(value, path, validate, { max = MAX_COLLECTION_LENGTH } = {}) {
+function boundedArray<T>(value: unknown, path: string, validate: (entry: unknown, path: string) => T, { max = MAX_COLLECTION_LENGTH }: { max?: number } = {}): T[] {
   if (!Array.isArray(value) || value.length > max) {
     fail(path, `must be an array with at most ${max} entries`);
   }
   return value.map((entry, index) => validate(entry, `${path}[${index}]`));
 }
 
-function finiteRecord(value, path) {
+function finiteRecord(value: unknown, path: string): Record<string, number> {
   object(value, path, Object.keys(value || {}), []);
   const entries = Object.entries(value);
   if (entries.length > 128) fail(path, 'must contain at most 128 measurements');
@@ -111,38 +123,47 @@ function finiteRecord(value, path) {
   }));
 }
 
-function stableReasons(value, path) {
+function stableReasons(value: unknown, path: string): string[] {
   return boundedArray(value, path, (reason, reasonPath) => (
     string(reason, reasonPath, { max: MAX_REASON_LENGTH })
   ), { max: MAX_REASON_COUNT });
 }
 
 /** Validates and normalizes the immutable release identity boundary. */
-export function validateReleaseIdentity(value, path = 'release') {
+export function validateReleaseIdentity(value: unknown, path = 'release'): UnknownRecord {
   const keys = [
     'requested', 'actual', 'sourceRevision', 'fixtureRelease',
     'packageVersionsDigest', 'settingsDigest', 'harnessRevision',
     'harnessDirty', 'executionEnvironment',
   ];
   object(value, path, keys);
+  const validatedStrings = new Map<string, string>();
   for (const key of ['requested', 'actual', 'sourceRevision', 'fixtureRelease',
     'harnessRevision', 'executionEnvironment']) {
-    string(value[key], `${path}.${key}`, { max: 256 });
-    if (FORBIDDEN_IDENTITY_VALUES.has(value[key].toLowerCase())) {
+    const validated = string(value[key], `${path}.${key}`, { max: 256 });
+    validatedStrings.set(key, validated);
+    if (FORBIDDEN_IDENTITY_VALUES.has(validated.toLowerCase())) {
       fail(`${path}.${key}`, 'must not be unknown or unavailable');
     }
   }
-  if (value.requested !== value.actual) {
+  const requested = validatedStrings.get('requested');
+  const actual = validatedStrings.get('actual');
+  const fixtureRelease = validatedStrings.get('fixtureRelease');
+  const harnessRevision = validatedStrings.get('harnessRevision');
+  const sourceRevision = validatedStrings.get('sourceRevision');
+  if (requested === undefined || actual === undefined || fixtureRelease === undefined
+      || harnessRevision === undefined || sourceRevision === undefined) fail(path, 'is missing validated identity fields');
+  if (requested !== actual) {
     fail(`${path}.actual`, 'must exactly match the requested release');
   }
-  if (value.fixtureRelease !== `METEOR@${value.requested}`) {
+  if (fixtureRelease !== `METEOR@${requested}`) {
     fail(`${path}.fixtureRelease`, 'must exactly match the requested release');
   }
-  if (!GIT_REVISION_PATTERN.test(value.harnessRevision)) {
+  if (!GIT_REVISION_PATTERN.test(harnessRevision)) {
     fail(`${path}.harnessRevision`, 'must be an exact Git revision');
   }
-  if (!(GIT_REVISION_PATTERN.test(value.sourceRevision)
-    || value.sourceRevision === `release:${value.requested}`)) {
+  if (!(GIT_REVISION_PATTERN.test(sourceRevision)
+    || (RELEASE_SOURCE_PATTERN.test(sourceRevision) && sourceRevision === `release:${requested}`))) {
     fail(`${path}.sourceRevision`, 'must identify the exact requested source');
   }
   digest(value.packageVersionsDigest, `${path}.packageVersionsDigest`);
@@ -152,72 +173,77 @@ export function validateReleaseIdentity(value, path = 'release') {
 }
 
 /** Validates one exact release-audit case coordinate. */
-export function validateCaseCoordinate(value, path = 'coordinate') {
+export function validateCaseCoordinate(value: unknown, path = 'coordinate'): CaseCoordinate {
   object(value, path, ['caseId', 'transport', 'observerOrder', 'topology', 'seed', 'faultId'],
     ['caseId', 'transport', 'observerOrder', 'topology', 'seed']);
-  identifier(value.caseId, `${path}.caseId`);
-  enumeration(value.transport, `${path}.transport`, DDP_TRANSPORTS);
+  const caseId = identifier(value.caseId, `${path}.caseId`);
+  const transport = enumeration(value.transport, `${path}.transport`, DDP_TRANSPORTS);
   const observerOrder = boundedArray(value.observerOrder, `${path}.observerOrder`,
     (driver, driverPath) => enumeration(driver, driverPath, OBSERVER_DRIVERS), { max: 3 });
   if (observerOrder.length === 0 || new Set(observerOrder).size !== observerOrder.length) {
     fail(`${path}.observerOrder`, 'must contain one to three unique drivers');
   }
-  enumeration(value.topology, `${path}.topology`, MONGO_TOPOLOGIES);
-  if (!Number.isSafeInteger(value.seed) || value.seed < 0 || value.seed > 0xffffffff) {
+  const topology = enumeration(value.topology, `${path}.topology`, MONGO_TOPOLOGIES);
+  if (!Number.isSafeInteger(value.seed) || typeof value.seed !== 'number' || value.seed < 0 || value.seed > 0xffffffff) {
     fail(`${path}.seed`, 'must be an unsigned 32-bit integer');
   }
-  if (value.faultId !== undefined) identifier(value.faultId, `${path}.faultId`);
-  return structuredClone(value);
+  const faultId = value.faultId === undefined ? undefined : identifier(value.faultId, `${path}.faultId`);
+  return faultId === undefined
+    ? { caseId, transport, observerOrder, topology, seed: value.seed }
+    : { caseId, transport, observerOrder, topology, seed: value.seed, faultId };
 }
 
 /** Validates one versioned capability declaration. */
-export function validateCapabilityDefinition(value, path = 'capability') {
+export function validateCapabilityDefinition(value: unknown, path = 'capability'): UnknownRecord {
   object(value, path, [
     'id', 'expectation', 'requiredCases', 'applicability', 'source', 'rationale',
   ]);
-  identifier(value.id, `${path}.id`);
-  enumeration(value.expectation, `${path}.expectation`, CAPABILITY_EXPECTATIONS);
+  const capabilityId = identifier(value.id, `${path}.id`);
+  const expectation = enumeration(value.expectation, `${path}.expectation`, CAPABILITY_EXPECTATIONS);
   const requiredCases = boundedArray(value.requiredCases, `${path}.requiredCases`,
     (caseId, casePath) => identifier(caseId, casePath), { max: 128 });
   if (new Set(requiredCases).size !== requiredCases.length) {
     fail(`${path}.requiredCases`, 'contains duplicate case identifiers');
   }
-  boundedArray(value.applicability, `${path}.applicability`, (entry, entryPath) => {
+  const applicability = boundedArray(value.applicability, `${path}.applicability`, (entry, entryPath) => {
     object(entry, entryPath, ['topologies', 'transports', 'observerOrders']);
-    boundedArray(entry.topologies, `${entryPath}.topologies`,
+    const topologies = boundedArray(entry.topologies, `${entryPath}.topologies`,
       (topology, topologyPath) => enumeration(topology, topologyPath, MONGO_TOPOLOGIES),
       { max: MONGO_TOPOLOGIES.length });
-    boundedArray(entry.transports, `${entryPath}.transports`,
+    const transports = boundedArray(entry.transports, `${entryPath}.transports`,
       (transport, transportPath) => enumeration(transport, transportPath, DDP_TRANSPORTS),
       { max: DDP_TRANSPORTS.length });
-    boundedArray(entry.observerOrders, `${entryPath}.observerOrders`,
+    const observerOrders = boundedArray(entry.observerOrders, `${entryPath}.observerOrders`,
       (order, orderPath) => {
-        const coordinate = {
-          caseId: value.id,
-          transport: entry.transports[0],
-          observerOrder: order,
-          topology: entry.topologies[0],
-          seed: 0,
-        };
-        if (entry.transports.length === 0 || entry.topologies.length === 0) {
+        if (transports.length === 0 || topologies.length === 0) {
           fail(entryPath, 'must not contain empty dimensions');
         }
+        const transport = transports.at(0);
+        const topology = topologies.at(0);
+        if (transport === undefined || topology === undefined) fail(entryPath, 'must not contain empty dimensions');
+        const coordinate = {
+          caseId: capabilityId,
+          transport,
+          observerOrder: order,
+          topology,
+          seed: 0,
+        };
         validateCaseCoordinate(coordinate, orderPath);
-        return [...order];
+        return order;
       }, { max: 8 });
-    return structuredClone(entry);
+    return { topologies, transports, observerOrders };
   }, { max: 32 });
   string(value.source, `${path}.source`, { max: 512 });
   string(value.rationale, `${path}.rationale`, { max: 1_024 });
-  if (['supported', 'fallback_required'].includes(value.expectation)
-    && (value.requiredCases.length === 0 || value.applicability.length === 0)) {
+  if (['supported', 'fallback_required'].includes(expectation)
+    && (requiredCases.length === 0 || applicability.length === 0)) {
     fail(path, 'must declare required cases and applicability');
   }
   return structuredClone(value);
 }
 
 /** Returns the stable identity of a logical case coordinate. */
-export function coordinateKey(value) {
+export function coordinateKey(value: unknown): string {
   const coordinate = validateCaseCoordinate(value);
   return [
     coordinate.caseId,
@@ -229,27 +255,27 @@ export function coordinateKey(value) {
   ].join('|');
 }
 
-function validateMongoIdentity(value, path, { allowUnavailable = false } = {}) {
+function validateMongoIdentity(value: unknown, path: string, { allowUnavailable = false }: { allowUnavailable?: boolean } = {}): UnknownRecord {
   object(value, path, [
     'serverVersion', 'featureCompatibilityVersion', 'topology', 'topologyName', 'members',
   ]);
-  string(value.serverVersion, `${path}.serverVersion`, { max: 64 });
-  string(value.featureCompatibilityVersion, `${path}.featureCompatibilityVersion`, { max: 64 });
+  const serverVersion = string(value.serverVersion, `${path}.serverVersion`, { max: 64 });
+  const featureCompatibilityVersion = string(value.featureCompatibilityVersion, `${path}.featureCompatibilityVersion`, { max: 64 });
   enumeration(value.topology, `${path}.topology`, MONGO_TOPOLOGIES);
-  string(value.topologyName, `${path}.topologyName`, { max: 128 });
-  const unavailableIdentity = value.serverVersion === 'unavailable'
-    && value.featureCompatibilityVersion === 'unavailable'
-    && value.topologyName === 'unavailable'
+  const topologyName = string(value.topologyName, `${path}.topologyName`, { max: 128 });
+  const unavailableIdentity = serverVersion === 'unavailable'
+    && featureCompatibilityVersion === 'unavailable'
+    && topologyName === 'unavailable'
     && Array.isArray(value.members)
     && value.members.length === 0;
   if (allowUnavailable && unavailableIdentity) return structuredClone(value);
-  if (!VERSION_PATTERN.test(value.serverVersion)) {
+  if (!VERSION_PATTERN.test(serverVersion)) {
     fail(`${path}.serverVersion`, 'must be an exact numeric version');
   }
-  if (!VERSION_PATTERN.test(value.featureCompatibilityVersion)) {
+  if (!VERSION_PATTERN.test(featureCompatibilityVersion)) {
     fail(`${path}.featureCompatibilityVersion`, 'must be an exact numeric version');
   }
-  if (FORBIDDEN_IDENTITY_VALUES.has(value.topologyName.toLowerCase())) {
+  if (FORBIDDEN_IDENTITY_VALUES.has(topologyName.toLowerCase())) {
     fail(`${path}.topologyName`, 'must not be unavailable');
   }
   const members = boundedArray(value.members, `${path}.members`, (member, memberPath) => {
@@ -269,7 +295,7 @@ function validateMongoIdentity(value, path, { allowUnavailable = false } = {}) {
   return structuredClone(value);
 }
 
-function validateObserverEvidence(value, path) {
+function validateObserverEvidence(value: unknown, path: string): UnknownRecord {
   object(value, path, [
     'cursorId', 'requestedOrder', 'actualDriver', 'fallbackFrom', 'fallbackReason',
   ], ['cursorId', 'requestedOrder', 'actualDriver']);
@@ -289,24 +315,24 @@ function validateObserverEvidence(value, path) {
   return structuredClone(value);
 }
 
-function validateOracle(value, path) {
+function validateOracle(value: unknown, path: string): UnknownRecord {
   object(value, path, ['oracleId', 'family', 'producer', 'digest', 'assertions', 'passed', 'failures']);
   identifier(value.oracleId, `${path}.oracleId`);
   enumeration(value.family, `${path}.family`, AUDIT_ORACLE_FAMILIES);
   enumeration(value.producer, `${path}.producer`, ORACLE_PRODUCERS);
   digest(value.digest, `${path}.digest`);
-  if (!Number.isSafeInteger(value.assertions) || value.assertions < 0 || value.assertions > 1_000_000) {
+  if (!Number.isSafeInteger(value.assertions) || typeof value.assertions !== 'number' || value.assertions < 0 || value.assertions > 1_000_000) {
     fail(`${path}.assertions`, 'must be a bounded non-negative safe integer');
   }
   if (typeof value.passed !== 'boolean') fail(`${path}.passed`, 'must be boolean');
-  stableReasons(value.failures, `${path}.failures`);
-  if (value.passed && value.failures.length > 0) {
+  const failures = stableReasons(value.failures, `${path}.failures`);
+  if (value.passed && failures.length > 0) {
     fail(`${path}.failures`, 'must be empty when passed is true');
   }
   return structuredClone(value);
 }
 
-function validateFaultWitness(value, path) {
+function validateFaultWitness(value: unknown, path: string): UnknownRecord {
   object(value, path, [
     'faultId', 'kind', 'activationEvidenceDigest', 'restorationEvidenceDigest', 'restored',
   ]);
@@ -319,7 +345,7 @@ function validateFaultWitness(value, path) {
 }
 
 /** Validates a persisted case artifact and rejects all unknown fields. */
-export function validateAuditCaseResult(value, path = 'caseResult') {
+export function validateAuditCaseResult(value: unknown, path = 'caseResult'): UnknownRecord {
   const attestationKeys = [
     'contractId', 'contractDigest', 'caseDefinitionDigest', 'compiledPlanDigest',
     'interpreterVersion', 'resolvedParameters', 'stepLedgerDigest', 'evidenceLedgerDigests',
@@ -331,9 +357,11 @@ export function validateAuditCaseResult(value, path = 'caseResult') {
   ], [
     'schemaVersion', 'coordinate', 'attemptId', 'status', 'release', 'mongo',
     'observerEvidence', 'oracles', 'diagnostics', 'reasons',
-    ...(value.schemaVersion === 3 && value.status !== 'incomplete' ? attestationKeys : []),
   ]);
-  if (![2, 3].includes(value.schemaVersion)) fail(`${path}.schemaVersion`, 'must equal 2 or 3');
+  if (typeof value.schemaVersion !== 'number' || ![2, 3].includes(value.schemaVersion)) fail(`${path}.schemaVersion`, 'must equal 2 or 3');
+  if (value.schemaVersion === 3 && value.status !== 'incomplete') {
+    for (const key of attestationKeys) if (!Object.hasOwn(value, key)) fail(`${path}.${key}`, 'is required');
+  }
   if (value.schemaVersion === 2 && attestationKeys.some((key) => Object.hasOwn(value, key))) {
     fail(path, 'schema version 2 cannot contain declarative attestations');
   }
@@ -346,7 +374,11 @@ export function validateAuditCaseResult(value, path = 'caseResult') {
       digest(value[key], `${path}.${key}`);
     }
     identifier(value.interpreterVersion, `${path}.interpreterVersion`);
-    object(value.resolvedParameters, `${path}.resolvedParameters`, Object.keys(value.resolvedParameters), []);
+    const resolvedParameters = value.resolvedParameters;
+    if (!resolvedParameters || typeof resolvedParameters !== 'object' || Array.isArray(resolvedParameters)) {
+      fail(`${path}.resolvedParameters`, 'must be an object');
+    }
+    object(resolvedParameters, `${path}.resolvedParameters`, Object.keys(resolvedParameters), []);
     object(value.evidenceLedgerDigests, `${path}.evidenceLedgerDigests`, ORACLE_PRODUCERS, []);
     if (Object.keys(value.evidenceLedgerDigests).length === 0) {
       fail(`${path}.evidenceLedgerDigests`, 'must not be empty');
@@ -387,7 +419,7 @@ export function validateAuditCaseResult(value, path = 'caseResult') {
 }
 
 /** Validates cleanup evidence required before a release can conform. */
-export function validateRecoveryEvidence(value, path = 'recovery') {
+export function validateRecoveryEvidence(value: unknown, path = 'recovery'): UnknownRecord {
   object(value, path, [
     'runDocumentsRemoved', 'topologyRestored', 'profilerRestored', 'networkRestored', 'digest',
   ]);
@@ -401,7 +433,7 @@ export function validateRecoveryEvidence(value, path = 'recovery') {
 }
 
 /** Validates one oracle-sensitivity result. */
-export function validateNegativeControlResult(value, path = 'negativeControl') {
+export function validateNegativeControlResult(value: unknown, path = 'negativeControl'): UnknownRecord {
   object(value, path, [
     'controlId', 'expectedReason', 'actualReason', 'detected', 'evidenceDigest',
   ]);
@@ -414,14 +446,17 @@ export function validateNegativeControlResult(value, path = 'negativeControl') {
 }
 
 /** Validates the sealed progress-journal reference. */
-export function validateProgressReference(value, path = 'progress') {
+export function validateProgressReference(value: unknown, path = 'progress'): UnknownRecord {
   object(value, path, ['firstSequence', 'lastSequence', 'digest']);
-  for (const key of ['firstSequence', 'lastSequence']) {
-    if (!Number.isSafeInteger(value[key]) || value[key] < 1) {
-      fail(`${path}.${key}`, 'must be a positive safe integer');
-    }
+  const firstSequence = value.firstSequence;
+  const lastSequence = value.lastSequence;
+  if (!Number.isSafeInteger(firstSequence) || typeof firstSequence !== 'number' || firstSequence < 1) {
+    fail(`${path}.firstSequence`, 'must be a positive safe integer');
   }
-  if (value.lastSequence < value.firstSequence) {
+  if (!Number.isSafeInteger(lastSequence) || typeof lastSequence !== 'number' || lastSequence < 1) {
+    fail(`${path}.lastSequence`, 'must be a positive safe integer');
+  }
+  if (lastSequence < firstSequence) {
     fail(`${path}.lastSequence`, 'must not precede firstSequence');
   }
   digest(value.digest, `${path}.digest`);
@@ -429,7 +464,7 @@ export function validateProgressReference(value, path = 'progress') {
 }
 
 /** Validates the immutable aggregate artifact at its persistence boundary. */
-export function validateReleaseAuditManifest(value, path = 'manifest') {
+export function validateReleaseAuditManifest(value: unknown, path = 'manifest'): UnknownRecord {
   object(value, path, [
     'schemaVersion', 'contract', 'release', 'topologyScope', 'transportScope',
     'status', 'capabilities', 'cases', 'negativeControls',
