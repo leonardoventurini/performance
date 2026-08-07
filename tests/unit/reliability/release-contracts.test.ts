@@ -95,7 +95,7 @@ test('case contract rejects unknown fields, statuses, and non-finite diagnostics
   nonFinite.diagnostics.resources.cpu = Number.POSITIVE_INFINITY;
   assert.throws(() => validateAuditCaseResult(nonFinite), /must be finite/);
   const unattested = validCase();
-  delete unattested.compiledPlanDigest;
+  Reflect.deleteProperty(unattested, 'compiledPlanDigest');
   assert.throws(() => validateAuditCaseResult(unattested), /compiledPlanDigest is required/);
 });
 
@@ -105,7 +105,7 @@ test('historical schema v2 remains readable but cannot carry v3 attestations', (
   for (const key of [
     'contractId', 'contractDigest', 'caseDefinitionDigest', 'compiledPlanDigest',
     'interpreterVersion', 'resolvedParameters', 'stepLedgerDigest', 'evidenceLedgerDigests',
-  ]) delete historical[key];
+  ]) Reflect.deleteProperty(historical, key);
   assert.equal(validateAuditCaseResult(historical).schemaVersion, 2);
   assert.throws(() => validateAuditCaseResult({
     ...historical, contractId: 'forged-v3-field',
@@ -167,7 +167,7 @@ test('registry includes every exact capability explicitly named by the spec', ()
     'mongodb.change_stream_pre_images',
   ]) {
     assert.equal(
-      RELEASE_CAPABILITY_REGISTRY.find((capability) => capability.id === id).expectation,
+      RELEASE_CAPABILITY_REGISTRY.find((capability) => capability.id === id)?.expectation,
       'out_of_scope',
     );
   }
@@ -183,6 +183,7 @@ test('matrix resolver covers every applicable required capability coordinate', (
   assert.ok(matrix.coordinates.length > 0);
   for (const capability of RELEASE_CAPABILITY_REGISTRY) {
     const required = matrix.requiredByCapability[capability.id];
+    assert.ok(required);
     if (['supported', 'fallback_required'].includes(capability.expectation)) {
       assert.ok(required.length > 0, `${capability.id} is uncovered`);
     } else {
@@ -192,10 +193,12 @@ test('matrix resolver covers every applicable required capability coordinate', (
 });
 
 test('matrix resolver rejects duplicate capability identities', () => {
+  const firstCapability = RELEASE_CAPABILITY_REGISTRY[0];
+  assert.ok(firstCapability);
   assert.throws(() => resolveReleaseAuditMatrix({
     topologyScope: ['replica_set'],
     transportScope: ['sockjs'],
     seed: 7,
-    registry: [RELEASE_CAPABILITY_REGISTRY[0], RELEASE_CAPABILITY_REGISTRY[0]],
+    registry: [firstCapability, firstCapability],
   }), /duplicate capability identifier/);
 });

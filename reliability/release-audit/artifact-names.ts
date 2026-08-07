@@ -1,7 +1,8 @@
 import crypto from 'node:crypto';
+import type { CaseCoordinate } from '../contracts/release-audit.js';
 
 /** Returns the stable bounded filename for one immutable case attempt. */
-export function caseArtifactFileName(coordinate, attemptId) {
+export function caseArtifactFileName(coordinate: CaseCoordinate, attemptId: string): string {
   const coordinateDigest = crypto
     .createHash('sha256')
     .update(JSON.stringify(coordinate))

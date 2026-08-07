@@ -21,10 +21,43 @@ import {
   createCaseExecution,
   createReleaseExecution,
 } from './state-machine.js';
+import type { CaseCoordinate } from '../contracts/release-audit.js';
+import type { ReleaseAuditManifest } from './aggregate.js';
+import type { ReleaseExecutionState } from './state-machine.js';
+
+type UnknownRecord = Record<string, unknown>;
+interface ReleaseIdentity extends UnknownRecord { readonly actual: string; readonly harnessDirty: boolean }
+interface RecoveryEvidence extends UnknownRecord { readonly runDocumentsRemoved: boolean; readonly topologyRestored: boolean; readonly profilerRestored: boolean; readonly networkRestored: boolean }
+interface CaseResult extends UnknownRecord { readonly coordinate: CaseCoordinate; readonly attemptId: string; readonly status: 'passed' | 'failed' | 'incomplete'; readonly reasons: readonly string[] }
+interface ExecutorFinalization { readonly recovery?: RecoveryEvidence; readonly negativeControls?: readonly UnknownRecord[] }
+interface CaseExecutor {
+  (input: { coordinate: CaseCoordinate; release: ReleaseIdentity; attemptId: string; artifactRoot: string }): Promise<CaseResult | null | undefined>;
+  finalize?: () => Promise<ExecutorFinalization | null | undefined>;
+}
+interface CoordinateReleaseAuditOptions {
+  readonly repositoryRoot: string;
+  readonly resultsRoot: string;
+  readonly release: string;
+  readonly releaseIdentity: ReleaseIdentity;
+  readonly topologyScope?: readonly string[];
+  readonly transportScope?: readonly string[];
+  readonly seed?: number;
+  readonly executeCase: CaseExecutor;
+  readonly negativeControls?: readonly UnknownRecord[];
+  readonly recovery?: RecoveryEvidence;
+  readonly now?: () => number;
+}
+export interface CoordinateReleaseAuditResult extends Record<string, unknown> {
+  readonly auditId: string;
+  readonly artifactRoot: string;
+  readonly manifest: ReleaseAuditManifest;
+  readonly releaseExecution: Readonly<{ state: ReleaseExecutionState; history: readonly ReleaseExecutionState[] }>;
+  readonly progressSeal: Readonly<{ algorithm: 'sha256'; digest: string; byteLength: number; eventCount: number; firstSequence: number | null; lastSequence: number | null }>;
+}
 
 const SAFE_RELEASE = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/u;
 
-function defaultRecoveryEvidence() {
+function defaultRecoveryEvidence(): RecoveryEvidence {
   const recovery = {
     runDocumentsRemoved: false,
     topologyRestored: false,
@@ -34,7 +67,7 @@ function defaultRecoveryEvidence() {
   return { ...recovery, digest: contractDigest(recovery) };
 }
 
-function incompleteCase({ coordinate, release, mongo, attemptId, reason }) {
+function incompleteCase({ coordinate, release, mongo, attemptId, reason }: { coordinate: CaseCoordinate; release: ReleaseIdentity; mongo: UnknownRecord; attemptId: string; reason: string }): CaseResult {
   return {
     schemaVersion: 3,
     coordinate,
@@ -49,7 +82,7 @@ function incompleteCase({ coordinate, release, mongo, attemptId, reason }) {
   };
 }
 
-function unavailableMongoIdentity(topology) {
+function unavailableMongoIdentity(topology: string): UnknownRecord {
   return {
     serverVersion: 'unavailable',
     featureCompatibilityVersion: 'unavailable',
@@ -61,7 +94,6 @@ function unavailableMongoIdentity(topology) {
 
 /** Executes one complete, fail-closed release-audit coordination attempt. */
 export async function coordinateReleaseAudit({
-  repositoryRoot,
   resultsRoot,
   release,
   releaseIdentity,
@@ -72,7 +104,7 @@ export async function coordinateReleaseAudit({
   negativeControls = [],
   recovery = defaultRecoveryEvidence(),
   now = Date.now,
-}) {
+}: CoordinateReleaseAuditOptions): Promise<CoordinateReleaseAuditResult> {
   if (!SAFE_RELEASE.test(release)) {
     throw new TypeError('release must be an exact bounded release identifier');
   }
@@ -90,7 +122,7 @@ export async function coordinateReleaseAudit({
   });
   let releaseExecution = createReleaseExecution();
   let sequence = journal.lastSequence || 0;
-  const caseResults = [];
+  const caseResults: CaseResult[] = [];
   let effectiveRecovery = recovery;
   let effectiveNegativeControls = negativeControls;
   let executorFinalized = false;
@@ -104,7 +136,7 @@ export async function coordinateReleaseAudit({
     if (finalization?.negativeControls) effectiveNegativeControls = finalization.negativeControls;
   };
 
-  const append = async ({ kind, state, payload, coordinate, attemptId }) => {
+  const append = async ({ kind, state, payload, coordinate, attemptId }: { kind: string; state: string; payload: UnknownRecord; coordinate?: CaseCoordinate; attemptId?: string }) => {
     sequence += 1;
     return journal.append(createProgressEvent({
       auditId,
@@ -114,8 +146,8 @@ export async function coordinateReleaseAudit({
       kind,
       state,
       payload,
-      coordinate,
-      attemptId,
+      ...(coordinate === undefined ? {} : { coordinate }),
+      ...(attemptId === undefined ? {} : { attemptId }),
     }));
   };
 
@@ -181,7 +213,7 @@ export async function coordinateReleaseAudit({
         'evidence_sealed',
         'cleanup_verified',
         result.status,
-      ]) {
+      ] as const) {
         caseExecution = advanceCaseExecution(caseExecution, nextState);
       }
       await writeAtomicJson({
@@ -226,11 +258,13 @@ export async function coordinateReleaseAudit({
         digest: '0'.repeat(64),
       },
     });
+    const provisionalStatus = provisional.status;
+    if (typeof provisionalStatus !== 'string') throw new TypeError('provisional aggregate has no status');
     await append({
       kind: 'audit_completed',
-      state: provisional.status,
+      state: provisionalStatus,
       payload: {
-        status: provisional.status,
+        status: provisionalStatus,
         passedCases: caseResults.filter(({ status }) => status === 'passed').length,
         failedCases: caseResults.filter(({ status }) => status === 'failed').length,
         incompleteCases: matrix.coordinates.length
@@ -238,7 +272,7 @@ export async function coordinateReleaseAudit({
       },
     });
     const progressSeal = await journal.seal();
-    const manifest = validateReleaseAuditManifest(aggregateReleaseAudit({
+    const manifest = aggregateReleaseAudit({
       release: releaseIdentity,
       topologyScope,
       transportScope,
@@ -252,8 +286,13 @@ export async function coordinateReleaseAudit({
         lastSequence: progressSeal.lastSequence,
         digest: progressSeal.digest,
       },
-    }));
-    releaseExecution = advanceReleaseExecution(releaseExecution, manifest.status);
+    });
+    validateReleaseAuditManifest(manifest);
+    const manifestStatus = manifest.status;
+    if (manifestStatus !== 'conformant' && manifestStatus !== 'non_conformant' && manifestStatus !== 'incomplete') {
+      throw new TypeError('release manifest has an invalid terminal status');
+    }
+    releaseExecution = advanceReleaseExecution(releaseExecution, manifestStatus);
     await writeAtomicJson({
       artifactRoot,
       targetPath: 'manifest.json',

@@ -16,6 +16,7 @@ import {
   resolve,
   sep,
 } from 'node:path';
+import type { FileHandle } from 'node:fs/promises';
 
 const DIRECTORY_SYNC_UNSUPPORTED_CODES = new Set([
   'EACCES',
@@ -29,10 +30,12 @@ const DIRECTORY_SYNC_UNSUPPORTED_CODES = new Set([
  * Error raised when an artifact target could escape its explicit audit root.
  */
 export class ArtifactPathError extends Error {
+  readonly artifactRoot: string | undefined;
+  readonly targetPath: string | undefined;
   /**
    * Creates a stable artifact containment failure.
    */
-  constructor(message, { artifactRoot, targetPath } = {}) {
+  constructor(message: string, { artifactRoot, targetPath }: { artifactRoot?: string; targetPath?: string } = {}) {
     super(message);
     this.name = 'ArtifactPathError';
     this.artifactRoot = artifactRoot;
@@ -40,17 +43,21 @@ export class ArtifactPathError extends Error {
   }
 }
 
-function isContained(rootPath, candidatePath) {
+function isContained(rootPath: string, candidatePath: string): boolean {
   const offset = relative(rootPath, candidatePath);
   return offset === '' || (!offset.startsWith(`..${sep}`) && offset !== '..' && !isAbsolute(offset));
 }
 
-async function assertNotSymlink(path, artifactRoot, targetPath) {
+function errorCode(error: unknown): string | undefined {
+  return error instanceof Error && 'code' in error && typeof error.code === 'string' ? error.code : undefined;
+}
+
+async function assertNotSymlink(path: string, artifactRoot: string, targetPath: string): Promise<boolean> {
   let metadata;
   try {
     metadata = await lstat(path);
   } catch (error) {
-    if (error.code === 'ENOENT') return false;
+    if (errorCode(error) === 'ENOENT') return false;
     throw error;
   }
   if (metadata.isSymbolicLink()) {
@@ -62,7 +69,7 @@ async function assertNotSymlink(path, artifactRoot, targetPath) {
   return true;
 }
 
-async function prepareContainedDirectory(rootPath, targetDirectory, originalRoot, targetPath) {
+async function prepareContainedDirectory(rootPath: string, targetDirectory: string, originalRoot: string, targetPath: string): Promise<void> {
   await mkdir(rootPath, { recursive: true });
   await assertNotSymlink(rootPath, originalRoot, targetPath);
   const canonicalRoot = await realpath(rootPath);
@@ -87,13 +94,14 @@ async function prepareContainedDirectory(rootPath, targetDirectory, originalRoot
   }
 }
 
-async function syncDirectory(directoryPath) {
-  let directoryHandle;
+async function syncDirectory(directoryPath: string): Promise<void> {
+  let directoryHandle: FileHandle | undefined;
   try {
     directoryHandle = await open(directoryPath, 'r');
     await directoryHandle.sync();
   } catch (error) {
-    if (!DIRECTORY_SYNC_UNSUPPORTED_CODES.has(error.code)) throw error;
+    const code = errorCode(error);
+    if (code === undefined || !DIRECTORY_SYNC_UNSUPPORTED_CODES.has(code)) throw error;
   } finally {
     await directoryHandle?.close();
   }
@@ -102,7 +110,7 @@ async function syncDirectory(directoryPath) {
 /**
  * Resolves an artifact target and rejects lexical escape and symlink traversal.
  */
-export async function resolveArtifactPath({ artifactRoot, targetPath }) {
+export async function resolveArtifactPath({ artifactRoot, targetPath }: { artifactRoot: string; targetPath: string }): Promise<string> {
   if (typeof artifactRoot !== 'string' || artifactRoot.length === 0) {
     throw new TypeError('artifactRoot must be an explicit non-empty path');
   }
@@ -140,9 +148,9 @@ export async function writeAtomicJson({
   targetPath,
   value,
   space = 2,
-}) {
+}: { artifactRoot: string; targetPath: string; value: unknown; space?: number }): Promise<Readonly<{ algorithm: 'sha256'; digest: string; byteLength: number; path: string }>> {
   const resolvedTarget = await resolveArtifactPath({ artifactRoot, targetPath });
-  let serialized;
+  let serialized: string | undefined;
   try {
     serialized = JSON.stringify(value, null, space);
   } catch (error) {
@@ -158,7 +166,7 @@ export async function writeAtomicJson({
     targetDirectory,
     `.${basename(resolvedTarget)}.${process.pid}.${randomUUID()}.tmp`,
   );
-  let temporaryHandle;
+  let temporaryHandle: FileHandle | undefined;
   let temporaryExists = false;
   try {
     temporaryHandle = await open(temporaryPath, 'wx', 0o600);
@@ -166,7 +174,7 @@ export async function writeAtomicJson({
     await temporaryHandle.writeFile(contents);
     await temporaryHandle.sync();
     await temporaryHandle.close();
-    temporaryHandle = null;
+    temporaryHandle = undefined;
 
     await assertNotSymlink(resolvedTarget, artifactRoot, targetPath);
     await rename(temporaryPath, resolvedTarget);
@@ -176,7 +184,7 @@ export async function writeAtomicJson({
     await temporaryHandle?.close();
     if (temporaryExists) {
       await unlink(temporaryPath).catch((error) => {
-        if (error.code !== 'ENOENT') throw error;
+        if (errorCode(error) !== 'ENOENT') throw error;
       });
     }
   }

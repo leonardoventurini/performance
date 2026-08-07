@@ -86,7 +86,9 @@ test('compiler rejects out-of-applicability coordinates and profile overflow', (
     coordinate: { ...coordinate, transport: 'uws' },
   }), /does not apply/u);
   const invalid = catalog();
-  invalid.profilesById.get('smoke').parameters.documents = 11;
+  const smokeProfile = invalid.profilesById.get('smoke');
+  assert.ok(smokeProfile);
+  smokeProfile.parameters.documents = 11;
   assert.throws(() => compileDeclarativeCase({
     catalog: invalid,
     caseId: 'event.insert',
@@ -114,8 +116,12 @@ test('checked-in catalog covers and compiles every required default coordinate',
 test('compiler rejects barrier participant counts that cannot release their concurrency group', () => {
   const loaded = loadDeclarativeAuditCatalog();
   const source = loaded.casesById.get('recovery.stream_restart_concurrent_writes');
+  assert.ok(source);
   const invalidDefinition = structuredClone(source);
-  const barrier = invalidDefinition.steps.find(({ kind }) => kind === 'barrier');
+  const steps = invalidDefinition.steps;
+  assert.ok(Array.isArray(steps));
+  const barrier = steps.find((entry: unknown) => entry !== null && typeof entry === 'object' && 'kind' in entry && entry.kind === 'barrier');
+  assert.ok(barrier && typeof barrier === 'object');
   barrier.participants = { kind: 'literal', value: 3 };
   const invalidCatalog = {
     ...loaded,
@@ -126,6 +132,7 @@ test('compiler rejects barrier participant counts that cannot release their conc
     transportScope: ['sockjs'],
     seed: 42,
   }).coordinates.find(({ caseId }) => caseId === invalidDefinition.id);
+  assert.ok(matchingCoordinate);
 
   assert.throws(() => compileDeclarativeCase({
     catalog: invalidCatalog,

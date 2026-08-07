@@ -19,7 +19,7 @@ import {
   writeAtomicJson,
 } from '../../../reliability/release-audit/atomic-artifacts.js';
 
-const temporaryDirectories = [];
+const temporaryDirectories: string[] = [];
 
 async function temporaryRoot() {
   const directory = await mkdtemp(join(tmpdir(), 'release-artifacts-'));
@@ -50,7 +50,7 @@ describe('release audit atomic artifacts', () => {
       byteLength: contents.byteLength,
       path: 'cases/case-1.json',
     });
-    assert.deepEqual(JSON.parse(contents), { status: 'passed', attempts: 1 });
+    assert.deepEqual(JSON.parse(contents.toString('utf8')), { status: 'passed', attempts: 1 });
     assert.equal((await lstat(target)).isSymbolicLink(), false);
     assert.deepEqual(await readdir(dirname(target)), ['case-1.json']);
   });

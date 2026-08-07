@@ -6,8 +6,10 @@ import {
   coordinateKey,
 } from '../contracts/release-audit.js';
 import { RELEASE_CAPABILITY_REGISTRY } from './capability-registry.js';
+import type { Capability } from './capability-registry.js';
+import type { CaseCoordinate } from '../contracts/release-audit.js';
 
-function assertUnique(values, label, permitted) {
+function assertUnique<Value extends string>(values: readonly string[], label: string, permitted: readonly Value[]): asserts values is readonly Value[] {
   if (!Array.isArray(values) || values.length === 0 || new Set(values).size !== values.length) {
     throw new TypeError(`${label} must be a non-empty array of unique values`);
   }
@@ -25,21 +27,21 @@ export function resolveReleaseAuditMatrix({
   transportScope,
   seed,
   registry = RELEASE_CAPABILITY_REGISTRY,
-}) {
+}: { topologyScope: readonly string[]; transportScope: readonly string[]; seed: number; registry?: readonly Capability[] }): Readonly<{ coordinates: readonly CaseCoordinate[]; requiredByCapability: Readonly<Record<string, readonly string[]>> }> {
   assertUnique(topologyScope, 'topologyScope', MONGO_TOPOLOGIES);
   assertUnique(transportScope, 'transportScope', DDP_TRANSPORTS);
   if (!Number.isSafeInteger(seed) || seed < 0 || seed > 0xffffffff) {
     throw new TypeError('seed must be an unsigned 32-bit integer');
   }
 
-  const coordinates = new Map();
-  const requiredByCapability = new Map();
+  const coordinates = new Map<string, CaseCoordinate>();
+  const requiredByCapability = new Map<string, string[]>();
   for (const capability of registry) {
     validateCapabilityDefinition(capability);
     if (requiredByCapability.has(capability.id)) {
       throw new TypeError(`duplicate capability identifier ${capability.id}`);
     }
-    const required = [];
+    const required: string[] = [];
     if (capability.expectation === 'out_of_scope'
       || capability.expectation === 'not_supported') {
       requiredByCapability.set(capability.id, required);

@@ -1,11 +1,41 @@
-function percentile(sorted, value) {
-  if (sorted.length === 0) return 0;
-  const index = Math.max(0, Math.ceil((value / 100) * sorted.length) - 1);
-  return sorted[index];
+export interface ReliabilitySummaryInput {
+  readonly profile: string;
+  readonly seed: number;
+  readonly requestedDriver: string;
+  readonly actualDriver: string;
+  readonly completed: boolean;
+  readonly subscribers: number;
+  readonly documents: number;
+  readonly mutations: number;
+  readonly payloadBytes: number;
+  readonly writes: unknown;
+  readonly observedEvents: number;
+  readonly duplicateEvents: number;
+  readonly outOfOrderEvents: number;
+  readonly foreignEvents: number;
+  readonly convergedSubscribers: number;
+  readonly timedOutSubscribers: number;
+  readonly finalStateMismatches: number;
+  readonly digestMismatches: number;
+  readonly latencies: readonly number[];
+  readonly failureReasons?: readonly string[];
 }
 
-function round(value) {
+function percentile(sorted: readonly number[], value: number): number {
+  if (sorted.length === 0) return 0;
+  const index = Math.max(0, Math.ceil((value / 100) * sorted.length) - 1);
+  return sorted[index] ?? 0;
+}
+
+function round(value: number): number {
   return Math.round(value * 100) / 100;
+}
+
+export interface ReliabilitySummary extends Record<string, unknown> {
+  readonly status: 'passed' | 'failed' | 'incomplete';
+  readonly propagation_p95: number;
+  readonly generated_bytes: number;
+  readonly failure_reasons: readonly string[];
 }
 
 export function summarizeReliability({
@@ -29,7 +59,7 @@ export function summarizeReliability({
   digestMismatches,
   latencies,
   failureReasons = [],
-}) {
+}: ReliabilitySummaryInput): ReliabilitySummary {
   const sorted = [...latencies].sort((left, right) => left - right);
   const average = sorted.length === 0
     ? 0

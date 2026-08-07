@@ -9,7 +9,7 @@ import {
   readFixtureRelease,
 } from '../../../reliability/release-audit/identity.js';
 
-const temporaryDirectories = [];
+const temporaryDirectories: string[] = [];
 
 afterEach(() => {
   for (const directory of temporaryDirectories.splice(0)) {
@@ -27,7 +27,7 @@ function fixture() {
   return root;
 }
 
-function git(command, args) {
+function git(command: string, args: readonly string[]): string {
   assert.equal(command, 'git');
   if (args[0] === 'rev-parse') return 'a'.repeat(40);
   return '';
@@ -80,7 +80,7 @@ describe('MongoDB identity attestation', () => {
   test('records versions and hashes replica-set endpoints', async () => {
     const database = {
       admin: () => ({
-        command: async (command) => {
+        command: async (command: Record<string, unknown>): Promise<Record<string, unknown>> => {
           if (command.buildInfo) return { version: '8.0.1' };
           if (command.getParameter) {
             return { featureCompatibilityVersion: { version: '8.0' } };
@@ -97,7 +97,7 @@ describe('MongoDB identity attestation', () => {
 
     assert.equal(identity.topology, 'replica_set');
     assert.equal(identity.members.length, 2);
-    assert.equal(identity.members[0].role, 'primary');
+    assert.equal(identity.members[0]?.role, 'primary');
     assert.doesNotMatch(JSON.stringify(identity), /127\.0\.0\.1/u);
   });
 });

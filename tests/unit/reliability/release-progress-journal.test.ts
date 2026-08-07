@@ -14,7 +14,7 @@ import {
   ProgressJournalCorruptionError,
 } from '../../../reliability/release-audit/progress-journal.js';
 
-const temporaryDirectories = [];
+const temporaryDirectories: string[] = [];
 
 async function createJournalPath() {
   const directory = await mkdtemp(join(tmpdir(), 'release-progress-'));
@@ -22,11 +22,12 @@ async function createJournalPath() {
   return join(directory, 'progress.ndjson');
 }
 
-function validateEvent(event) {
+function validateEvent(event: unknown): boolean {
   if (
     !event
     || typeof event !== 'object'
-    || !Number.isSafeInteger(event.sequence)
+    || !('sequence' in event) || typeof event.sequence !== 'number' || !Number.isSafeInteger(event.sequence)
+    || !('kind' in event)
     || typeof event.kind !== 'string'
   ) {
     throw new TypeError('invalid progress event');
@@ -34,7 +35,7 @@ function validateEvent(event) {
   return true;
 }
 
-function event(sequence, kind = 'heartbeat') {
+function event(sequence: number, kind = 'heartbeat'): { auditId: string; sequence: number; kind: string } {
   return { auditId: 'audit-1', sequence, kind };
 }
 

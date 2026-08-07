@@ -6,6 +6,16 @@ import {
   truncate,
 } from 'node:fs/promises';
 import { dirname } from 'node:path';
+import type { FileHandle } from 'node:fs/promises';
+
+interface SequenceEvent { readonly sequence: number; readonly [key: string]: unknown }
+type EventValidator = (event: unknown) => unknown | Promise<unknown>;
+interface JournalRecovery { readonly eventCount: number; readonly firstSequence: number | null; readonly lastSequence: number | null; readonly recoveredTornTail: boolean }
+interface OpenJournalOptions { readonly journalPath: string; readonly validateEvent: EventValidator; readonly maxEventBytes?: number; readonly maxJournalBytes?: number }
+
+function errorCode(error: unknown): string | undefined {
+  return error instanceof Error && 'code' in error && typeof error.code === 'string' ? error.code : undefined;
+}
 
 /** Runtime ceiling shared with progress ingestion and artifact validation. */
 export const PROGRESS_EVENT_MAX_BYTES = 4 * 1024;
@@ -17,18 +27,19 @@ export const PROGRESS_JOURNAL_MAX_BYTES = 64 * 1024 * 1024;
  * Error raised when a journal cannot be trusted as a contiguous event ledger.
  */
 export class ProgressJournalCorruptionError extends Error {
+  readonly recordNumber: number | null;
   /**
    * Creates a corruption error with its one-based record coordinate.
    */
-  constructor(message, { recordNumber = null, cause } = {}) {
+  constructor(message: string, { recordNumber = null, cause }: { recordNumber?: number | null; cause?: unknown } = {}) {
     super(message, { cause });
     this.name = 'ProgressJournalCorruptionError';
     this.recordNumber = recordNumber;
   }
 }
 
-function assertSequence(event, expectedSequence, recordNumber) {
-  if (!Number.isSafeInteger(event?.sequence) || event.sequence < 1) {
+function assertSequence(event: unknown, expectedSequence: number, recordNumber: number): asserts event is SequenceEvent {
+  if (!event || typeof event !== 'object' || !('sequence' in event) || typeof event.sequence !== 'number' || !Number.isSafeInteger(event.sequence) || event.sequence < 1) {
     throw new ProgressJournalCorruptionError(
       `Progress record ${recordNumber} has an invalid sequence`,
       { recordNumber },
@@ -42,7 +53,7 @@ function assertSequence(event, expectedSequence, recordNumber) {
   }
 }
 
-async function validateRecord(validateEvent, event, recordNumber) {
+async function validateRecord(validateEvent: EventValidator, event: unknown, recordNumber: number): Promise<void> {
   try {
     const validationResult = await validateEvent(event);
     if (validationResult === false) {
@@ -56,8 +67,8 @@ async function validateRecord(validateEvent, event, recordNumber) {
   }
 }
 
-async function parseCompleteRecord(line, recordNumber, validateEvent, expectedSequence) {
-  let event;
+async function parseCompleteRecord(line: Buffer, recordNumber: number, validateEvent: EventValidator, expectedSequence: number): Promise<SequenceEvent> {
+  let event: unknown;
   try {
     event = JSON.parse(line.toString('utf8'));
   } catch (error) {
@@ -76,12 +87,12 @@ async function recoverJournal({
   validateEvent,
   maxEventBytes,
   maxJournalBytes,
-}) {
-  let contents;
+}: { journalPath: string; validateEvent: EventValidator; maxEventBytes: number; maxJournalBytes: number }): Promise<JournalRecovery> {
+  let contents: Buffer;
   try {
     contents = await readFile(journalPath);
   } catch (error) {
-    if (error.code === 'ENOENT') {
+    if (errorCode(error) === 'ENOENT') {
       return {
         eventCount: 0,
         firstSequence: null,
@@ -100,7 +111,7 @@ async function recoverJournal({
 
   let cursor = 0;
   let recordNumber = 0;
-  let lastSequence = null;
+  let lastSequence: number | null = null;
   while (cursor < contents.byteLength) {
     const newlineIndex = contents.indexOf(0x0a, cursor);
     if (newlineIndex === -1) break;
@@ -138,7 +149,7 @@ async function recoverJournal({
         { recordNumber: recordNumber + 1 },
       );
     }
-    let parsedTail;
+    let parsedTail: unknown;
     try {
       parsedTail = JSON.parse(tail.toString('utf8'));
     } catch {
@@ -171,7 +182,7 @@ async function recoverJournal({
   };
 }
 
-async function writeCompleteBuffer(fileHandle, buffer) {
+async function writeCompleteBuffer(fileHandle: FileHandle, buffer: Buffer): Promise<void> {
   let offset = 0;
   while (offset < buffer.byteLength) {
     const { bytesWritten } = await fileHandle.write(
@@ -191,22 +202,23 @@ async function writeCompleteBuffer(fileHandle, buffer) {
  * Crash-consistent append-only event journal for a single release audit.
  */
 export class ProgressJournal {
-  #fileHandle;
-  #journalPath;
-  #validateEvent;
-  #maxEventBytes;
-  #eventCount;
-  #firstSequence;
-  #lastSequence;
+  readonly recoveredTornTail: boolean;
+  #fileHandle: FileHandle;
+  #journalPath: string;
+  #validateEvent: EventValidator;
+  #maxEventBytes: number;
+  #eventCount: number;
+  #firstSequence: number | null;
+  #lastSequence: number | null;
   #closed = false;
 
-  constructor({
+  private constructor({
     fileHandle,
     journalPath,
     validateEvent,
     maxEventBytes,
     recovery,
-  }) {
+  }: { fileHandle: FileHandle; journalPath: string; validateEvent: EventValidator; maxEventBytes: number; recovery: JournalRecovery }) {
     this.#fileHandle = fileHandle;
     this.#journalPath = journalPath;
     this.#validateEvent = validateEvent;
@@ -225,7 +237,7 @@ export class ProgressJournal {
     validateEvent,
     maxEventBytes = PROGRESS_EVENT_MAX_BYTES,
     maxJournalBytes = PROGRESS_JOURNAL_MAX_BYTES,
-  }) {
+  }: OpenJournalOptions): Promise<ProgressJournal> {
     if (typeof journalPath !== 'string' || journalPath.length === 0) {
       throw new TypeError('journalPath must be a non-empty string');
     }
@@ -257,19 +269,19 @@ export class ProgressJournal {
   }
 
   /** Highest committed sequence, or null for an empty journal. */
-  get lastSequence() {
+  get lastSequence(): number | null {
     return this.#lastSequence;
   }
 
   /** Number of complete, validated records in the journal. */
-  get eventCount() {
+  get eventCount(): number {
     return this.#eventCount;
   }
 
   /**
    * Validates, appends, flushes, and fsyncs one event before returning it.
    */
-  async append(event) {
+  async append<Event extends SequenceEvent>(event: Event): Promise<Event> {
     if (this.#closed) {
       throw new Error('Cannot append to a closed progress journal');
     }
@@ -277,7 +289,7 @@ export class ProgressJournal {
     await validateRecord(this.#validateEvent, event, recordNumber);
     assertSequence(event, recordNumber, recordNumber);
 
-    let serialized;
+    let serialized: string | undefined;
     try {
       serialized = JSON.stringify(event);
     } catch (error) {
@@ -303,7 +315,7 @@ export class ProgressJournal {
   /**
    * Closes the journal and returns its immutable digest and sequence bounds.
    */
-  async seal() {
+  async seal(): Promise<Readonly<{ algorithm: 'sha256'; digest: string; byteLength: number; eventCount: number; firstSequence: number | null; lastSequence: number | null }>> {
     if (this.#closed) {
       throw new Error('Progress journal is already closed');
     }
@@ -323,7 +335,7 @@ export class ProgressJournal {
   /**
    * Closes without sealing, for abort paths that cannot finalize a manifest.
    */
-  async close() {
+  async close(): Promise<void> {
     if (this.#closed) return;
     this.#closed = true;
     await this.#fileHandle.close();

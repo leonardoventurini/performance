@@ -1,6 +1,7 @@
 import {
   CAPABILITY_EXPECTATIONS,
   coordinateKey,
+  validateCaseCoordinate,
   validateAuditCaseResult,
   validateNegativeControlResult,
   validateProgressReference,
@@ -21,19 +22,108 @@ import {
   REQUIRED_NEGATIVE_CONTROLS,
 } from './capability-registry.js';
 import { resolveReleaseAuditMatrix } from './matrix.js';
+import type { CaseCoordinate } from '../contracts/release-audit.js';
+import type { Capability } from './capability-registry.js';
 
-function same(value, expected) {
+type UnknownRecord = Record<string, unknown>;
+interface ReleaseIdentity extends UnknownRecord { readonly harnessDirty: boolean; readonly requested: string; readonly actual: string }
+interface OracleEvidence extends UnknownRecord { readonly assertions: number; readonly passed: boolean; readonly producer: string; readonly family: string; readonly digest: string }
+interface ObserverEvidence extends UnknownRecord { readonly requestedOrder: readonly string[]; readonly actualDriver: string; readonly fallbackFrom?: string; readonly fallbackReason?: string }
+interface FaultWitness extends UnknownRecord { readonly faultId: string; readonly restored: boolean; readonly activationEvidenceDigest: string; readonly restorationEvidenceDigest: string }
+interface MongoIdentity extends UnknownRecord { readonly topology: string; readonly serverVersion: string; readonly featureCompatibilityVersion: string }
+interface AuditCaseResult extends UnknownRecord { readonly status: string; readonly reasons: readonly string[]; readonly release: ReleaseIdentity; readonly contractId: string; readonly contractDigest: string; readonly caseDefinitionDigest: string; readonly interpreterVersion: string; readonly oracles: readonly OracleEvidence[]; readonly observerEvidence: readonly ObserverEvidence[]; readonly coordinate: CaseCoordinate; readonly faultWitness?: FaultWitness; readonly attemptId: string; readonly mongo: MongoIdentity }
+interface CaseContract extends UnknownRecord { readonly definitionDigest: string; readonly requiredOracleProducers: readonly string[]; readonly requiresObserverEvidence: boolean; readonly requiresTransportIdentity: boolean; readonly expectation: string; readonly expectedDriverByTopology?: Readonly<Record<string, string>>; readonly expectedDriver?: string; readonly fallbackFrom?: string }
+interface NegativeControl extends UnknownRecord { readonly controlId: string; readonly expectedReason: string; readonly actualReason: string; readonly detected: boolean }
+interface RecoveryEvidence extends UnknownRecord { readonly digest: string; readonly runDocumentsRemoved: boolean; readonly topologyRestored: boolean; readonly profilerRestored: boolean; readonly networkRestored: boolean }
+interface StatusResult { readonly status: string; readonly reasons: readonly string[] }
+export interface ReleaseManifestCapability extends UnknownRecord { readonly id: string; readonly status: string; readonly coordinates: readonly CaseCoordinate[]; readonly reasons: readonly string[] }
+export interface ReleaseAuditManifest extends UnknownRecord { readonly status: string; readonly capabilities: readonly ReleaseManifestCapability[]; readonly cases: readonly UnknownRecord[] }
+
+function isRecord(value: unknown): value is UnknownRecord { return Boolean(value) && typeof value === 'object' && !Array.isArray(value); }
+function releaseIdentity(value: unknown): ReleaseIdentity {
+  const result = validateReleaseIdentity(value);
+  if (typeof result.harnessDirty !== 'boolean' || typeof result.requested !== 'string' || typeof result.actual !== 'string') throw new TypeError('validated release identity has invalid shape');
+  return { ...result, harnessDirty: result.harnessDirty, requested: result.requested, actual: result.actual };
+}
+function caseResult(value: unknown, path: string): AuditCaseResult {
+  const result = validateAuditCaseResult(value, path);
+  if (typeof result.status !== 'string' || !Array.isArray(result.reasons) || !result.reasons.every((entry) => typeof entry === 'string')
+    || !isRecord(result.release) || !isRecord(result.coordinate) || !isRecord(result.mongo)
+    || typeof result.attemptId !== 'string' || !Array.isArray(result.oracles) || !Array.isArray(result.observerEvidence)
+    || typeof result.contractId !== 'string' || typeof result.contractDigest !== 'string' || typeof result.caseDefinitionDigest !== 'string' || typeof result.interpreterVersion !== 'string') throw new TypeError(`${path} has invalid validated shape`);
+  const release = releaseIdentity(result.release);
+  const coordinate = validateCaseCoordinate(result.coordinate);
+  const mongo = result.mongo;
+  if (typeof mongo.topology !== 'string' || typeof mongo.serverVersion !== 'string' || typeof mongo.featureCompatibilityVersion !== 'string') throw new TypeError(`${path}.mongo has invalid shape`);
+  const oracles = result.oracles.map((oracle, index) => {
+    if (!isRecord(oracle) || typeof oracle.assertions !== 'number' || typeof oracle.passed !== 'boolean' || typeof oracle.producer !== 'string' || typeof oracle.family !== 'string' || typeof oracle.digest !== 'string') throw new TypeError(`${path}.oracles[${index}] has invalid shape`);
+    return { ...oracle, assertions: oracle.assertions, passed: oracle.passed, producer: oracle.producer, family: oracle.family, digest: oracle.digest };
+  });
+  const observerEvidence = result.observerEvidence.map((evidence, index) => {
+    if (!isRecord(evidence) || !Array.isArray(evidence.requestedOrder) || !evidence.requestedOrder.every((entry) => typeof entry === 'string') || typeof evidence.actualDriver !== 'string') throw new TypeError(`${path}.observerEvidence[${index}] has invalid shape`);
+    return { ...evidence, requestedOrder: evidence.requestedOrder, actualDriver: evidence.actualDriver, ...(typeof evidence.fallbackFrom === 'string' ? { fallbackFrom: evidence.fallbackFrom } : {}), ...(typeof evidence.fallbackReason === 'string' ? { fallbackReason: evidence.fallbackReason } : {}) };
+  });
+  let faultWitness: FaultWitness | undefined;
+  if (result.faultWitness !== undefined) {
+    const witness = result.faultWitness;
+    if (!isRecord(witness) || typeof witness.faultId !== 'string' || typeof witness.restored !== 'boolean' || typeof witness.activationEvidenceDigest !== 'string' || typeof witness.restorationEvidenceDigest !== 'string') throw new TypeError(`${path}.faultWitness has invalid shape`);
+    faultWitness = { ...witness, faultId: witness.faultId, restored: witness.restored, activationEvidenceDigest: witness.activationEvidenceDigest, restorationEvidenceDigest: witness.restorationEvidenceDigest };
+  }
+  return { ...result, status: result.status, reasons: result.reasons, release, contractId: result.contractId, contractDigest: result.contractDigest, caseDefinitionDigest: result.caseDefinitionDigest, interpreterVersion: result.interpreterVersion, oracles, observerEvidence, coordinate, ...(faultWitness === undefined ? {} : { faultWitness }), attemptId: result.attemptId, mongo: { ...mongo, topology: mongo.topology, serverVersion: mongo.serverVersion, featureCompatibilityVersion: mongo.featureCompatibilityVersion } };
+}
+function negativeControl(value: unknown, path: string): NegativeControl {
+  const result = validateNegativeControlResult(value, path);
+  if (typeof result.controlId !== 'string' || typeof result.expectedReason !== 'string' || typeof result.actualReason !== 'string' || typeof result.detected !== 'boolean') throw new TypeError(`${path} has invalid shape`);
+  return { ...result, controlId: result.controlId, expectedReason: result.expectedReason, actualReason: result.actualReason, detected: result.detected };
+}
+function recoveryEvidence(value: unknown): RecoveryEvidence {
+  const result = validateRecoveryEvidence(value);
+  if (typeof result.digest !== 'string' || typeof result.runDocumentsRemoved !== 'boolean' || typeof result.topologyRestored !== 'boolean' || typeof result.profilerRestored !== 'boolean' || typeof result.networkRestored !== 'boolean') throw new TypeError('recovery has invalid shape');
+  return { ...result, digest: result.digest, runDocumentsRemoved: result.runDocumentsRemoved, topologyRestored: result.topologyRestored, profilerRestored: result.profilerRestored, networkRestored: result.networkRestored };
+}
+function caseContract(value: unknown): CaseContract | undefined {
+  if (!isRecord(value) || typeof value.definitionDigest !== 'string' || !Array.isArray(value.requiredOracleProducers)
+    || !value.requiredOracleProducers.every((entry) => typeof entry === 'string') || typeof value.requiresObserverEvidence !== 'boolean'
+    || typeof value.requiresTransportIdentity !== 'boolean' || typeof value.expectation !== 'string') return undefined;
+  let expectedDriverByTopology: Record<string, string> | undefined;
+  if (isRecord(value.expectedDriverByTopology)) {
+    const entries = Object.entries(value.expectedDriverByTopology);
+    if (entries.every(([, entry]) => typeof entry === 'string')) {
+      expectedDriverByTopology = {};
+      for (const [key, entry] of entries) {
+        if (typeof entry === 'string') expectedDriverByTopology[key] = entry;
+      }
+    }
+  }
+  return { ...value, definitionDigest: value.definitionDigest, requiredOracleProducers: value.requiredOracleProducers, requiresObserverEvidence: value.requiresObserverEvidence, requiresTransportIdentity: value.requiresTransportIdentity, expectation: value.expectation, ...(expectedDriverByTopology === undefined ? {} : { expectedDriverByTopology }), ...(typeof value.expectedDriver === 'string' ? { expectedDriver: value.expectedDriver } : {}), ...(typeof value.fallbackFrom === 'string' ? { fallbackFrom: value.fallbackFrom } : {}) };
+}
+function releaseManifest(value: unknown): ReleaseAuditManifest {
+  const result = validateReleaseAuditManifest(value);
+  if (typeof result.status !== 'string' || !Array.isArray(result.capabilities) || !Array.isArray(result.cases)) throw new TypeError('validated manifest has invalid shape');
+  const capabilities = result.capabilities.map((entry, index) => {
+    if (!isRecord(entry) || typeof entry.id !== 'string' || typeof entry.status !== 'string' || !Array.isArray(entry.coordinates)
+      || !Array.isArray(entry.reasons) || !entry.reasons.every((reason) => typeof reason === 'string')) throw new TypeError(`manifest.capabilities[${index}] has invalid shape`);
+    return { ...entry, id: entry.id, status: entry.status, coordinates: entry.coordinates.map((coordinate) => validateCaseCoordinate(coordinate)), reasons: entry.reasons };
+  });
+  const cases = result.cases.map((entry, index) => {
+    if (!isRecord(entry)) throw new TypeError(`manifest.cases[${index}] has invalid shape`);
+    return entry;
+  });
+  return { ...result, status: result.status, capabilities, cases };
+}
+
+function same(value: unknown, expected: unknown): boolean {
   return contractDigest(value) === contractDigest(expected);
 }
 
 /** Applies the production release-identity gate before evidence is aggregated. */
-export function releaseIdentityStatus(candidate, expected) {
+export function releaseIdentityStatus(candidate: unknown, expected?: unknown): StatusResult {
   if (candidate === undefined || candidate === null) {
     return { status: 'incomplete', reasons: ['release_identity_missing'] };
   }
   let validated;
   try {
-    validated = validateReleaseIdentity(candidate);
+    validated = releaseIdentity(candidate);
   } catch {
     return { status: 'incomplete', reasons: ['release_identity_invalid'] };
   }
@@ -45,7 +135,7 @@ export function releaseIdentityStatus(candidate, expected) {
 }
 
 /** Applies the production case-artifact gate and returns its exact rejection reason. */
-export function caseEvidenceStatus(result, contract) {
+export function caseEvidenceStatus(result: AuditCaseResult, contract: CaseContract | undefined): StatusResult {
   if (result.status === 'failed') return { status: 'failed', reasons: result.reasons };
   if (result.status === 'incomplete' || result.status === 'not_applicable') {
     return { status: 'incomplete', reasons: result.reasons };
@@ -142,7 +232,7 @@ export function caseEvidenceStatus(result, contract) {
 }
 
 /** Applies the production required-coordinate gate to all attempts for one coordinate. */
-export function logicalCoordinateStatus(attempts, contract) {
+export function logicalCoordinateStatus(attempts: readonly AuditCaseResult[], contract: CaseContract | undefined): StatusResult {
   if (attempts.length === 0) {
     return { status: 'incomplete', reasons: ['required_coordinate_missing'] };
   }
@@ -154,12 +244,12 @@ export function logicalCoordinateStatus(attempts, contract) {
   return { status: 'passed', reasons: [] };
 }
 
-function negativeControlsComplete(results, suppliedDigest) {
+function negativeControlsComplete(results: readonly NegativeControl[], suppliedDigest: string): boolean {
   if (suppliedDigest !== NEGATIVE_CONTROL_CONTRACT_DIGEST) return false;
   const expectedById = new Map(REQUIRED_NEGATIVE_CONTROLS
     .map((control) => [control.controlId, control]));
   if (results.length !== expectedById.size) return false;
-  const seen = new Set();
+  const seen = new Set<string>();
   for (const result of results) {
     if (seen.has(result.controlId)) return false;
     seen.add(result.controlId);
@@ -175,7 +265,7 @@ function negativeControlsComplete(results, suppliedDigest) {
 }
 
 /** Applies the production restoration gate and preserves an actionable reason. */
-export function recoveryEvidenceStatus(recovery) {
+export function recoveryEvidenceStatus(recovery: RecoveryEvidence): StatusResult {
   const evidence = {
     runDocumentsRemoved: recovery.runDocumentsRemoved,
     topologyRestored: recovery.topologyRestored,
@@ -210,8 +300,8 @@ export function aggregateReleaseAudit({
   progress,
   registry = RELEASE_CAPABILITY_REGISTRY,
   capabilityContractDigest = RELEASE_CAPABILITY_CONTRACT_DIGEST,
-}) {
-  const validatedRelease = validateReleaseIdentity(release);
+}: { release: unknown; topologyScope: readonly string[]; transportScope: readonly string[]; seed: number; caseResults: readonly unknown[]; negativeControls: readonly unknown[]; negativeControlContractDigest: string; recovery: unknown; progress: unknown; registry?: readonly Capability[]; capabilityContractDigest?: string }): ReleaseAuditManifest {
+  const validatedRelease = releaseIdentity(release);
   if (!Array.isArray(caseResults)) throw new TypeError('caseResults must be an array');
   if (!Array.isArray(negativeControls)) {
     throw new TypeError('negativeControls must be an array');
@@ -221,16 +311,16 @@ export function aggregateReleaseAudit({
   }
   const matrix = resolveReleaseAuditMatrix({ topologyScope, transportScope, seed, registry });
   const requiredCoordinateKeys = new Set(matrix.coordinates.map(coordinateKey));
-  const attemptsByCoordinate = new Map();
-  const seenAttempts = new Set();
+  const attemptsByCoordinate = new Map<string, AuditCaseResult[]>();
+  const seenAttempts = new Set<string>();
   let identityIncomplete = validatedRelease.harnessDirty
     || validatedRelease.requested !== validatedRelease.actual;
   let unknownEvidence = false;
-  let mongoVersion;
-  let mongoFcv;
+  let mongoVersion: string | undefined;
+  let mongoFcv: string | undefined;
 
   const validatedCases = caseResults.map((result, index) => {
-    const validated = validateAuditCaseResult(result, `caseResults[${index}]`);
+    const validated = caseResult(result, `caseResults[${index}]`);
     const coordinate = coordinateKey(validated.coordinate);
     const attemptKey = `${coordinate}|${validated.attemptId}`;
     if (seenAttempts.has(attemptKey)) {
@@ -254,7 +344,7 @@ export function aggregateReleaseAudit({
     return validated;
   });
 
-  const capabilityIds = new Set();
+  const capabilityIds = new Set<string>();
   const capabilities = registry.map((capability) => {
     if (capabilityIds.has(capability.id)) {
       throw new TypeError(`duplicate capability identifier ${capability.id}`);
@@ -274,9 +364,10 @@ export function aggregateReleaseAudit({
       };
     }
     const keys = matrix.requiredByCapability[capability.id];
+    if (keys === undefined) throw new TypeError(`capability ${capability.id} is absent from the resolved matrix`);
     const outcomes = keys.map((key) => logicalCoordinateStatus(
       attemptsByCoordinate.get(key) || [],
-      RELEASE_CASE_CONTRACTS[key.split('|')[0]],
+      caseContract(RELEASE_CASE_CONTRACTS[key.split('|')[0] ?? '']),
     ));
     const coordinates = keys.map((key) => matrix.coordinates
       .find((coordinate) => coordinateKey(coordinate) === key));
@@ -312,9 +403,9 @@ export function aggregateReleaseAudit({
   });
 
   const controls = negativeControls.map((control, index) => (
-    validateNegativeControlResult(control, `negativeControls[${index}]`)
+    negativeControl(control, `negativeControls[${index}]`)
   ));
-  const validatedRecovery = validateRecoveryEvidence(recovery);
+  const validatedRecovery = recoveryEvidence(recovery);
   const validatedProgress = validateProgressReference(progress);
   const hasFailedCapability = capabilities.some(({ status }) => status === 'failed');
   const hasIncompleteCapability = capabilities.some(({ status }) => status === 'incomplete');
@@ -327,7 +418,7 @@ export function aggregateReleaseAudit({
     ? 'non_conformant'
     : completionIncomplete ? 'incomplete' : 'conformant';
 
-  return validateReleaseAuditManifest({
+  return releaseManifest({
     schemaVersion: 1,
     contract: {
       id: RELEASE_CAPABILITY_CONTRACT_ID,

@@ -7,8 +7,9 @@ import {
   createCaseExecution,
   createReleaseExecution,
 } from '../../../reliability/release-audit/state-machine.js';
+import type { CaseExecutionState, ReleaseExecutionState } from '../../../reliability/release-audit/state-machine.js';
 
-function advanceCaseThrough(states) {
+function advanceCaseThrough(states: readonly CaseExecutionState[]) {
   return states.reduce(
     (execution, state) => advanceCaseExecution(execution, state),
     createCaseExecution(),
@@ -125,12 +126,12 @@ describe('release audit case execution state', () => {
 
 describe('release coordinator execution state', () => {
   test('permits a complete conformance decision path', () => {
-    const execution = [
+    const execution = ([
       'identity_verified',
       'executing',
       'aggregating',
       'conformant',
-    ].reduce(
+    ] satisfies readonly ReleaseExecutionState[]).reduce(
       (current, state) => advanceReleaseExecution(current, state),
       createReleaseExecution(),
     );

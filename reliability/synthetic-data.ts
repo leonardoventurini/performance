@@ -8,7 +8,45 @@ const MAX_MUTATIONS = 25;
 const MAX_TIMEOUT_MS = 10 * 60 * 1_000;
 const MAX_GENERATED_PAYLOAD_BYTES = 1024 * 1024 * 1024;
 
-function createRandom(seed) {
+type RandomSource = () => number;
+
+export interface SyntheticDocumentOptions {
+  readonly runId: string;
+  readonly sequence: number;
+  readonly revision: number;
+  readonly payloadBytes: number;
+  readonly seed: number;
+}
+
+export interface WorkloadOptions {
+  readonly subscribers: number;
+  readonly documents: number;
+  readonly mutations: number;
+  readonly payloadBytes: number;
+  readonly burstSize: number;
+  readonly timeoutMs: number;
+  readonly seed: number;
+}
+export interface SyntheticDocument extends Record<string, unknown> {
+  readonly _id: string;
+  readonly runId: string;
+  readonly sequence: number;
+  readonly revision: number;
+  readonly payload: string;
+  readonly payloadDigest: string;
+  readonly adversarial: {
+    readonly unicode: string;
+    readonly scalarBoundaries: { readonly maximumSafeInteger: number };
+    readonly [key: string]: unknown;
+  };
+  readonly structureDigest: string;
+}
+
+interface BsonObjectIdLike { readonly _bsontype: 'ObjectId'; toHexString(): string }
+interface BsonBinaryLike { readonly _bsontype: 'Binary'; readonly buffer: ArrayBufferView; readonly position: number; readonly sub_type: number }
+type CanonicalValue = readonly unknown[];
+
+function createRandom(seed: number): RandomSource {
   let state = seed >>> 0;
   return () => {
     state ^= state << 13;
@@ -18,7 +56,7 @@ function createRandom(seed) {
   };
 }
 
-function makePayload(byteLength, random, revision) {
+function makePayload(byteLength: number, random: RandomSource, revision: number): string {
   const alphabet = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
   const prefix = `revision:${revision}|`;
   const chunkLength = Math.min(4096, Math.max(1, byteLength - prefix.length));
@@ -29,15 +67,27 @@ function makePayload(byteLength, random, revision) {
   return (prefix + chunk.repeat(Math.ceil(byteLength / chunk.length))).slice(0, byteLength);
 }
 
-export function payloadDigest(payload) {
+export function payloadDigest(payload: string): string {
   return crypto.createHash('sha256').update(payload).digest('hex');
 }
 
-export function structureDigest(value) {
+export function structureDigest(value: unknown): string {
   return crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
 
-function canonicalize(value) {
+function isObjectIdLike(value: object): value is BsonObjectIdLike {
+  return '_bsontype' in value && value._bsontype === 'ObjectId'
+    && 'toHexString' in value && typeof value.toHexString === 'function';
+}
+
+function isBinaryLike(value: object): value is BsonBinaryLike {
+  return '_bsontype' in value && value._bsontype === 'Binary'
+    && 'buffer' in value && ArrayBuffer.isView(value.buffer)
+    && 'position' in value && typeof value.position === 'number'
+    && 'sub_type' in value && typeof value.sub_type === 'number';
+}
+
+function canonicalize(value: unknown): CanonicalValue {
   if (value === null) return ['null'];
   if (value === undefined) return ['undefined'];
   if (typeof value === 'string') return ['string', value];
@@ -56,23 +106,28 @@ function canonicalize(value) {
     if (ArrayBuffer.isView(value)) {
       return ['binary', 0, Buffer.from(value.buffer, value.byteOffset, value.byteLength).toString('base64')];
     }
-    if (value._bsontype === 'ObjectId' && typeof value.toHexString === 'function') {
+    if (isObjectIdLike(value)) {
       return ['object_id', value.toHexString()];
     }
-    if (value._bsontype === 'Binary' && ArrayBuffer.isView(value.buffer)) {
-      const bytes = value.buffer.subarray(0, value.position);
+    if (isBinaryLike(value)) {
+      const bytes = Buffer.from(
+        value.buffer.buffer,
+        value.buffer.byteOffset,
+        Math.min(value.position, value.buffer.byteLength),
+      );
       return ['binary', value.sub_type, Buffer.from(bytes).toString('base64')];
     }
-    return ['object', Object.keys(value).sort().map((key) => [key, canonicalize(value[key])])];
+    return ['object', Object.entries(value).sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, child]) => [key, canonicalize(child)])];
   }
   return [typeof value, String(value)];
 }
 
-export function documentDigest(value) {
+export function documentDigest(value: unknown): string {
   return crypto.createHash('sha256').update(JSON.stringify(canonicalize(value))).digest('hex');
 }
 
-export function buildSyntheticDocument({ runId, sequence, revision, payloadBytes, seed }) {
+export function buildSyntheticDocument({ runId, sequence, revision, payloadBytes, seed }: SyntheticDocumentOptions): SyntheticDocument {
   const random = createRandom((seed + sequence * 31 + revision * 997) >>> 0);
   const payload = makePayload(payloadBytes, random, revision);
   const adversarial = {
@@ -101,8 +156,8 @@ export function buildSyntheticDocument({ runId, sequence, revision, payloadBytes
   };
 }
 
-export function validateWorkloadOptions(options) {
-  const integerFields = ['subscribers', 'documents', 'mutations', 'payloadBytes', 'burstSize', 'timeoutMs', 'seed'];
+export function validateWorkloadOptions<T extends WorkloadOptions>(options: T): T {
+  const integerFields = ['subscribers', 'documents', 'mutations', 'payloadBytes', 'burstSize', 'timeoutMs', 'seed'] as const;
   for (const field of integerFields) {
     if (!Number.isSafeInteger(options[field]) || options[field] < (field === 'seed' ? 0 : 1)) {
       throw new Error(`${field} must be a ${field === 'seed' ? 'non-negative' : 'positive'} integer`);
@@ -125,7 +180,7 @@ export function validateWorkloadOptions(options) {
   return options;
 }
 
-export function isLoopbackMongoUri(uri) {
+export function isLoopbackMongoUri(uri: string): boolean {
   const authority = uri.match(/^mongodb(?:\+srv)?:\/\/([^/]+)/)?.[1];
   if (!authority) return false;
   const hosts = authority.replace(/^.*@/, '').split(',');
@@ -133,6 +188,7 @@ export function isLoopbackMongoUri(uri) {
     const hostname = host.startsWith('[')
       ? host.slice(1, host.indexOf(']'))
       : host.split(':')[0];
+    if (hostname === undefined) return false;
     if (hostname === 'localhost' || hostname === '::1') return true;
     return net.isIP(hostname) === 4 && hostname.startsWith('127.');
   });

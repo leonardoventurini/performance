@@ -6,7 +6,7 @@ import { afterEach, describe, test } from 'node:test';
 import { coordinateReleaseAudit } from '../../../reliability/release-audit/coordinator.js';
 import { validateReleaseAuditArtifact } from '../../../cli/release-audit-validate.js';
 
-const directories = [];
+const directories: string[] = [];
 const DIGEST = 'a'.repeat(64);
 const RELEASE = {
   requested: '3.5.1-beta.0',
@@ -56,8 +56,13 @@ describe('release audit coordinator', () => {
     const events = fs.readFileSync(
       path.join(result.artifactRoot, 'progress.ndjson'),
       'utf8',
-    ).trim().split('\n').map(JSON.parse);
-    assert.equal(events.at(-1).kind, 'audit_completed');
+    ).trim().split('\n').map((line): { kind: string; sequence: number } => {
+      const parsed: unknown = JSON.parse(line);
+      assert.ok(parsed && typeof parsed === 'object' && 'kind' in parsed && typeof parsed.kind === 'string'
+        && 'sequence' in parsed && typeof parsed.sequence === 'number');
+      return { kind: parsed.kind, sequence: parsed.sequence };
+    });
+    assert.equal(events.at(-1)?.kind, 'audit_completed');
     assert.deepEqual(
       events.map(({ sequence }) => sequence),
       Array.from({ length: events.length }, (_, index) => index + 1),
