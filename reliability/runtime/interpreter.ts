@@ -69,7 +69,7 @@ type PrimitiveHandler = (invocation: PrimitiveInvocation) => Promise<unknown>;
 
 /** Closed primitive registry consumed by the interpreter. */
 export interface DeclarativePrimitiveRegistry {
-  readonly steps: Readonly<Partial<Record<DeclarativeStep['kind'], PrimitiveHandler>>>;
+  readonly steps: Readonly<Record<string, PrimitiveHandler | undefined>>;
   readonly wait: Readonly<Record<string, PrimitiveHandler>>;
   readonly clientLifecycle: Readonly<Record<string, PrimitiveHandler>>;
   readonly fault: Readonly<Record<string, Readonly<Record<'activate' | 'restore', PrimitiveHandler>>>>;
@@ -177,20 +177,40 @@ function resolveValue(reference: DeclarativeValueRef | unknown, state: Interpret
   }
 }
 
-function registryHandler(registry: DeclarativePrimitiveRegistry, step: DeclarativeStep): PrimitiveHandler | undefined {
-  if (step.kind === 'client_lifecycle') return registry.clientLifecycle?.[step.action];
-  if (step.kind === 'fault') return registry.fault?.[step.controller]?.[step.operation];
-  if (step.kind === 'wait') return registry.wait?.[step.predicate];
+interface CoverageStep {
+  readonly kind: string;
+  readonly action?: string;
+  readonly controller?: string;
+  readonly operation?: string;
+  readonly predicate?: string;
+}
+
+function isCoverageStep(value: unknown): value is CoverageStep {
+  return isRuntimeRecord(value) && typeof value.kind === 'string';
+}
+
+function registryHandler(registry: DeclarativePrimitiveRegistry, step: CoverageStep): PrimitiveHandler | undefined {
+  if (step.kind === 'client_lifecycle' && step.action) return registry.clientLifecycle?.[step.action];
+  if (step.kind === 'fault' && step.controller
+      && (step.operation === 'activate' || step.operation === 'restore')) {
+    return registry.fault?.[step.controller]?.[step.operation];
+  }
+  if (step.kind === 'wait' && step.predicate) return registry.wait?.[step.predicate];
   return registry.steps?.[step.kind];
 }
 
 /** Proves that every compiled step resolves to one trusted primitive before side effects. */
 export function validatePlanPrimitiveCoverage(
-  plan: Pick<CompiledCasePlan, 'steps'>,
+  plan: Readonly<{ steps: readonly unknown[] }>,
   registry: DeclarativePrimitiveRegistry,
 ): void {
   const missing: string[] = [];
-  for (const step of plan.steps) {
+  for (const candidate of plan.steps) {
+    if (!isCoverageStep(candidate)) {
+      missing.push('invalid_step');
+      continue;
+    }
+    const step = candidate;
     if (!STEP_KINDS.includes(step.kind) || typeof registryHandler(registry, step) !== 'function') {
       const identity = step.kind === 'client_lifecycle'
         ? `${step.kind}:${step.action}`

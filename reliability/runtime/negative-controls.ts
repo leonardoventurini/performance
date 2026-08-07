@@ -52,9 +52,9 @@ interface RuntimeRecord {
     }>;
     contextEvidence?: Readonly<{ ddpLedgers?: readonly (readonly Readonly<{ direction: string; sequence?: number; message: DdpEvent['message'] }>[])[] }>;
   }>;
-  readonly result: Readonly<{
+  readonly result: Readonly<Record<string, unknown>> & Readonly<{
     status: string;
-    observerEvidence: readonly Readonly<{ fallbackFrom?: string }>[];
+    observerEvidence: readonly (Readonly<Record<string, unknown>> & Readonly<{ fallbackFrom?: string }>)[];
     faultWitness?: unknown;
     release?: unknown;
   }>;
@@ -286,12 +286,13 @@ export function runDeclarativeNegativeControls({
   controls: readonly NegativeControl[];
   records: readonly RuntimeRecord[];
   recovery?: RecoveryEvidence | null;
-  gates?: ProductionGates;
+  gates?: Partial<ProductionGates>;
 }>) {
+  const resolvedGates: ProductionGates = { ...PRODUCTION_GATES, ...gates };
   return Object.freeze(controls.map((control) => {
     const outcome = executeMutation(control, {
       records,
-      gates,
+      gates: resolvedGates,
       ...(recovery === undefined ? {} : { recovery }),
     });
     const detected = outcome?.detected === true;

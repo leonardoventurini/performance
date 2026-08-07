@@ -126,7 +126,7 @@ test('interpreter executes only registered steps, resolves values, and always cl
   assert.ok(cleanup);
   assert.equal(cleanup.cleanup, true);
   assert.match(execution.evidence.digest, /^[a-f0-9]{64}$/);
-  assert.throws(() => { Reflect.set(cleanup, 'cleanup', false); }, TypeError);
+  assert.throws(() => { Object.defineProperty(cleanup, 'cleanup', { value: false }); }, TypeError);
 });
 
 test('interpreter seals binary evidence without attempting to freeze typed-array elements', async () => {

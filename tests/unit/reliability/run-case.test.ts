@@ -15,7 +15,15 @@ test('event insert compiles with the exact runtime adapter inputs', () => {
       observerOrder: ['changeStreams', 'oplog', 'polling'],
     },
   });
-  assert.equal(plan.steps[0].kind, 'subscribe');
-  assert.equal(plan.steps.at(-1).kind, 'seal_evidence');
-  assert.match(plan.digest, /^[a-f0-9]{64}$/);
+  const steps = Reflect.get(plan, 'steps');
+  const digest = Reflect.get(plan, 'digest');
+  assert.ok(Array.isArray(steps));
+  const first = steps[0];
+  const last = steps.at(-1);
+  assert.ok(first && typeof first === 'object');
+  assert.ok(last && typeof last === 'object');
+  assert.equal(Reflect.get(first, 'kind'), 'subscribe');
+  assert.equal(Reflect.get(last, 'kind'), 'seal_evidence');
+  assert.equal(typeof digest, 'string');
+  assert.match(digest, /^[a-f0-9]{64}$/);
 });

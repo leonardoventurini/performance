@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 
-import { Binary, ObjectId } from 'mongodb';
+import { Binary, BSON, ObjectId } from 'mongodb';
 import type { Document } from 'mongodb';
 
 import type {
@@ -9,7 +9,6 @@ import type {
   DeclarativeValueRef,
 } from '../../contracts/declarative-audit.js';
 import { buildSyntheticDocument } from '../../synthetic-data.js';
-import { immutableClone } from '../immutable.js';
 
 type MutableDocument = Record<string, unknown>;
 
@@ -62,8 +61,21 @@ export interface ReliabilityCollection {
   countDocuments(selector: Document): Promise<number>;
 }
 
-function clone<Value>(value: Value): Value {
-  return immutableClone(value);
+function cloneValue(value: unknown): unknown {
+  return BSON.EJSON.deserialize(BSON.EJSON.serialize(value));
+}
+
+function cloneDocument(document: ReliabilityDocument): ReliabilityDocument {
+  const cloned = BSON.deserialize(BSON.serialize(document));
+  return {
+    ...cloned,
+    _id: String(cloned._id),
+    runId: String(cloned.runId),
+    caseExecutionId: String(cloned.caseExecutionId),
+    sequence: Number(cloned.sequence),
+    revision: Number(cloned.revision),
+    ...(typeof cloned.payload === 'string' ? { payload: cloned.payload } : {}),
+  };
 }
 
 function setPath(document: MutableDocument, path: readonly string[], value: unknown): void {
@@ -77,7 +89,7 @@ function setPath(document: MutableDocument, path: readonly string[], value: unkn
     if (!next || typeof next !== 'object' || Array.isArray(next)) throw new Error('document path is not traversable');
     target = Object.fromEntries(Object.entries(next));
   }
-  target[finalPart] = clone(value);
+  target[finalPart] = cloneValue(value);
 }
 
 function deletePath(document: MutableDocument, path: readonly string[]): void {
@@ -191,7 +203,7 @@ function applyTransition(
   resolve: ResolveValue,
 ): ReliabilityDocument | null {
   if (!document) throw new Error('expected-model transition targets a missing document');
-  const next = clone(document);
+  const next = cloneDocument(document);
   if (transition.kind === 'delete') return null;
   if (transition.kind === 'replace') return next;
   if (transition.kind === 'set_field' && transition.path && transition.value) setPath(next, transition.path, resolve(transition.value));
@@ -250,10 +262,12 @@ export function createDatabaseAdapter({ collection, fixture }: Readonly<{
   collection: ReliabilityCollection;
   fixture: DeclarativeFixture;
 }>) {
-  const expected = new Map(fixture.documents.map((document) => [String(document._id), clone(document)]));
+  const expected = new Map(fixture.documents.map((document) => [String(document._id), cloneDocument(document)]));
   const inserted = new Set();
   return Object.freeze({
-    expectedSnapshot: () => [...expected.values()].filter((document) => inserted.has(String(document._id))),
+    expectedSnapshot: () => [...expected.values()]
+      .filter((document) => inserted.has(String(document._id)))
+      .map(cloneDocument),
     async write({ step, resolve }: Readonly<{
       step: DatabaseWriteStep;
       resolve: ResolveValue;
@@ -268,7 +282,7 @@ export function createDatabaseAdapter({ collection, fixture }: Readonly<{
             payloadBytes: Buffer.byteLength(fixtureDocument.payload || ''),
           }) }
           : fixtureDocument;
-        await collection.insertOne(clone(document));
+        await collection.insertOne(cloneDocument(document));
         const transitioned = applyTransition(document, step.expectedTransition, resolve);
         if (transitioned) expected.set(id, transitioned);
         inserted.add(id);
@@ -302,7 +316,11 @@ export function createDatabaseAdapter({ collection, fixture }: Readonly<{
       } else {
         throw new Error(`MongoDB operation ${step.operation} is unavailable`);
       }
-      return { expectedState: clone([...expected.values()].filter((document) => inserted.has(String(document._id)))) };
+      return {
+        expectedState: [...expected.values()]
+          .filter((document) => inserted.has(String(document._id)))
+          .map(cloneDocument),
+      };
     },
     async cleanup({ runId, signal }: Readonly<{ runId: string; signal?: AbortSignal }>) {
       if (signal?.aborted) throw signal.reason;
