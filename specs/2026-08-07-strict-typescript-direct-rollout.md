@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed for direct implementation on `feat/reliability`.
+Implemented and verified on `feat/reliability`.
 
 ## Goal and scope
 
@@ -385,34 +385,34 @@ logs, credentials, or unrelated workspace changes.
 
 ## Direct-rollout execution checklist
 
-- [ ] Capture the pre-conversion root, application, Playwright, collector,
+- [x] Capture the pre-conversion root, application, Playwright, collector,
   dashboard-control, benchmark-result, and declarative-audit evidence; verify:
   existing repository gates and a preflighted smoke artifact; done when parity
   inputs, normalized outcomes, and only the deterministic contract/plan/content
   digests are recorded.
-- [ ] Add TypeScript dependencies, shared strict policy, project references,
+- [x] Add TypeScript dependencies, shared strict policy, project references,
   host declarations, type-test harness, source-inventory gate, clean build,
   asset copier, and build fingerprint; verify: negative configuration and stale
   output tests fail for their intended reasons.
-- [ ] Define the shared config, CLI, process, metric, result, JSON/EJSON/BSON,
+- [x] Define the shared config, CLI, process, metric, result, JSON/EJSON/BSON,
   DDP, MongoDB, and declarative-audit type graph before implementation changes;
   verify: compile-only positive and negative contract fixtures.
-- [ ] Convert root libraries, config, CLI, reporters, runners, drivers,
+- [x] Convert root libraries, config, CLI, reporters, runners, drivers,
   collectors, reliability runtime, and their unit tests to NodeNext TypeScript;
   verify: zero diagnostics and all converted root tests pass from `dist/`.
-- [ ] Convert the GC preload to `.cts`, Playwright journeys to `.ts`, Artillery
+- [x] Convert the GC preload to `.cts`, Playwright journeys to `.ts`, Artillery
   processors and fanout to emitted TypeScript programs, and legacy helpers to
   `.cts`/`.ts`; verify: independent loader probes and subprocess lifecycle
   tests use only current emitted output.
-- [ ] Convert the task app, React client, shared task package, monitor package,
+- [x] Convert the task app, React client, shared task package, monitor package,
   private Meteor adapters, and tests; update Meteor main-module declarations;
   verify: strict app projects, package resolution, Meteor tests, production
   build, and both Playwright journeys.
-- [ ] Convert the dashboard shared contracts, typed collections, Blaze client,
+- [x] Convert the dashboard shared contracts, typed collections, Blaze client,
   server control plane, and tests; retain and strictly check only its host
   config; verify: strict app projects, Meteor tests, production build, CSS
   identity, and audit-control integration.
-- [ ] Switch package scripts, just recipes, workflows, Artillery YAML,
+- [x] Switch package scripts, just recipes, workflows, Artillery YAML,
   dashboard preflight, and documentation to the stable build contract in the
   same rollout; verify: a clean checkout cannot execute stale or missing output.
 - [ ] Run the complete static, unit, integration, browser, application,
