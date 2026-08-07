@@ -17,6 +17,7 @@ const STDERR_LIMIT = 16_384;
 
 interface MongoCollectionLike {
   countDocuments(filter: Document): Promise<number>;
+  deleteMany(filter: Document): Promise<unknown>;
 }
 
 interface MongoDatabaseLike {
@@ -483,6 +484,25 @@ export class OwnedReplicaSet {
     await this.awaitHealthy();
   }
 
+  /**
+   * Performs the environment owner's last-resort cleanup after case-level cleanup.
+   * The exact run filter prevents an aborted primitive from broadening deletion scope.
+   */
+  async restoreAuditState(): Promise<void> {
+    this.assertLiveOwnership();
+    const client = new this.mongoClient(this.uri, { serverSelectionTimeoutMS: 5_000 });
+    try {
+      await client.connect();
+      const database = client.db('meteor');
+      await Promise.all([
+        database.collection('reliabilityDocuments').deleteMany({ runId: this.auditId }),
+        database.command({ profile: 0 }),
+      ]);
+    } finally {
+      await client.close();
+    }
+  }
+
   /** Attests database cleanup and profiler state while the owned topology is live. */
   async attestRecovery(): Promise<Readonly<{ runDocumentsRemoved: boolean; profilerRestored: boolean }>> {
     this.assertLiveOwnership();
@@ -491,7 +511,7 @@ export class OwnedReplicaSet {
       await client.connect();
       const database = client.db('meteor');
       const [runDocumentCount, profiler] = await Promise.all([
-        database.collection('reliabilityDocuments').countDocuments({}),
+        database.collection('reliabilityDocuments').countDocuments({ runId: this.auditId }),
         database.command({ profile: -1 }),
       ]);
       return Object.freeze({

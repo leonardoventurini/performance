@@ -28,6 +28,7 @@ function createHarness({ failAt = null }: Readonly<{ failAt?: FailurePoint }> = 
         uri: 'mongodb://127.0.0.1:27017/meteor',
         replicaSetName: 'audit',
         forcedShutdowns: 0,
+        async restoreAuditState() { events.push('restore:replica'); },
         async attestRecovery() { return { runDocumentsRemoved: true, profilerRestored: true }; },
         async stop() { events.push('stop:replica'); return { topologyRestored: true }; },
       };
@@ -73,7 +74,7 @@ test('environment provisions the topology in dependency order', async () => {
   assert.equal(Object.isFrozen(restoration), true);
   assert.equal(JSON.stringify(restoration).includes('/tmp'), false);
   assert.equal(JSON.stringify(restoration).includes('audit-1'), false);
-  assert.deepEqual(events.slice(-3), ['stop:proxy', 'stop:cluster', 'stop:replica']);
+  assert.deepEqual(events.slice(-4), ['restore:replica', 'stop:proxy', 'stop:cluster', 'stop:replica']);
 });
 
 test('partial startup unwinds only owned resources in reverse order', async () => {
@@ -84,8 +85,37 @@ test('partial startup unwinds only owned resources in reverse order', async () =
   await assert.rejects(() => environment.start(), /proxy failed/);
   assert.deepEqual(events, [
     'resolve:mongod', 'start:replica', 'start:cluster', 'start:proxy',
-    'stop:cluster', 'stop:replica',
+    'restore:replica', 'stop:cluster', 'stop:replica',
   ]);
+});
+
+test('environment restores database state before attestation and fails closed when restoration rejects', async () => {
+  const { events, factories } = createHarness();
+  const createReplicaSet = factories.createReplicaSet;
+  if (!createReplicaSet) throw new Error('test replica factory is missing');
+  factories.createReplicaSet = async (options) => {
+    const replicaSet = await createReplicaSet(options);
+    replicaSet.restoreAuditState = async () => {
+      events.push('restore:failed');
+      throw new Error('database restoration failed');
+    };
+    replicaSet.attestRecovery = async () => {
+      events.push('attest:replica');
+      return { runDocumentsRemoved: false, profilerRestored: false };
+    };
+    return replicaSet;
+  };
+  const environment = await new OwnedAuditEnvironment({
+    auditId: 'audit-1', source: { meteorCmd: 'meteor' }, appPath: '/tmp/app', factories,
+  }).start();
+
+  const restoration = await environment.stop();
+
+  assert.deepEqual(events.slice(4, 6), ['restore:failed', 'attest:replica']);
+  assert.equal(restoration.failureCount, 1);
+  assert.equal(restoration.restored, false);
+  assert.equal(restoration.recovery.runDocumentsRemoved, false);
+  assert.equal(restoration.recovery.profilerRestored, false);
 });
 
 test('environment evidence excludes endpoints, tokens, paths, and process ids', async () => {

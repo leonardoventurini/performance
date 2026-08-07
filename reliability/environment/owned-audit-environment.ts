@@ -26,7 +26,11 @@ export interface ReplicaSetResource {
   readonly uri: string;
   readonly replicaSetName: string;
   readonly forcedShutdowns: number;
+  /** Restores mutable database state owned by this exact audit before attestation. */
+  restoreAuditState(): Promise<void>;
+  /** Reports whether the owned audit state is clean while the topology remains live. */
   attestRecovery(): Promise<Readonly<{ runDocumentsRemoved: boolean; profilerRestored: boolean }>>;
+  /** Stops the owned topology after database recovery has been attested. */
   stop(): Promise<StopResult>;
 }
 
@@ -208,6 +212,11 @@ export class OwnedAuditEnvironment {
     let failureCount = 0;
     let databaseAttestation = null;
     if (this.replicaSet) {
+      try {
+        await this.replicaSet.restoreAuditState();
+      } catch {
+        failureCount += 1;
+      }
       try {
         databaseAttestation = await this.replicaSet.attestRecovery();
       } catch {

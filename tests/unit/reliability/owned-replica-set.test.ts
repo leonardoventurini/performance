@@ -129,7 +129,7 @@ test('database interruption targets only live marker-attested members', async ()
   await assert.rejects(() => replicaSet.resumeAll(), /not suspended/);
 });
 
-test('recovery attestation independently checks documents and profiler state', async () => {
+test('recovery restores only the exact audit run before independently attesting state', async () => {
   const observations: string[] = [];
   class FakeMongoClient {
     constructor(_uri: string, _options: Readonly<{ serverSelectionTimeoutMS: number }>) {}
@@ -141,14 +141,26 @@ test('recovery attestation independently checks documents and profiler state', a
         collection(collectionName: string) {
           assert.equal(collectionName, 'reliabilityDocuments');
           return {
+            async deleteMany(filter: Document) {
+              assert.deepEqual(filter, { runId: 'audit-1' });
+              observations.push('delete');
+              return { acknowledged: true, deletedCount: 3 };
+            },
             async countDocuments(filter: Document) {
-              assert.deepEqual(filter, {});
+              assert.deepEqual(filter, { runId: 'audit-1' });
+              observations.push('count');
               return 0;
             },
           };
         },
         async command(command: Document) {
+          if (command.profile === 0) {
+            assert.deepEqual(command, { profile: 0 });
+            observations.push('restore:profiler');
+            return { was: 2 };
+          }
           assert.deepEqual(command, { profile: -1 });
+          observations.push('attest:profiler');
           return { was: 0 };
         },
       };
@@ -168,9 +180,13 @@ test('recovery attestation independently checks documents and profiler state', a
   });
   replicaSet.assertLiveOwnership = testMarker;
 
+  await replicaSet.restoreAuditState();
   assert.deepEqual(await replicaSet.attestRecovery(), {
     runDocumentsRemoved: true,
     profilerRestored: true,
   });
-  assert.deepEqual(observations, ['connect', 'close']);
+  assert.deepEqual(observations, [
+    'connect', 'delete', 'restore:profiler', 'close',
+    'connect', 'count', 'attest:profiler', 'close',
+  ]);
 });
