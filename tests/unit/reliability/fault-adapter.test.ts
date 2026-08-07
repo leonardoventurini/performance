@@ -23,3 +23,56 @@ test('primary stepdown begins on activation and is awaited on restoration', asyn
   restore();
   assert.equal((await restoration).fault_witness.restored, true);
 });
+
+test('restoreAll rejects false restoration witnesses and retains active state', async () => {
+  const client = {
+    state: 'connected',
+    resume: async () => undefined,
+    call: async (_method: string, parameters: readonly unknown[]) => {
+      const operation = Reflect.get(parameters[0] as object, 'operation');
+      return operation === 'activate' ? { engaged: true } : { restored: false };
+    },
+  };
+  const faults = createFaultAdapter({
+    environment: { replicaSet: { stepDownPrimary: async () => undefined } },
+    clients: { clients: [], faultControlClients: async () => [client] },
+    runId: 'run', caseExecutionId: 'case', ownershipToken: 'token',
+  });
+  await faults.execute('startup_snapshot_pause', 'activate', { step: { faultId: 'fault' } });
+
+  await assert.rejects(faults.restoreAll(), /fault restoration was incomplete/);
+  assert.equal(faults.state.has('fault'), true);
+});
+
+test('asymmetric activation restores successful targets before rejecting', async () => {
+  const calls: string[] = [];
+  const first = {
+    state: 'connected',
+    resume: async () => undefined,
+    call: async (_method: string, parameters: readonly unknown[]) => {
+      const operation = String(Reflect.get(parameters[0] as object, 'operation'));
+      calls.push(`first:${operation}`);
+      return operation === 'activate' ? { engaged: true } : { restored: true };
+    },
+  };
+  const second = {
+    state: 'connected',
+    resume: async () => undefined,
+    call: async () => {
+      calls.push('second:activate');
+      throw new Error('second backend failed');
+    },
+  };
+  const faults = createFaultAdapter({
+    environment: { replicaSet: { stepDownPrimary: async () => undefined } },
+    clients: { clients: [], faultControlClients: async () => [first, second] },
+    runId: 'run', caseExecutionId: 'case', ownershipToken: 'token',
+  });
+
+  await assert.rejects(
+    faults.execute('watch_setup_pause', 'activate', { step: { faultId: 'fault' } }),
+    /second backend failed/,
+  );
+  assert.deepEqual(calls, ['first:activate', 'second:activate', 'first:restore']);
+  assert.equal(faults.state.has('fault'), false);
+});

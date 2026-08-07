@@ -52,9 +52,7 @@ export function createFaultAdapter({ environment, clients, runId, caseExecutionI
   ownershipToken: string;
 }>) {
   const active = new Map<string, TrackedFault>();
-  const internal = async (controller: string, operation: string, faultId: string): Promise<FaultStatus[]> => {
-    if (!clients.faultControlClients) throw new Error('fault control clients are unavailable');
-    return Promise.all((await clients.faultControlClients()).map(async (client) => {
+  const invoke = async (client: FaultClient, controller: string, operation: string, faultId: string): Promise<FaultStatus> => {
     if (!client.call) throw new Error('fault control DDP method is unavailable');
     const result = await client.call('audit.faultControl', [{
       runId, caseExecutionId, ownershipToken, controller, operation, faultId,
@@ -64,7 +62,35 @@ export function createFaultAdapter({ environment, clients, runId, caseExecutionI
       ...(typeof Reflect.get(result, 'engaged') === 'boolean' ? { engaged: Reflect.get(result, 'engaged') === true } : {}),
       ...(typeof Reflect.get(result, 'restored') === 'boolean' ? { restored: Reflect.get(result, 'restored') === true } : {}),
     };
-    }));
+  };
+  const internal = async (controller: string, operation: string, faultId: string): Promise<FaultStatus[]> => {
+    if (!clients.faultControlClients) throw new Error('fault control clients are unavailable');
+    return Promise.all((await clients.faultControlClients()).map((client) => invoke(client, controller, operation, faultId)));
+  };
+  const activateInternal = async (controller: string, faultId: string): Promise<void> => {
+    if (!clients.faultControlClients) throw new Error('fault control clients are unavailable');
+    const activated: FaultClient[] = [];
+    try {
+      for (const client of await clients.faultControlClients()) {
+        const witness = await invoke(client, controller, 'activate', faultId);
+        if (witness.engaged !== true) throw new Error('fault controller did not attest activation');
+        activated.push(client);
+      }
+    } catch (activationError) {
+      const compensationFailures: unknown[] = [];
+      for (const client of activated.reverse()) {
+        try {
+          const witness = await invoke(client, controller, 'restore', faultId);
+          if (witness.restored !== true) throw new Error('fault controller did not attest compensation');
+        } catch (error) {
+          compensationFailures.push(error);
+        }
+      }
+      if (compensationFailures.length > 0) {
+        throw new AggregateError([activationError, ...compensationFailures], 'fault activation failed and compensation was incomplete');
+      }
+      throw activationError;
+    }
   };
   return Object.freeze({
     state: active,
@@ -92,7 +118,7 @@ export function createFaultAdapter({ environment, clients, runId, caseExecutionI
           selected.forEach((client) => client.terminate?.());
           recovery = Promise.all(selected.map(resumeAfterDisconnect));
         } else {
-          await internal(controller, 'activate', key);
+          await activateInternal(controller, key);
           recovery = null;
         }
         const tracked: TrackedFault['recovery'] = recovery ? Promise.resolve(recovery).then(
@@ -115,6 +141,7 @@ export function createFaultAdapter({ environment, clients, runId, caseExecutionI
       } else {
         const witnesses = await internal(controller, 'restore', key);
         restored = witnesses.every((witness) => witness.restored === true);
+        if (!restored) throw new Error(`fault ${key} restoration was not attested by every controller`);
       }
       active.delete(key);
       return {
@@ -131,7 +158,10 @@ export function createFaultAdapter({ environment, clients, runId, caseExecutionI
             const outcome = await fault.recovery;
             if (!outcome.restored) throw outcome.error;
           } else {
-            await internal(fault.controller, 'restore', faultId);
+            const witnesses = await internal(fault.controller, 'restore', faultId);
+            if (!witnesses.every((witness) => witness.restored === true)) {
+              throw new Error(`fault ${faultId} restoration was not attested by every controller`);
+            }
           }
           active.delete(faultId);
         } catch (error) {

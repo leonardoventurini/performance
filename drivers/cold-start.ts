@@ -32,12 +32,15 @@ export async function runColdStartDriver({ scenarioName, app, appName, source, e
       source, appPath: app.path, port: config.appPort, env,
     });
     lastGetRuntimeInfo = getRuntimeInfo;
-    const startTime = Date.now();
-    await waitForApp(config.appPort);
-    const startupMs = Date.now() - startTime;
-    startupTimes.push(startupMs);
-    console.log(`Startup: ${(startupMs / 1000).toFixed(1)}s`);
-    await stopMeteorApp(meteorProc, { graceMs: COLD_START_GRACE_MS });
+    try {
+      const startTime = Date.now();
+      await waitForApp(config.appPort);
+      const startupMs = Date.now() - startTime;
+      startupTimes.push(startupMs);
+      console.log(`Startup: ${(startupMs / 1000).toFixed(1)}s`);
+    } finally {
+      await stopMeteorApp(meteorProc, { graceMs: COLD_START_GRACE_MS });
+    }
   }
 
   startupTimes.sort((a, b) => a - b);

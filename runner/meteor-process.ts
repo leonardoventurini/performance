@@ -92,6 +92,32 @@ export function findPid(pattern: string): string | null {
 
 export async function stopMeteorApp(proc: ChildProcess | null | undefined, { graceMs = 3000 }: { graceMs?: number } = {}): Promise<void> {
   if (!proc) return;
-  proc.kill('SIGTERM');
-  await io.sleep(graceMs);
+  const hasExited = (): boolean => proc.exitCode !== null || proc.signalCode !== null;
+  const waitForExit = async (): Promise<boolean> => {
+    if (hasExited()) return true;
+    const exited = (): void => resolveExit(true);
+    let resolveExit: (exited: true) => void = () => undefined;
+    const exit = new Promise<true>((resolve) => { resolveExit = resolve; });
+    proc.once('exit', exited);
+    const attested = await Promise.race([
+      exit,
+      io.sleep(graceMs).then(() => false),
+    ]);
+    if (!attested) proc.off('exit', exited);
+    return attested;
+  };
+
+  if (!hasExited() && !proc.kill('SIGTERM') && !hasExited()) {
+    throw new Error('Meteor process rejected SIGTERM before exit could be attested');
+  }
+  if (await waitForExit()) return;
+
+  // Escalate only through the original ChildProcess handle. Looking up or
+  // signaling its numeric PID after the grace period risks killing a reused PID.
+  if (!proc.kill('SIGKILL') && !hasExited()) {
+    throw new Error('Meteor process rejected SIGKILL before exit could be attested');
+  }
+  if (!await waitForExit()) {
+    throw new Error('Meteor process did not attest exit after SIGKILL');
+  }
 }

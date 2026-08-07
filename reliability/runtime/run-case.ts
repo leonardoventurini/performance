@@ -33,7 +33,8 @@ interface FaultArtifact {
   readonly restored: boolean;
 }
 
-interface RuntimeEnvironment {
+/** Owned runtime resources required to execute one declarative audit case. */
+export interface RuntimeEnvironment {
   readonly auditId: string;
   readonly ddpUrl: string;
   readonly proxy: Parameters<typeof createClientAdapter>[0]['proxy'];
@@ -135,7 +136,22 @@ function evidenceLedgerDigests(execution: DeclarativeExecution): Readonly<Record
 /** Executes one compiled coordinate against a running owned environment. */
 export async function runDeclarativeCase({
   environment, definition, plan, release, attemptId, mongoClientClass = MongoClient, captureExecution,
-}: Readonly<{
+}: RunDeclarativeCaseOptions) {
+  const mongoClient = new mongoClientClass(environment.replicaSet.uri, {
+    serverSelectionTimeoutMS: plan.budget.stepTimeoutMs,
+  });
+  await mongoClient.connect();
+  try {
+    return await executeConnectedCase({
+      environment, definition, plan, release, attemptId, mongoClient,
+      ...(captureExecution ? { captureExecution } : {}),
+    });
+  } finally {
+    await mongoClient.close();
+  }
+}
+
+interface RunDeclarativeCaseOptions {
   environment: RuntimeEnvironment;
   definition: DeclarativeCaseDefinition;
   plan: CompiledCasePlan;
@@ -143,14 +159,14 @@ export async function runDeclarativeCase({
   attemptId: string;
   mongoClientClass?: typeof MongoClient;
   captureExecution?: (capture: CapturedExecution) => void;
-}>) {
+}
+
+async function executeConnectedCase({
+  environment, definition, plan, release, attemptId, captureExecution, mongoClient,
+}: Omit<RunDeclarativeCaseOptions, 'mongoClientClass'> & Readonly<{ mongoClient: MongoClient }>) {
   const runId = environment.auditId;
   const caseExecutionId = attemptId;
   const fixture = buildDeclarativeFixture({ definition, plan, runId, caseExecutionId });
-  const mongoClient = new mongoClientClass(environment.replicaSet.uri, {
-    serverSelectionTimeoutMS: plan.budget.stepTimeoutMs,
-  });
-  await mongoClient.connect();
   const databaseHandle = mongoClient.db('meteor');
   const collection = databaseHandle.collection<ReliabilityDocument>('reliabilityDocuments');
   const mongoIdentity = await attestMongoIdentity(databaseHandle);
@@ -184,25 +200,20 @@ export async function runDeclarativeCase({
     registry: createDeclarativePrimitiveRegistry(),
     interpreterVersion: DECLARATIVE_AUDIT_INTERPRETER_VERSION,
   });
-  let execution: DeclarativeExecution;
-  try {
-    execution = await interpreter.execute({
-      plan,
-      definition,
-      runId,
-      fixture,
-      context: {
-        database: cleanupDatabase,
-        clients,
-        evidence,
-        faults,
-        waits,
-        barriers: createBarrierAdapter(),
-      },
-    });
-  } finally {
-    await mongoClient.close();
-  }
+  const execution: DeclarativeExecution = await interpreter.execute({
+    plan,
+    definition,
+    runId,
+    fixture,
+    context: {
+      database: cleanupDatabase,
+      clients,
+      evidence,
+      faults,
+      waits,
+      barriers: createBarrierAdapter(),
+    },
+  });
   const evaluationDefinition = {
     oracles: definition.oracles.map((oracle) => ({
       ...Object.fromEntries(Object.entries(oracle)),

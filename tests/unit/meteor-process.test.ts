@@ -247,7 +247,11 @@ describe('stopMeteorApp', () => {
     mock.method(io, 'sleep', (ms: number) => { sleeps.push(ms); return Promise.resolve(); });
     let killed: NodeJS.Signals | number | undefined;
     const proc = new ChildProcess();
-    proc.kill = (sig?: NodeJS.Signals | number): boolean => { killed = sig; return true; };
+    proc.kill = (sig?: NodeJS.Signals | number): boolean => {
+      killed = sig;
+      queueMicrotask(() => proc.emit('exit', 0, sig));
+      return true;
+    };
     await stopMeteorApp(proc);
     assert.equal(killed, 'SIGTERM');
     assert.deepEqual(sleeps, [3000]);
@@ -257,7 +261,10 @@ describe('stopMeteorApp', () => {
     const sleeps: number[] = [];
     mock.method(io, 'sleep', (ms: number) => { sleeps.push(ms); return Promise.resolve(); });
     const proc = new ChildProcess();
-    proc.kill = (): boolean => true;
+    proc.kill = (signal?: NodeJS.Signals | number): boolean => {
+      queueMicrotask(() => proc.emit('exit', 0, signal));
+      return true;
+    };
     await stopMeteorApp(proc, { graceMs: 500 });
     assert.deepEqual(sleeps, [500]);
   });
@@ -268,5 +275,26 @@ describe('stopMeteorApp', () => {
     await stopMeteorApp(null);
     await stopMeteorApp(undefined);
     assert.deepEqual(sleeps, []);
+  });
+
+  test('escalates through the same process handle when SIGTERM does not produce an exit', async () => {
+    mock.method(io, 'sleep', () => Promise.resolve());
+    const signals: (NodeJS.Signals | number | undefined)[] = [];
+    const proc = new ChildProcess();
+    proc.kill = (signal?: NodeJS.Signals | number): boolean => {
+      signals.push(signal);
+      if (signal === 'SIGKILL') queueMicrotask(() => proc.emit('exit', null, 'SIGKILL'));
+      return true;
+    };
+
+    await stopMeteorApp(proc, { graceMs: 1 });
+    assert.deepEqual(signals, ['SIGTERM', 'SIGKILL']);
+  });
+
+  test('rejects when exit cannot be attested after escalation', async () => {
+    mock.method(io, 'sleep', () => Promise.resolve());
+    const proc = new ChildProcess();
+    proc.kill = (): boolean => true;
+    await assert.rejects(stopMeteorApp(proc, { graceMs: 1 }), /did not attest exit after SIGKILL/);
   });
 });
