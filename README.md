@@ -33,11 +33,13 @@ just bench-list
 just bench reactive-light --tag local
 ```
 
-`just check-all` additionally runs both Meteor application suites and requires
-the Meteor CLI. Run `just install` before checks so recipes use only
-workspace-local binaries. Destructive dashboard mutations and legacy remote
-operations remain explicit low-level commands and intentionally have no Just
-recipes.
+`just check` type-checks the root harness and host contracts, enforces the
+maintained-source inventory, and runs the credential-free root verification
+suite. `just check-all` additionally type-checks every workspace and runs both
+Meteor application suites, so it requires the Meteor CLI. Run `just install`
+before checks so every gate uses workspace-local dependencies. Destructive
+dashboard mutations and legacy remote operations remain explicit low-level
+commands and intentionally have no Just recipes.
 
 ## Usage
 

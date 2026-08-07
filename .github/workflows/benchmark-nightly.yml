@@ -32,14 +32,8 @@ jobs:
         with:
           node-version: '24'
 
-      - name: Install dependencies
+      - name: Install root dependencies
         run: npm ci
-
-      - name: Build benchmark harness
-        run: npm run build
-
-      - name: Install Playwright browsers
-        run: npx playwright install chromium
 
       - name: Clone Meteor core
         run: |
@@ -47,9 +41,25 @@ jobs:
           cd $METEOR_REPO
           git fetch --tags --depth 50
 
-      - name: Install app dependencies
+      - name: Install task app dependencies
         run: '"$METEOR_REPO/meteor" npm ci'
         working-directory: apps/tasks-3.x
+
+      - name: Install dashboard dependencies
+        run: '"$METEOR_REPO/meteor" npm ci'
+        working-directory: apps/dashboard
+
+      - name: Type-check all TypeScript workspaces
+        run: npm run typecheck:all
+
+      - name: Verify maintained source inventory
+        run: npm run test:source-inventory
+
+      - name: Build benchmark harness
+        run: npm run build
+
+      - name: Install Playwright browsers
+        run: npx playwright install chromium
 
       - name: Set branch
         id: params

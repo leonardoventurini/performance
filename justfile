@@ -34,10 +34,22 @@ install-dashboard:
     cd "{{ dashboard_app }}" && meteor npm ci
 
 # Run the fast, credential-free root verification suite.
-check: test bench-list playwright-list syntax-check dashboard-css-check
+check: typecheck source-inventory test bench-list playwright-list syntax-check dashboard-css-check
 
 # Run root checks plus both Meteor application test suites.
-check-all: check test-task test-dashboard
+check-all: check typecheck-all test-task test-dashboard
+
+# Type-check the root harness, browser scenarios, and JavaScript host contracts.
+typecheck:
+    npm run typecheck:node
+
+# Type-check every maintained TypeScript workspace.
+typecheck-all:
+    npm run typecheck:all
+
+# Enforce the maintained-source inventory and its explicit JavaScript host exceptions.
+source-inventory:
+    npm run test:source-inventory
 
 # Run all Node unit tests.
 test:
