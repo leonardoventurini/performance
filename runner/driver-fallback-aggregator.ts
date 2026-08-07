@@ -18,7 +18,7 @@ export function aggregateDriverFallback(dump?: unknown) {
   if (total === 0) return null;
   const noFallback = Number(dump.no_fallback) || 0;
   return {
-    metric: 'driver_fallbacks',
+    metric: 'driver_fallbacks' as const,
     total_cursors: total,
     no_fallback: noFallback,
     configured_first: typeof dump.configured_first === 'string' ? dump.configured_first : null,

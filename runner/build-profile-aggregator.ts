@@ -74,7 +74,7 @@ export function aggregateBuildProfile(parsed: unknown, { topN = 5 }: { topN?: nu
   const longTailMs = Math.max(0, totalMs - topNTotalMs);
 
   return {
-    metric: 'build_profile',
+    metric: 'build_profile' as const,
     total_ms: totalMs,
     top_nodes: top,
     top_n_count: top.length,

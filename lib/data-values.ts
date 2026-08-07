@@ -23,6 +23,8 @@ export function isJsonValue(value: unknown): value is JsonValue {
   if (typeof value === 'number') return Number.isFinite(value);
   if (Array.isArray(value)) return value.every(isJsonValue);
   if (typeof value !== 'object') return false;
+  const prototype = Object.getPrototypeOf(value) as unknown;
+  if (prototype !== Object.prototype && prototype !== null) return false;
   return Object.values(value).every(isJsonValue);
 }
 

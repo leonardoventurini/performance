@@ -33,9 +33,19 @@ import path from 'node:path';
 import { isJsonObject, isJsonValue } from '../lib/data-values.js';
 import type { JsonValue } from '../lib/data-values.js';
 
-/** JSON-safe output from one self-identifying collector. */
+/** Closed metric identities consumed by result persistence and the dashboard. */
+export type MetricName =
+  | 'app_resources' | 'db_resources' | 'gc' | 'event_loop_delay'
+  | 'bundle_size' | 'cold_start' | 'fanout' | 'change_stream_audit'
+  | 'ddp_methods' | 'ddp_subscriptions' | 'live_update_propagation'
+  | 'mongo_ops' | 'observer_pool' | 'ddp_messages' | 'ddp_frame_size'
+  | 'mongo_slow_queries' | 'mongo_index_usage' | 'mongo_pool'
+  | 'mongo_changestream' | 'mongo_wiredtiger' | 'ddp_compression'
+  | 'driver_fallbacks' | 'build_profile' | 'plugin_compile';
+
+/** JSON-safe output from one known, self-identifying collector. */
 export interface CollectorResult {
-  readonly metric: string;
+  readonly metric: MetricName;
   readonly [key: string]: JsonValue | undefined;
 }
 /** Runtime identity fields captured from the benchmarked Meteor process. */
@@ -63,13 +73,76 @@ function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+const METRIC_SIGNATURES: Readonly<Record<MetricName, readonly string[]>> = Object.freeze({
+  app_resources: ['cpu', 'memory'], db_resources: ['cpu', 'memory'], gc: ['count', 'total_pause_ms'],
+  event_loop_delay: ['p99'], bundle_size: ['total_kb'], cold_start: ['startup_median_ms'],
+  fanout: ['fanout_avg_ms'], change_stream_audit: ['status', 'failure_reasons'], ddp_methods: ['total_calls'],
+  ddp_subscriptions: ['total_subs'], live_update_propagation: ['observed_updates'], mongo_ops: ['duration_s'],
+  observer_pool: ['samples'], ddp_messages: ['total_in', 'total_out'], ddp_frame_size: ['in', 'out'],
+  mongo_slow_queries: ['total_slow'], mongo_index_usage: ['collections'], mongo_pool: ['samples'],
+  mongo_changestream: ['samples'], mongo_wiredtiger: ['cache_hit_ratio'], ddp_compression: ['in', 'out'],
+  driver_fallbacks: ['total_cursors'], build_profile: ['top_nodes'], plugin_compile: ['plugins'],
+});
+
+function isFiniteNumber(value: JsonValue | undefined): boolean {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function isArray(value: JsonValue | undefined): boolean {
+  return Array.isArray(value);
+}
+
+function isObject(value: JsonValue | undefined): boolean {
+  return isJsonObject(value);
+}
+
+const METRIC_FIELD_VALIDATORS: Readonly<Partial<Record<MetricName, Readonly<Record<string, (value: JsonValue | undefined) => boolean>>>>> = Object.freeze({
+  app_resources: { cpu: isObject, memory: isObject },
+  db_resources: { cpu: isObject, memory: isObject },
+  gc: { count: isFiniteNumber, total_pause_ms: isFiniteNumber },
+  event_loop_delay: { p99: isFiniteNumber },
+  bundle_size: { total_kb: isFiniteNumber },
+  cold_start: { startup_median_ms: isFiniteNumber },
+  fanout: { fanout_avg_ms: isFiniteNumber },
+  change_stream_audit: {
+    status: (value) => value === 'passed' || value === 'failed' || value === 'incomplete',
+    failure_reasons: (value) => Array.isArray(value) && value.every((reason: JsonValue) => typeof reason === 'string'),
+  },
+  ddp_methods: { total_calls: isFiniteNumber },
+  ddp_subscriptions: { total_subs: isFiniteNumber },
+  live_update_propagation: { observed_updates: isFiniteNumber },
+  mongo_ops: { duration_s: isFiniteNumber },
+  observer_pool: { samples: isFiniteNumber },
+  ddp_messages: { total_in: isFiniteNumber, total_out: isFiniteNumber },
+  ddp_frame_size: { in: isObject, out: isObject },
+  mongo_slow_queries: { total_slow: isFiniteNumber },
+  mongo_index_usage: { collections: isObject },
+  mongo_pool: { samples: isFiniteNumber },
+  mongo_changestream: { samples: isFiniteNumber },
+  mongo_wiredtiger: { cache_hit_ratio: isFiniteNumber },
+  ddp_compression: { in: isObject, out: isObject },
+  driver_fallbacks: { total_cursors: isFiniteNumber },
+  build_profile: { top_nodes: isArray },
+  plugin_compile: { plugins: isObject },
+});
+
+function isMetricName(value: string): value is MetricName {
+  return Object.hasOwn(METRIC_SIGNATURES, value);
+}
+
 /** Validates an untrusted self-identifying collector payload. */
-export function collectorResult<T extends Readonly<{ readonly metric: string }>>(value: T): T & CollectorResult;
+export function collectorResult<T extends Readonly<{ readonly metric: MetricName }>>(value: T): T & CollectorResult;
 export function collectorResult(value: unknown): CollectorResult;
 export function collectorResult(value: unknown): CollectorResult {
-  if (!isJsonObject(value) || typeof value.metric !== 'string' || value.metric.length === 0) {
-    throw new TypeError('Collector result must be a JSON object with a non-empty metric identifier.');
+  if (!isJsonObject(value) || typeof value.metric !== 'string' || !isMetricName(value.metric)) {
+    throw new TypeError('Collector result must be a JSON object with a known metric identifier.');
   }
+  const missing = METRIC_SIGNATURES[value.metric].filter((field) => value[field] === undefined);
+  if (missing.length > 0) throw new TypeError(`Metric ${value.metric} is missing required fields: ${missing.join(', ')}.`);
+  const invalid = Object.entries(METRIC_FIELD_VALIDATORS[value.metric] ?? {})
+    .filter(([field, validate]) => !validate(value[field]))
+    .map(([field]) => field);
+  if (invalid.length > 0) throw new TypeError(`Metric ${value.metric} has invalid fields: ${invalid.join(', ')}.`);
   return { ...value, metric: value.metric };
 }
 
@@ -112,6 +185,12 @@ function buildResult({ scenario, app, tag, meteor, runtime = {}, collectorResult
       'Call resolveMeteorSource from meteor-source.js to obtain it.'
     );
   }
+  const metrics: Record<string, CollectorResult> = {};
+  for (const result of collectorResults) {
+    const validated = collectorResult(result);
+    if (metrics[validated.metric] !== undefined) throw new TypeError(`Duplicate collector metric: ${validated.metric}.`);
+    metrics[validated.metric] = validated;
+  }
   return {
     timestamp: new Date().toISOString(),
     tag: tag || meteor.version,
@@ -123,7 +202,7 @@ function buildResult({ scenario, app, tag, meteor, runtime = {}, collectorResult
     // Each collector tags its output with a `metric` field; we use that as
     // the key here so the dashboard reads `metrics.app_resources.cpu.avg`
     // etc. without any per-collector branching.
-    metrics: Object.fromEntries(collectorResults.map((result) => [result.metric, collectorResult(result)])),
+    metrics,
   };
 }
 

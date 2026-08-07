@@ -7,7 +7,7 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { buildResult } from '../../reporters/json-reporter.js';
+import { buildResult, collectorResult } from '../../reporters/json-reporter.js';
 import type { BenchmarkResult, CollectorResult } from '../../reporters/json-reporter.js';
 
 const FIXTURES = path.join(import.meta.dirname, 'fixtures');
@@ -159,11 +159,20 @@ describe('buildResult — tag fallback', () => {
 });
 
 describe('buildResult — metrics keying', () => {
+  test('collector contracts reject unknown identities and malformed known payloads', () => {
+    assert.throws(() => collectorResult({ metric: 'invented', count: 1 }), /known metric identifier/);
+    assert.throws(() => collectorResult({ metric: 'gc', count: 1 }), /missing required fields: total_pause_ms/);
+    assert.throws(
+      () => collectorResult({ metric: 'gc', count: 'one', total_pause_ms: 1 }),
+      /invalid fields: count/,
+    );
+  });
+
   test('collectorResults are keyed by r.metric in result.metrics', () => {
     const collectorResults = [
-      { metric: 'app_resources', name: 'APP', cpu: { avg: 10 } },
-      { metric: 'gc', count: 5 },
-    ];
+      { metric: 'app_resources', name: 'APP', cpu: { avg: 10 }, memory: { avg_mb: 20 } },
+      { metric: 'gc', count: 5, total_pause_ms: 10 },
+    ] satisfies readonly CollectorResult[];
     const result = buildResult({
       scenario: 's', app: 'a', tag: 't',
       meteor: METEOR, collectorResults, wallClockMs: 0,
@@ -193,16 +202,15 @@ describe('buildResult — metrics keying', () => {
     assert.deepEqual(result.meteor, baseline.meteor);
   });
 
-  test('later collectorResults with duplicate metric overwrite earlier ones', () => {
-    const result = buildResult({
+  test('duplicate collector metrics are rejected instead of silently overwritten', () => {
+    assert.throws(() => buildResult({
       scenario: 's', app: 'a', tag: 't',
       meteor: METEOR,
       collectorResults: [
-        { metric: 'gc', count: 1 },
-        { metric: 'gc', count: 99 },
+        { metric: 'gc', count: 1, total_pause_ms: 1 },
+        { metric: 'gc', count: 99, total_pause_ms: 2 },
       ],
       wallClockMs: 0,
-    });
-    assert.equal(result.metrics.gc?.count, 99);
+    }), /Duplicate collector metric: gc/);
   });
 });

@@ -50,7 +50,7 @@ export function aggregatePluginCompile(parsed?: unknown) {
 
   if (Object.keys(plugins).length === 0) return null;
   return {
-    metric: 'plugin_compile',
+    metric: 'plugin_compile' as const,
     total_plugin_ms: totalPluginMs,
     plugins,
   };

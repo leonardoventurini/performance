@@ -16,6 +16,13 @@ describe('aggregateDdpMessages', () => {
     );
   });
 
+  test('present malformed evidence fails closed', () => {
+    assert.throws(() => aggregateDdpMessages({ by_in: 'invalid' }), /by_in must be a count map/);
+    assert.throws(() => aggregateDdpMessages({ by_in: { method: -1 } }), /non-negative safe integer/);
+    assert.throws(() => aggregateDdpMessages({ by_in: { method: 1.5 } }), /non-negative safe integer/);
+    assert.throws(() => aggregateDdpMessages({ startTime: Number.NaN }), /startTime must be finite/);
+  });
+
   test('single incoming message → counted, out empty', () => {
     const r = aggregateDdpMessages({
       startTime: 0,

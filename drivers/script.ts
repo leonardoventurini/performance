@@ -40,6 +40,7 @@ import {
   stopCollectors,
 } from '../runner/collectors.js';
 import { buildResult } from '../reporters/json-reporter.js';
+import type { MetricName } from '../reporters/json-reporter.js';
 import type { DriverInputs, ScriptScenario } from '../lib/benchmark-types.js';
 import { errorMessage } from '../lib/benchmark-types.js';
 
@@ -52,7 +53,9 @@ function parseMetrics(value: unknown): Record<string, unknown> {
 
 /** Executes a standalone emitted workload and merges its guarded metrics. */
 export async function runScriptDriver({ scenario, scenarioName, app, appName, source, env, tag, config, scriptArgs: extraScriptArgs = [] }: DriverInputs & Readonly<{ scenario: ScriptScenario }>): Promise<ReturnType<typeof buildResult>> {
-  const metricName = scenario.metric || 'fanout';
+  const metricName: MetricName = scenario.metric === undefined || scenario.metric === 'fanout'
+    ? 'fanout'
+    : (() => { throw new TypeError(`Unsupported script metric: ${scenario.metric}`); })();
   const configuredBenchMongoUri = env.BENCH_MONGO_URL || process.env.BENCH_MONGO_URL;
   const configuredMeteorMongoUri = env.MONGO_URL || process.env.MONGO_URL;
   const fallbackMongoUri = `mongodb://127.0.0.1:${config.appPort + 1}/meteor`;

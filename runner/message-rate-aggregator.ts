@@ -19,10 +19,22 @@
 type CountMap = Readonly<Record<string, number>>;
 interface MessageDump { startTime?: number; endTime?: number; by_in?: CountMap; by_out?: CountMap }
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> { return typeof value === 'object' && value !== null && !Array.isArray(value); }
-function countMap(value: unknown): CountMap | undefined {
-  if (!isRecord(value)) return undefined;
-  if (!Object.values(value).every((entry) => typeof entry === 'number' && Number.isFinite(entry))) return undefined;
-  return value as Readonly<Record<string, number>>;
+function countMap(value: unknown, field: string): CountMap | undefined {
+  if (value === undefined) return undefined;
+  if (!isRecord(value)) throw new TypeError(`${field} must be a count map.`);
+  const result: Record<string, number> = {};
+  for (const [name, count] of Object.entries(value)) {
+    if (typeof count !== 'number' || !Number.isSafeInteger(count) || count < 0) {
+      throw new TypeError(`${field}.${name} must be a non-negative safe integer.`);
+    }
+    result[name] = count;
+  }
+  return result;
+}
+function timestamp(value: unknown, field: string): number | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'number' || !Number.isFinite(value)) throw new TypeError(`${field} must be finite.`);
+  return value;
 }
 function sumCounts(byType: CountMap | undefined): number {
   let total = 0;
@@ -35,20 +47,22 @@ function sumCounts(byType: CountMap | undefined): number {
 /** Aggregates an untrusted DDP message counter payload. */
 export function aggregateDdpMessages(value?: unknown) {
   if (!isRecord(value)) return null;
-  const byIn = countMap(value.by_in);
-  const byOut = countMap(value.by_out);
+  const byIn = countMap(value.by_in, 'by_in');
+  const byOut = countMap(value.by_out, 'by_out');
+  const startTime = timestamp(value.startTime, 'startTime');
+  const endTime = timestamp(value.endTime, 'endTime');
   const dump: MessageDump = {
-    ...(typeof value.startTime === 'number' ? { startTime: value.startTime } : {}),
-    ...(typeof value.endTime === 'number' ? { endTime: value.endTime } : {}),
+    ...(startTime !== undefined ? { startTime } : {}),
+    ...(endTime !== undefined ? { endTime } : {}),
     ...(byIn ? { by_in: byIn } : {}),
     ...(byOut ? { by_out: byOut } : {}),
   };
-  const { startTime, endTime, by_in, by_out } = dump;
+  const { by_in, by_out } = dump;
   const totalIn = sumCounts(by_in);
   const totalOut = sumCounts(by_out);
   if (totalIn === 0 && totalOut === 0) return null;
 
-  const durationMs = Math.max(0, Number(endTime ?? 0) - Number(startTime ?? 0));
+  const durationMs = Math.max(0, Number(dump.endTime ?? 0) - Number(dump.startTime ?? 0));
   const durationS = durationMs / 1000;
   const perSec = (total: number): number => (durationS > 0 ? +(total / durationS).toFixed(2) : 0);
 
