@@ -9,7 +9,7 @@
 // Single facade for the whole codebase — extend, don't fork.
 
 import { execSync as _execSync, execFileSync as _execFileSync, spawn as _spawn } from 'node:child_process';
-import { existsSync as _existsSync, readFileSync as _readFileSync, unlinkSync as _unlinkSync, mkdirSync as _mkdirSync, readdirSync as _readdirSync, writeFileSync as _writeFileSync, statSync as _statSync, rmSync as _rmSync } from 'node:fs';
+import { existsSync as _existsSync, readFileSync as _readFileSync, unlinkSync as _unlinkSync, mkdirSync as _mkdirSync, readdirSync as _readdirSync, writeFileSync as _writeFileSync, statSync as _statSync, lstatSync as _lstatSync, rmSync as _rmSync } from 'node:fs';
 import { setTimeout as _sleep } from 'node:timers/promises';
 import _SimpleDDP from 'simpleddp';
 import _ws from 'ws';
@@ -26,6 +26,7 @@ export const io = {
   readdirSync: _readdirSync,
   writeFileSync: _writeFileSync,
   statSync: _statSync,
+  lstatSync: _lstatSync,
   rmSync: _rmSync,
   sleep: _sleep,
   // Wrapper (not a bound reference) so tests can replace globalThis.fetch

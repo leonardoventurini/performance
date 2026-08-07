@@ -24,14 +24,15 @@ function meteorArgv(source: MeteorSource, subcommandArgs: readonly string[]): st
 }
 
 // Recursively sum file sizes under a directory. Returns total bytes.
-function dirSizeBytes(dirPath: string): number {
+/** Measures an emitted directory without following possibly dangling bundle symlinks. */
+export function directorySizeBytes(dirPath: string): number {
   if (!io.existsSync(dirPath)) return 0;
   let total = 0;
   for (const entry of io.readdirSync(dirPath)) {
     const full = path.join(dirPath, entry);
-    const stat = io.statSync(full);
+    const stat = io.lstatSync(full);
     if (stat.isDirectory()) {
-      total += dirSizeBytes(full);
+      total += directorySizeBytes(full);
     } else {
       total += stat.size;
     }
@@ -48,47 +49,49 @@ export async function runBundleSizeDriver({ scenarioName, app, appName, source, 
 
   ensureAppDeps(source, app.path);
 
-  console.log('Building production bundle...');
-  const buildStart = Date.now();
-  io.execFileSync(source.meteorCmd, meteorArgv(source, ['build', buildDir, '--directory']), {
-    cwd: app.path,
-    stdio: 'inherit',
-    env: { ...process.env, ...env },
-  });
-  const buildTimeMs = Date.now() - buildStart;
-  console.log(`Build time: ${(buildTimeMs / 1000).toFixed(1)}s`);
+  try {
+    console.log('Building production bundle...');
+    const buildStart = Date.now();
+    io.execFileSync(source.meteorCmd, meteorArgv(source, ['build', buildDir, '--directory']), {
+      cwd: app.path,
+      stdio: 'inherit',
+      env: { ...process.env, ...env },
+    });
+    const buildTimeMs = Date.now() - buildStart;
+    console.log(`Build time: ${(buildTimeMs / 1000).toFixed(1)}s`);
 
-  // Client bundle: sum the top-level .js files only (Meteor's web.browser).
-  const webBrowserDir = path.join(buildDir, 'bundle', 'programs', 'web.browser');
-  let clientSizeKb = 0;
-  if (io.existsSync(webBrowserDir)) {
-    for (const f of io.readdirSync(webBrowserDir).filter((n) => n.endsWith('.js'))) {
-      clientSizeKb += io.statSync(path.join(webBrowserDir, f)).size / BYTES_PER_KB;
+    // Client bundle: sum the top-level .js files only (Meteor's web.browser).
+    const webBrowserDir = path.join(buildDir, 'bundle', 'programs', 'web.browser');
+    let clientSizeKb = 0;
+    if (io.existsSync(webBrowserDir)) {
+      for (const f of io.readdirSync(webBrowserDir).filter((n) => n.endsWith('.js'))) {
+        clientSizeKb += io.statSync(path.join(webBrowserDir, f)).size / BYTES_PER_KB;
+      }
     }
+
+    const serverDir = path.join(buildDir, 'bundle', 'programs', 'server');
+    const serverSizeKb = Math.round(directorySizeBytes(serverDir) / BYTES_PER_KB);
+    const totalSizeKb = Math.round(directorySizeBytes(path.join(buildDir, 'bundle')) / BYTES_PER_KB);
+
+    console.log(`Client JS: ${clientSizeKb.toFixed(0)} KB`);
+    console.log(`Server: ${serverSizeKb} KB`);
+    console.log(`Total bundle: ${totalSizeKb} KB`);
+
+    return buildResult({
+      scenario: scenarioName,
+      app: appName,
+      tag,
+      meteor: { version: source.version, sha: source.sha },
+      collectorResults: [{
+        metric: 'bundle_size',
+        client_js_kb: Math.round(clientSizeKb),
+        server_kb: serverSizeKb,
+        total_kb: totalSizeKb,
+        build_time_ms: buildTimeMs,
+      }],
+      wallClockMs: buildTimeMs,
+    });
+  } finally {
+    io.rmSync(buildDir, { recursive: true, force: true });
   }
-
-  const serverDir = path.join(buildDir, 'bundle', 'programs', 'server');
-  const serverSizeKb = Math.round(dirSizeBytes(serverDir) / BYTES_PER_KB);
-  const totalSizeKb = Math.round(dirSizeBytes(path.join(buildDir, 'bundle')) / BYTES_PER_KB);
-
-  console.log(`Client JS: ${clientSizeKb.toFixed(0)} KB`);
-  console.log(`Server: ${serverSizeKb} KB`);
-  console.log(`Total bundle: ${totalSizeKb} KB`);
-
-  io.rmSync(buildDir, { recursive: true, force: true });
-
-  return buildResult({
-    scenario: scenarioName,
-    app: appName,
-    tag,
-    meteor: { version: source.version, sha: source.sha },
-    collectorResults: [{
-      metric: 'bundle_size',
-      client_js_kb: Math.round(clientSizeKb),
-      server_kb: serverSizeKb,
-      total_kb: totalSizeKb,
-      build_time_ms: buildTimeMs,
-    }],
-    wallClockMs: buildTimeMs,
-  });
 }
