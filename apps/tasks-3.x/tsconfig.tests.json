@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": { "types": ["node", "meteor", "mocha"] },
+  "include": ["tests/**/*.ts", "packages/tasks-common/**/*-tests.ts", "packages/tasks-common/reliability-query-descriptors.ts", "types/**/*.d.ts"]
+}

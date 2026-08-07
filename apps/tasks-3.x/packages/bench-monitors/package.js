@@ -20,5 +20,6 @@ Package.describe({
 Package.onUse(function (api) {
   api.versionsFrom('2.16');
   api.use('ecmascript');
-  api.mainModule('bench-monitors.server.js', ['server']);
+  api.use('typescript@5.11.0-beta351.0');
+  api.mainModule('bench-monitors.server.ts', ['server']);
 });

@@ -54,16 +54,30 @@ const DRIVER_CLASS_TO_NAME = {
   PollingObserveDriver: 'polling',
 };
 
+interface PrivateObserveHandle { stop?(): void; readonly _multiplexer?: { readonly _observeDriver?: { readonly constructor?: { readonly name?: string } } } }
+interface PrivateCursor { observeChangesAsync(callbacks: { added(): void }): Promise<PrivateObserveHandle> }
+
+function privateCursor(value: object): PrivateCursor {
+  if (!('observeChangesAsync' in value) || typeof value.observeChangesAsync !== 'function') {
+    throw new TypeError('observer probe requires observeChangesAsync');
+  }
+  return value as PrivateCursor;
+}
+
 async function probeActualObserverDriver() {
   const collName = `__runtime_info_probe_${process.pid}_${Date.now()}`;
   let handle;
   try {
     const probe = new Mongo.Collection(collName);
-    handle = await probe.find().observeChangesAsync({ added: () => {} });
+    const cursor = privateCursor(probe.find());
+    handle = await cursor.observeChangesAsync({ added: () => undefined });
     const className = handle._multiplexer?._observeDriver?.constructor?.name;
-    return DRIVER_CLASS_TO_NAME[className] || `unknown_class:${className || 'undefined'}`;
-  } catch (err) {
-    return `probe_failed:${String(err.message).replace(/[\r\n]+/g, ' ').slice(0, 100)}`;
+    return typeof className === 'string' && className in DRIVER_CLASS_TO_NAME
+      ? DRIVER_CLASS_TO_NAME[className as keyof typeof DRIVER_CLASS_TO_NAME]
+      : `unknown_class:${className || 'undefined'}`;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return `probe_failed:${message.replace(/[\r\n]+/g, ' ').slice(0, 100)}`;
   } finally {
     try { handle?.stop?.(); } catch {}
     try {

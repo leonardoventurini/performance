@@ -1,0 +1,6 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": { "types": ["node", "meteor"] },
+  "include": ["server/**/*.ts", "packages/bench-monitors/**/*.ts", "packages/tasks-common/**/*.ts", "types/**/*.d.ts"],
+  "exclude": ["packages/tasks-common/**/*.tsx", "packages/tasks-common/**/*-tests.ts", ".meteor/local", "node_modules"]
+}

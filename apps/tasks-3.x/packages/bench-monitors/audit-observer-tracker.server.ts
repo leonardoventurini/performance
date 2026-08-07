@@ -3,6 +3,24 @@ import { MongoInternals } from 'meteor/mongo';
 import { AsyncLocalStorage } from 'node:async_hooks';
 
 import { deriveObservedFallback, extractAuditScope, validateAuditEchoRequest, validateAuditFaultRequest, validateAuditMonitorRequest } from './audit-observer-contract';
+import { privateMongo } from './_private-types';
+import type { ObserveDriver, ObserveHandle } from './_private-types';
+
+type AuditScope = NonNullable<ReturnType<typeof extractAuditScope>>;
+interface SharedStream {
+  _changeStream?: { emit(event: string, value?: unknown): void };
+  _restarting?: boolean;
+  _restart(): Promise<void>;
+}
+interface AuditDriver extends ObserveDriver { readonly _sharedStream?: SharedStream }
+interface DriverGate { engaged(): boolean; release(): void }
+interface ActiveFault { controller: string; gate: DriverGate | null; activatedAt: number }
+interface SelectionAttempt { driver: 'changeStreams' | 'oplog' | 'polling'; available: boolean; reason?: string }
+interface SelectionContext { scope: AuditScope | null; selection?: { configuredOrder: SelectionAttempt['driver'][]; attempts: SelectionAttempt[] } }
+interface Observation extends AuditScope {
+  sequence: number; monotonicNs: string; instanceId: string; actualDriver: string;
+  multiplexerIdentity: string; fallbackFrom?: string; fallbackReason?: string;
+}
 
 const MAX_AUDIT_OBSERVATIONS = 10_000;
 const DRIVER_NAMES = Object.freeze({
@@ -11,12 +29,12 @@ const DRIVER_NAMES = Object.freeze({
   PollingObserveDriver: 'polling',
 });
 
-const observations = [];
-const multiplexerIdentities = new WeakMap();
-const fallbackProvenanceByMultiplexer = new WeakMap();
-const driversByCase = new Map();
-const activeFaults = new Map();
-const selectionContexts = new AsyncLocalStorage();
+const observations: Observation[] = [];
+const multiplexerIdentities = new WeakMap<object, string>();
+const fallbackProvenanceByMultiplexer = new WeakMap<object, { fallbackFrom: string; fallbackReason: string }>();
+const driversByCase = new Map<string, Set<AuditDriver>>();
+const activeFaults = new Map<string, ActiveFault>();
+const selectionContexts = new AsyncLocalStorage<SelectionContext>();
 let sequence = 0;
 let multiplexerSequence = 0;
 let patched = false;
@@ -30,47 +48,47 @@ const INTERNAL_FAULT_CONTROLLERS = Object.freeze([
   'writes_continue_during_recovery',
 ]);
 
-function driverMatchesCase(driver, caseExecutionId) {
-  return driver?._cursorDescription?.selector?.caseExecutionId === caseExecutionId
-    || extractAuditScope(driver?._cursorDescription)?.caseExecutionId === caseExecutionId;
+function driverMatchesCase(driver: AuditDriver, caseExecutionId: string): boolean {
+  return extractAuditScope(driver._cursorDescription)?.caseExecutionId === caseExecutionId;
 }
 
-function installDriverGate(drivers, caseExecutionId, method) {
+function installDriverGate(drivers: readonly AuditDriver[], caseExecutionId: string, method: string): DriverGate {
   const prototypes = [...new Set(drivers.map((driver) => Object.getPrototypeOf(driver)))];
-  let release;
+  let releaseGate: () => void = () => undefined;
   let engaged = false;
-  const gate = new Promise((resolve) => { release = resolve; });
+  const gate = new Promise<void>((resolve) => { releaseGate = resolve; });
   const restorations = prototypes.map((prototype) => {
-    const original = prototype[method];
+    const methods = prototype as Record<string, unknown>;
+    const original = methods[method];
     if (typeof original !== 'function') throw new Error(`audit fault requires ${method}`);
-    const wrapped = async function (...args) {
+    const wrapped = async function (this: AuditDriver, ...args: unknown[]) {
       if (driverMatchesCase(this, caseExecutionId)) {
         engaged = true;
         await gate;
       }
       return original.apply(this, args);
     };
-    prototype[method] = wrapped;
+    methods[method] = wrapped;
     return () => {
-      if (prototype[method] === wrapped) prototype[method] = original;
+      if (methods[method] === wrapped) methods[method] = original;
     };
   });
   return Object.freeze({
     engaged: () => engaged,
     release() {
       for (const restore of restorations) restore();
-      release();
+      releaseGate();
     },
   });
 }
 
-function caseDrivers(caseExecutionId) {
+function caseDrivers(caseExecutionId: string): AuditDriver[] {
   const drivers = driversByCase.get(caseExecutionId);
   if (!drivers || drivers.size === 0) throw new Error('audit fault has no correlated observer driver');
   return [...drivers];
 }
 
-async function waitForStreams(caseExecutionId) {
+async function waitForStreams(caseExecutionId: string): Promise<void> {
   const deadline = Date.now() + 10_000;
   while (Date.now() < deadline) {
     const streams = caseDrivers(caseExecutionId).map((driver) => driver?._sharedStream);
@@ -80,7 +98,7 @@ async function waitForStreams(caseExecutionId) {
   throw new Error('audit change stream did not recover');
 }
 
-function multiplexerIdentity(multiplexer) {
+function multiplexerIdentity(multiplexer: object | null | undefined): string {
   if (!multiplexer || typeof multiplexer !== 'object') return 'unavailable';
   const existing = multiplexerIdentities.get(multiplexer);
   if (existing) return existing;
@@ -95,29 +113,35 @@ export function initAuditObserverTracker() {
   if (!process.env.AUDIT_INSTANCE_ID) {
     throw new Error('audit observer tracking requires AUDIT_INSTANCE_ID');
   }
+  const runId = process.env.AUDIT_RUN_ID;
+  const ownershipToken = process.env.AUDIT_OWNERSHIP_TOKEN;
+  const instanceId = process.env.AUDIT_INSTANCE_ID;
   patched = true;
-  const mongo = MongoInternals?.defaultRemoteCollectionDriver?.()?.mongo;
-  if (!mongo || typeof mongo._observeChanges !== 'function') {
+  const mongo = privateMongo(MongoInternals?.defaultRemoteCollectionDriver?.()?.mongo);
+  if (!mongo) {
     throw new Error('audit observer tracking requires mongo._observeChanges');
   }
   const original = mongo._observeChanges.bind(mongo);
-  const originalSelect = mongo._selectReactivityDriver?.bind(mongo);
+  const selectRuntime = mongo as typeof mongo & {
+    _selectReactivityDriver?: (configuredOrder: SelectionAttempt['driver'][], checks: Record<string, () => Promise<{ available: boolean; reason?: string }>>) => Promise<unknown>;
+  };
+  const originalSelect = selectRuntime._selectReactivityDriver?.bind(selectRuntime);
   if (typeof originalSelect !== 'function') {
     throw new Error('audit observer tracking requires mongo._selectReactivityDriver');
   }
-  mongo._selectReactivityDriver = async function (configuredOrder, driverChecks) {
+  selectRuntime._selectReactivityDriver = async function (configuredOrder, driverChecks) {
     const context = selectionContexts.getStore();
     if (!context) return originalSelect(configuredOrder, driverChecks);
-    const attempts = [];
-    const observedChecks = Object.fromEntries(Object.entries(driverChecks).map(([driver, check]) => [
-      driver,
-      async () => {
-        const result = driver === 'changeStreams'
+    const attempts: SelectionAttempt[] = [];
+    const observedChecks = Object.fromEntries(Object.entries(driverChecks).map(([driverName, check]) => [
+      driverName,
+      async (): Promise<{ available: boolean; reason?: string }> => {
+        const result = driverName === 'changeStreams'
           && context.scope?.queryId === 'change_stream_unavailable'
           ? { available: false, reason: 'closed audit primitive forced Change Stream unavailability' }
           : await check();
         attempts.push(Object.freeze({
-          driver,
+          driver: driverName as SelectionAttempt['driver'],
           available: result?.available === true,
           ...(typeof result?.reason === 'string' && result.reason.length > 0 ? { reason: result.reason } : {}),
         }));
@@ -125,36 +149,39 @@ export function initAuditObserverTracker() {
       },
     ]));
     const result = await originalSelect(configuredOrder, observedChecks);
-    context.selection = Object.freeze({ configuredOrder: [...configuredOrder], attempts: Object.freeze(attempts) });
+    context.selection = { configuredOrder: [...configuredOrder], attempts: [...attempts] };
     return result;
   };
-  mongo._observeChanges = async function (...args) {
+  mongo._observeChanges = async function (...args: unknown[]): Promise<ObserveHandle> {
     const scope = extractAuditScope(args[0]);
-    const context = { scope };
-    const handle = scope?.runId === process.env.AUDIT_RUN_ID
+    const context: SelectionContext = { scope };
+    const correlatedScope = scope?.runId === runId ? scope : null;
+    const handle = correlatedScope
       ? await selectionContexts.run(context, () => original(...args))
       : await original(...args);
-    if (scope?.runId === process.env.AUDIT_RUN_ID) {
-      const drivers = driversByCase.get(scope.caseExecutionId) || new Set();
-      if (handle?._multiplexer?._observeDriver) drivers.add(handle._multiplexer._observeDriver);
-      driversByCase.set(scope.caseExecutionId, drivers);
+    if (correlatedScope) {
+      const drivers = driversByCase.get(correlatedScope.caseExecutionId) ?? new Set<AuditDriver>();
+      if (handle?._multiplexer?._observeDriver) drivers.add(handle._multiplexer._observeDriver as AuditDriver);
+      driversByCase.set(correlatedScope.caseExecutionId, drivers);
       const multiplexer = handle?._multiplexer;
       const className = multiplexer?._observeDriver?.constructor?.name;
-      const actualDriver = DRIVER_NAMES[className] || `unknown:${className || 'undefined'}`;
+      const actualDriver = typeof className === 'string' && className in DRIVER_NAMES
+        ? DRIVER_NAMES[className as keyof typeof DRIVER_NAMES]
+        : `unknown:${className || 'undefined'}`;
       const observedFallback = deriveObservedFallback(context.selection, actualDriver);
       if (observedFallback && multiplexer) {
         fallbackProvenanceByMultiplexer.set(multiplexer, observedFallback);
       }
-      const fallback = observedFallback || fallbackProvenanceByMultiplexer.get(multiplexer);
+      const fallback = observedFallback || (multiplexer ? fallbackProvenanceByMultiplexer.get(multiplexer) : undefined);
       observations.push(Object.freeze({
         sequence: ++sequence,
         monotonicNs: process.hrtime.bigint().toString(),
-        instanceId: process.env.AUDIT_INSTANCE_ID,
-        runId: scope.runId,
-        caseExecutionId: scope.caseExecutionId,
-        queryId: scope.queryId,
-        cursorOrdinal: scope.cursorOrdinal,
-        cursorFingerprint: scope.cursorFingerprint,
+        instanceId,
+        runId: correlatedScope.runId,
+        caseExecutionId: correlatedScope.caseExecutionId,
+        queryId: correlatedScope.queryId,
+        cursorOrdinal: correlatedScope.cursorOrdinal,
+        cursorFingerprint: correlatedScope.cursorFingerprint,
         actualDriver,
         ...(fallback || {}),
         multiplexerIdentity: multiplexerIdentity(multiplexer),
@@ -166,14 +193,14 @@ export function initAuditObserverTracker() {
   Meteor.methods({
     'audit.echo'(request) {
       return validateAuditEchoRequest(request, {
-        runId: process.env.AUDIT_RUN_ID,
-        ownershipToken: process.env.AUDIT_OWNERSHIP_TOKEN,
+        runId,
+        ownershipToken,
       });
     },
     'audit.monitorSnapshot'(request) {
       const filter = validateAuditMonitorRequest(request, {
-        runId: process.env.AUDIT_RUN_ID,
-        ownershipToken: process.env.AUDIT_OWNERSHIP_TOKEN,
+        runId,
+        ownershipToken,
       });
       return observations.filter(({ runId, caseExecutionId }) => (
         runId === filter.runId
@@ -182,12 +209,12 @@ export function initAuditObserverTracker() {
     },
     async 'audit.faultControl'(request) {
       const fault = validateAuditFaultRequest(request, {
-        runId: process.env.AUDIT_RUN_ID,
-        ownershipToken: process.env.AUDIT_OWNERSHIP_TOKEN,
+        runId,
+        ownershipToken,
       }, INTERNAL_FAULT_CONTROLLERS);
       const key = `${fault.caseExecutionId}:${fault.faultId}`;
       const drivers = caseDrivers(fault.caseExecutionId);
-      const streams = [...new Set(drivers.map((driver) => driver?._sharedStream).filter(Boolean))];
+      const streams = [...new Set(drivers.map((driver) => driver._sharedStream).filter((stream): stream is SharedStream => Boolean(stream)))];
       if (fault.operation === 'status') {
         const active = activeFaults.get(key);
         if (!active || active.controller !== fault.controller) throw new Error('audit fault was not activated by this process');
@@ -195,7 +222,7 @@ export function initAuditObserverTracker() {
       }
       if (fault.operation === 'activate') {
         if (activeFaults.has(key)) throw new Error('audit fault is already active');
-        let gate = null;
+        let gate: DriverGate | null = null;
         if (fault.controller === 'startup_snapshot_pause') {
           gate = installDriverGate(drivers, fault.caseExecutionId, '_sendInitialAdds');
         } else if (fault.controller === 'watch_setup_pause') {
@@ -209,8 +236,7 @@ export function initAuditObserverTracker() {
         } else if (fault.controller === 'change_stream_repeated_restart') {
           await Promise.all(streams.map(async (stream) => { await stream._restart(); await stream._restart(); }));
         } else {
-          const error = new Error(`declarative audit fault: ${fault.controller}`);
-          error.code = 91;
+          const error = Object.assign(new Error(`declarative audit fault: ${fault.controller}`), { code: 91 });
           for (const stream of streams) stream._changeStream?.emit('error', error);
         }
         activeFaults.set(key, { ...fault, activatedAt: Date.now(), gate });

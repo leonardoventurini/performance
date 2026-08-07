@@ -13,13 +13,15 @@ Package.describe({
 Package.onUse(function(api) {
   api.versionsFrom('2.16');
   api.use('ecmascript');
-  api.mainModule('tasks-common.client.js', ['client']);
-  api.mainModule('tasks-common.server.js', ['server']);
+  api.use('typescript@5.11.0-beta351.0');
+  api.mainModule('tasks-common.client.tsx', ['client']);
+  api.mainModule('tasks-common.server.ts', ['server']);
 });
 
 Package.onTest(function(api) {
   api.use('ecmascript');
+  api.use('typescript@5.11.0-beta351.0');
   api.use('tinytest');
   api.use('tasks-common');
-  api.mainModule('tasks-common-tests.js');
+  api.mainModule('tasks-common-tests.ts');
 });

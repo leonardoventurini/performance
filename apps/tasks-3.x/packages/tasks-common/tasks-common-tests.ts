@@ -61,14 +61,17 @@ Tinytest.add('tasks-common - returns both server-owned projection cursors', (tes
     caseExecutionId: 'case-1',
     queryId: 'multiple_projections',
   });
+  const firstPlan = plans[0];
+  const secondPlan = plans[1];
+  if (!firstPlan || !secondPlan) throw new Error('multiple_projections must return two plans');
   test.equal(plans.length, 2);
-  test.equal(plans[0].options.fields, { sequence: 1, projected: 1 });
-  test.equal(plans[1].options.fields, { sequence: 1, nested: 1 });
-  test.equal(plans[0].options._auditObserverScope.cursorOrdinal, 0);
-  test.equal(plans[1].options._auditObserverScope.cursorOrdinal, 1);
-  test.isNotUndefined(plans[0].options._auditObserverScope.cursorFingerprint);
+  test.equal(firstPlan.options.fields, { sequence: 1, projected: 1 });
+  test.equal(secondPlan.options.fields, { sequence: 1, nested: 1 });
+  test.equal(firstPlan.options._auditObserverScope?.cursorOrdinal, 0);
+  test.equal(secondPlan.options._auditObserverScope?.cursorOrdinal, 1);
+  test.isNotUndefined(firstPlan.options._auditObserverScope?.cursorFingerprint);
   test.isFalse(
-    plans[0].options._auditObserverScope.cursorFingerprint
-      === plans[1].options._auditObserverScope.cursorFingerprint,
+    firstPlan.options._auditObserverScope?.cursorFingerprint
+      === secondPlan.options._auditObserverScope?.cursorFingerprint,
   );
 });

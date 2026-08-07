@@ -36,7 +36,16 @@ import { installDumpOnShutdown } from './_dump-on-shutdown';
 
 const MAX_SOCKETS = 100_000;
 
-const sockets = new Map(); // connId -> { socket?, startRead, startWritten, endRead?, endWritten? }
+interface RawSocket { readonly bytesRead: number; readonly bytesWritten: number }
+interface PrivateConnection {
+  readonly id: string;
+  readonly _session?: { readonly socket?: { readonly _socket?: RawSocket } & Partial<RawSocket>; readonly _socket?: { readonly _socket?: RawSocket } & Partial<RawSocket> };
+  readonly _socket?: { readonly _socket?: RawSocket } & Partial<RawSocket>;
+  onClose(callback: () => void): void;
+}
+interface SocketEntry { socket: RawSocket; startRead: number; startWritten: number }
+
+const sockets = new Map<string, SocketEntry>();
 let closedRead = 0;   // accumulated compressed bytes from sockets that already closed
 let closedWritten = 0;
 let socketResolutionWarned = false;
@@ -47,7 +56,7 @@ let socketResolutionWarned = false;
 // (different Meteor minor / different transport), we log once and the
 // metric ends up empty for that connection — handled by the absence
 // convention upstream.
-function findRawSocket(conn) {
+function findRawSocket(conn: PrivateConnection): RawSocket | null {
   const candidates = [
     () => conn?._session?.socket?._socket,
     () => conn?._session?.socket,
@@ -59,7 +68,9 @@ function findRawSocket(conn) {
   for (const get of candidates) {
     try {
       const s = get();
-      if (s && typeof s.bytesRead === 'number' && typeof s.bytesWritten === 'number') return s;
+      if (s && typeof s.bytesRead === 'number' && typeof s.bytesWritten === 'number') {
+        return { bytesRead: s.bytesRead, bytesWritten: s.bytesWritten };
+      }
     } catch {}
   }
   return null;
@@ -73,7 +84,8 @@ export function initCompressionTracker() {
   if (!outputPath) return;
   patched = true;
 
-  Meteor.onConnection((conn) => {
+  Meteor.onConnection((connection) => {
+    const conn = connection as PrivateConnection;
     if (sockets.size >= MAX_SOCKETS) return;
 
     // Defer one event-loop turn so the session/socket exist

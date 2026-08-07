@@ -24,9 +24,21 @@ import { performance } from 'node:perf_hooks';
 import { installDumpOnShutdown } from './_dump-on-shutdown';
 
 const MAX_SAMPLES_PER_PUB = 100_000;
-const samples = new Map(); // pubName -> number[]
+const samples = new Map<string, number[]>();
+interface TimedSubscription {
+  _benchStart: number | null;
+  readonly _name: string;
+  ready(): unknown;
+}
+type PublishHandler = (this: TimedSubscription, ...arguments_: unknown[]) => unknown;
+interface PublishRuntime { publish(name: string, handler: PublishHandler): unknown }
 
-function recordSample(name, ms) {
+function publishRuntime(value: object): PublishRuntime {
+  if (!('publish' in value) || typeof value.publish !== 'function') throw new TypeError('Meteor.publish is unavailable');
+  return value as PublishRuntime;
+}
+
+function recordSample(name: string, ms: number): void {
   let arr = samples.get(name);
   if (!arr) {
     arr = [];
@@ -40,20 +52,21 @@ function recordSample(name, ms) {
 let patched = false;
 let prototypePatched = false;
 
-export function initSubTiming() {
+export function initSubTiming(): void {
   if (patched) return;
   const outputPath = process.env.SUB_TIMING_OUTPUT;
   if (!outputPath) return;
   patched = true;
 
-  const origPublish = Meteor.publish.bind(Meteor);
-  Meteor.publish = function (name, handler) {
-    return origPublish(name, function (...args) {
+  const runtime = publishRuntime(Meteor);
+  const origPublish = runtime.publish.bind(runtime);
+  runtime.publish = function (name: string, handler: PublishHandler) {
+    return origPublish(name, function (this: TimedSubscription, ...args: unknown[]) {
       const sub = this;
       if (!prototypePatched) {
-        const proto = Object.getPrototypeOf(sub);
+        const proto = Object.getPrototypeOf(sub) as TimedSubscription;
         const origReady = proto.ready;
-        proto.ready = function () {
+        proto.ready = function (this: TimedSubscription) {
           // ready() can fire multiple times in lifecycle edge cases;
           // only count the first (initial-batch latency, what the user perceives).
           if (this._benchStart != null) {
@@ -70,7 +83,7 @@ export function initSubTiming() {
   };
 
   installDumpOnShutdown(outputPath, () => {
-    const dump = {};
+    const dump: Record<string, number[]> = {};
     for (const [name, arr] of samples) dump[name] = arr;
     return dump;
   }, 'sub-timing');

@@ -49,21 +49,23 @@
 
 import { Meteor } from 'meteor/meteor';
 import { installDumpOnShutdown } from './_dump-on-shutdown';
+import { privateMeteor } from './_private-types';
+import type { DdpMessage, PrivateSession } from './_private-types';
 
-const byIn = new Map(); // msgType -> count (client → server)
-const byOut = new Map(); // msgType -> count (server → client)
+const byIn = new Map<string, number>(); // msgType -> count (client → server)
+const byOut = new Map<string, number>(); // msgType -> count (server → client)
 let totalIn = 0;
 let totalOut = 0;
 let startTime = 0;
 
-function countIncoming(msg) {
+function countIncoming(msg: DdpMessage): void {
   const type = msg?.msg;
   if (typeof type !== 'string') return;
   byIn.set(type, (byIn.get(type) || 0) + 1);
   totalIn++;
 }
 
-function countOutgoing(msg) {
+function countOutgoing(msg: DdpMessage): void {
   const type = msg?.msg;
   if (typeof type !== 'string') return;
   byOut.set(type, (byOut.get(type) || 0) + 1);
@@ -80,11 +82,11 @@ let sessionProtoPatched = false;
 // until a DDP `connect` message has been processed.
 function tryPatchSessionProto() {
   if (sessionProtoPatched) return true;
-  const sessions = Meteor.server?.sessions;
+  const sessions = privateMeteor(Meteor).server?.sessions;
   if (!sessions) return false;
   // Meteor 3.x stores sessions in a Map; older versions used a plain
   // object. Grab any one — the prototype is shared across all sessions.
-  let firstSession = null;
+  let firstSession: PrivateSession | undefined;
   if (sessions instanceof Map) {
     firstSession = sessions.values().next().value;
   } else if (typeof sessions === 'object') {
@@ -95,11 +97,11 @@ function tryPatchSessionProto() {
   }
   if (!firstSession) return false;
 
-  const proto = Object.getPrototypeOf(firstSession);
+  const proto = Object.getPrototypeOf(firstSession) as PrivateSession;
   if (typeof proto?.send !== 'function') return false;
 
   const origSend = proto.send;
-  proto.send = function (msg) {
+  proto.send = function (msg: DdpMessage) {
     countOutgoing(msg);
     return origSend.call(this, msg);
   };
@@ -117,7 +119,7 @@ export function initDdpMessageCounter() {
   // Incoming: official hook, structured msg. Also a convenient place to
   // retry the outgoing-send patch in case a session sent a message
   // before our onConnection defer fired.
-  Meteor.onMessage((msg) => {
+  privateMeteor(Meteor).onMessage((msg) => {
     if (!sessionProtoPatched) tryPatchSessionProto();
     countIncoming(msg);
   });

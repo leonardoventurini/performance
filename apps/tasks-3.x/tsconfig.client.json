@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "types": ["meteor", "react", "react-dom"]
+  },
+  "include": ["client/**/*.ts", "client/**/*.tsx", "packages/tasks-common/**/*.ts", "packages/tasks-common/**/*.tsx", "types/**/*.d.ts"],
+  "exclude": ["packages/tasks-common/**/*-tests.ts", ".meteor/local", "node_modules"]
+}

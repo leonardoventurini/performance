@@ -2,14 +2,27 @@ const AUDIT_IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const AUDIT_CURSOR_SCOPE_OPTION = '_auditObserverScope';
 const OBSERVER_DRIVERS = Object.freeze(['changeStreams', 'oplog', 'polling']);
 
-function identifier(value) {
+type ObserverDriver = typeof OBSERVER_DRIVERS[number];
+interface AuditExpected { runId: string; ownershipToken: string }
+interface AuditSelectionAttempt { driver: ObserverDriver; available: boolean; reason?: string }
+interface AuditSelection { configuredOrder: ObserverDriver[]; attempts: AuditSelectionAttempt[] }
+type FaultOperation = 'activate' | 'status' | 'restore';
+
+function objectValue(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown> : null;
+}
+
+function identifier(value: unknown): string | null {
   return typeof value === 'string' && AUDIT_IDENTIFIER.test(value) ? value : null;
 }
 
 /** Reads the closed, server-generated audit tag from a Meteor cursor description. */
-export function extractAuditScope(cursorDescription) {
-  const value = cursorDescription?.options?.[AUDIT_CURSOR_SCOPE_OPTION];
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+export function extractAuditScope(cursorDescription: unknown) {
+  const description = objectValue(cursorDescription);
+  const options = objectValue(description?.options);
+  const value = objectValue(options?.[AUDIT_CURSOR_SCOPE_OPTION]);
+  if (!value) return null;
   const expectedKeys = [
     'caseExecutionId', 'cursorFingerprint', 'cursorOrdinal', 'queryId', 'runId',
   ];
@@ -20,7 +33,7 @@ export function extractAuditScope(cursorDescription) {
   const cursorFingerprint = identifier(value.cursorFingerprint);
   const cursorOrdinal = value.cursorOrdinal;
   if (!runId || !caseExecutionId || !queryId || !cursorFingerprint
-    || !Number.isSafeInteger(cursorOrdinal) || cursorOrdinal < 0) return null;
+    || typeof cursorOrdinal !== 'number' || !Number.isSafeInteger(cursorOrdinal) || cursorOrdinal < 0) return null;
   return Object.freeze({ runId, caseExecutionId, queryId, cursorOrdinal, cursorFingerprint });
 }
 
@@ -28,11 +41,11 @@ export function extractAuditScope(cursorDescription) {
  * Returns fallback provenance only when Meteor's driver selection checks
  * independently observed why the preferred driver was rejected.
  */
-export function deriveObservedFallback(selection, actualDriver) {
+export function deriveObservedFallback(selection: AuditSelection | null | undefined, actualDriver: string) {
   if (!selection || typeof selection !== 'object' || !OBSERVER_DRIVERS.includes(actualDriver)) return null;
   if (!Array.isArray(selection.configuredOrder) || !Array.isArray(selection.attempts)) return null;
   const fallbackFrom = selection.configuredOrder[0];
-  if (!OBSERVER_DRIVERS.includes(fallbackFrom) || fallbackFrom === actualDriver) return null;
+  if (!fallbackFrom || !OBSERVER_DRIVERS.includes(fallbackFrom) || fallbackFrom === actualDriver) return null;
   const rejected = selection.attempts.find(({ driver }) => driver === fallbackFrom);
   if (!rejected || rejected.available !== false || typeof rejected.reason !== 'string' || rejected.reason.length === 0) {
     return null;
@@ -41,8 +54,9 @@ export function deriveObservedFallback(selection, actualDriver) {
 }
 
 /** Validates the authenticated read request for correlated observer evidence. */
-export function validateAuditMonitorRequest(value, expected) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+export function validateAuditMonitorRequest(input: unknown, expected: AuditExpected) {
+  const value = objectValue(input);
+  if (!value) {
     throw new TypeError('audit monitor request must be an object');
   }
   const unknown = Object.keys(value).filter((key) => !['runId', 'caseExecutionId', 'ownershipToken'].includes(key));
@@ -58,37 +72,42 @@ export function validateAuditMonitorRequest(value, expected) {
   if (value.caseExecutionId !== undefined && !caseExecutionId) {
     throw new TypeError('caseExecutionId must be a valid audit identifier');
   }
-  return Object.freeze({ runId: value.runId, caseExecutionId });
+  return Object.freeze({ runId: expected.runId, caseExecutionId });
 }
 
 /** Validates an ownership-attested request for one closed in-process fault primitive. */
-export function validateAuditFaultRequest(value, expected, controllers) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+export function validateAuditFaultRequest(input: unknown, expected: AuditExpected, controllers: readonly string[]) {
+  const value = objectValue(input);
+  if (!value) {
     throw new TypeError('audit fault request must be an object');
   }
   const allowed = ['runId', 'caseExecutionId', 'ownershipToken', 'controller', 'operation', 'faultId'];
   const unknown = Object.keys(value).filter((key) => !allowed.includes(key));
   if (unknown.length > 0) throw new TypeError(`unknown audit fault fields: ${unknown.sort().join(', ')}`);
-  validateAuditMonitorRequest({
+  const monitor = validateAuditMonitorRequest({
     runId: value.runId,
     caseExecutionId: value.caseExecutionId,
     ownershipToken: value.ownershipToken,
   }, expected);
-  if (!controllers.includes(value.controller)) throw new TypeError('unknown audit fault controller');
-  if (!['activate', 'status', 'restore'].includes(value.operation)) throw new TypeError('unknown audit fault operation');
-  if (!identifier(value.faultId)) throw new TypeError('faultId must be a valid audit identifier');
+  if (!monitor.caseExecutionId) throw new TypeError('caseExecutionId is required for audit faults');
+  if (typeof value.controller !== 'string' || !controllers.includes(value.controller)) throw new TypeError('unknown audit fault controller');
+  if (typeof value.operation !== 'string' || !['activate', 'status', 'restore'].includes(value.operation)) throw new TypeError('unknown audit fault operation');
+  const operation = value.operation as FaultOperation;
+  const faultId = identifier(value.faultId);
+  if (!faultId) throw new TypeError('faultId must be a valid audit identifier');
   return Object.freeze({
-    runId: value.runId,
-    caseExecutionId: value.caseExecutionId,
+    runId: monitor.runId,
+    caseExecutionId: monitor.caseExecutionId,
     controller: value.controller,
-    operation: value.operation,
-    faultId: value.faultId,
+    operation,
+    faultId,
   });
 }
 
 /** Validates a bounded ownership-attested EJSON transport echo. */
-export function validateAuditEchoRequest(value, expected, maximumBytes = 16_777_216) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+export function validateAuditEchoRequest(input: unknown, expected: AuditExpected, maximumBytes = 16_777_216) {
+  const value = objectValue(input);
+  if (!value) {
     throw new TypeError('audit echo request must be an object');
   }
   const unknown = Object.keys(value).filter((key) => !['runId', 'ownershipToken', 'payload'].includes(key));

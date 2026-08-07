@@ -44,20 +44,22 @@
 import { Mongo } from 'meteor/mongo';
 import { Meteor } from 'meteor/meteor';
 import { installDumpOnShutdown } from './_dump-on-shutdown';
+import { privateMeteor } from './_private-types';
+import type { PrivateSession } from './_private-types';
 
 const MAX_SAMPLES = 100_000;
 const ATTRIBUTION_TTL_MS = 10_000;
 const CLEANUP_INTERVAL_MS = 5_000;
 
-const insertTimestamps = new Map(); // docId(string) -> insertTime(ms)
-const samples = []; // flat array of propagation latency ms
+const insertTimestamps = new Map<string, number>();
+const samples: number[] = [];
 
-function recordInsert(id) {
+function recordInsert(id: unknown): void {
   if (id == null) return;
   insertTimestamps.set(String(id), Date.now());
 }
 
-function recordPropagation(id) {
+function recordPropagation(id: unknown): void {
   if (id == null) return;
   if (samples.length >= MAX_SAMPLES) return;
   const key = String(id);
@@ -75,7 +77,7 @@ function recordPropagation(id) {
 
 let patched = false;
 let sessionProtoPatched = false;
-let cleanupTimer = null;
+let cleanupTimer: NodeJS.Timeout | null = null;
 
 // Grab Session.prototype off the first live session in Meteor.server.sessions
 // and patch sendAdded / sendChanged. Returns true once patched; idempotent
@@ -83,11 +85,11 @@ let cleanupTimer = null;
 // and sessions don't exist until a DDP `connect` message arrives.
 function tryPatchSessionProto() {
   if (sessionProtoPatched) return true;
-  const sessions = Meteor.server?.sessions;
+  const sessions = privateMeteor(Meteor).server?.sessions;
   if (!sessions) return false;
   // Meteor 3.x stores sessions in a Map; older versions used a plain object.
   // Iterate accordingly to grab any one — the prototype is shared.
-  let firstSession = null;
+  let firstSession: PrivateSession | undefined;
   if (sessions instanceof Map) {
     firstSession = sessions.values().next().value;
   } else if (typeof sessions === 'object') {
@@ -98,17 +100,17 @@ function tryPatchSessionProto() {
   }
   if (!firstSession) return false;
 
-  const proto = Object.getPrototypeOf(firstSession);
+  const proto = Object.getPrototypeOf(firstSession) as PrivateSession;
   if (typeof proto?.sendAdded !== 'function' || typeof proto?.sendChanged !== 'function') {
     return false;
   }
   const origSendAdded = proto.sendAdded;
-  proto.sendAdded = function (collection, id, fields) {
+  proto.sendAdded = function (collection: string, id: unknown, fields: Record<string, unknown>) {
     recordPropagation(id);
     return origSendAdded.call(this, collection, id, fields);
   };
   const origSendChanged = proto.sendChanged;
-  proto.sendChanged = function (collection, id, fields) {
+  proto.sendChanged = function (collection: string, id: unknown, fields: Record<string, unknown>) {
     recordPropagation(id);
     return origSendChanged.call(this, collection, id, fields);
   };
@@ -125,8 +127,11 @@ export function initPropagationTiming() {
   // Wrap Mongo.Collection.prototype.insertAsync — captures every
   // insert into any Collection instance. Lazy-tries to grab Session
   // prototype on every insert, in case it wasn't grabbed at connect.
-  const protoInsert = Mongo.Collection.prototype.insertAsync;
-  Mongo.Collection.prototype.insertAsync = async function (...args) {
+  type InsertFunction = (this: object, ...arguments_: unknown[]) => Promise<unknown>;
+  interface InsertPrototype { insertAsync: InsertFunction }
+  const collectionPrototype = Mongo.Collection.prototype as InsertPrototype;
+  const protoInsert = collectionPrototype.insertAsync;
+  collectionPrototype.insertAsync = async function (this: object, ...args: unknown[]) {
     const id = await protoInsert.apply(this, args);
     if (!sessionProtoPatched) tryPatchSessionProto();
     recordInsert(id);

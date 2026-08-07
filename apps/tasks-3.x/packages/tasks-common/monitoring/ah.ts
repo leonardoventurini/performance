@@ -5,38 +5,41 @@ export const AHCapture = {
   active: false,
 }
 
-const asyncResources = new Map();
+const asyncResources = new Map<string, ResourceInfo>();
 
-function logResourceCreation(asyncId, type, triggerAsyncId, resource) {
-  const stack = (new Error()).stack.split('\n').slice(2).filter(line => {
+interface ResourceInfo { count: number; types: Set<string> }
+interface ResourceLog { count: number; types: string[]; stack: string }
+
+function logResourceCreation(type: string): void {
+  const stack = (new Error()).stack?.split('\n').slice(2).filter((line) => {
     return !['AsyncHook.init', 'node:internal/async_hooks'].some(fn => line.includes(fn));
-  }).join('\n');
+  }).join('\n') ?? 'stack unavailable';
 
   if (!asyncResources.has(stack)) {
     asyncResources.set(stack, { count: 0, types: new Set() });
   }
 
-  const resourceInfo = asyncResources.get(stack);
+  const resourceInfo = asyncResources.get(stack) as ResourceInfo;
   resourceInfo.count++;
   resourceInfo.types.add(type);
 }
 
 const hooks = async_hooks.createHook({
-  init(asyncId, type, triggerAsyncId, resource) {
+  init(_asyncId, type) {
     if (!AHCapture.active) {
       return;
     }
 
-    logResourceCreation(asyncId, type, triggerAsyncId, resource);
+    logResourceCreation(type);
   },
 });
 
 hooks.enable();
 
-function printResults() {
-  let logs = []
+function printResults(): void {
+  let logs: ResourceLog[] = [];
 
-  asyncResources.forEach((info, stack) => {
+  asyncResources.forEach((info: ResourceInfo, stack: string) => {
     if (info.count <= 1) {
       return;
     }
@@ -57,4 +60,3 @@ function printResults() {
 
 // Set up an interval to print results periodically
 setInterval(printResults, 5000);
-

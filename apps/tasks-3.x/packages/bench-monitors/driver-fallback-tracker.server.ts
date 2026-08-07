@@ -22,6 +22,7 @@
 import { MongoInternals } from 'meteor/mongo';
 import { Meteor } from 'meteor/meteor';
 import { installDumpOnShutdown } from './_dump-on-shutdown';
+import { privateMongo } from './_private-types';
 
 const DRIVER_CLASS_TO_NAME = {
   ChangeStreamObserveDriver: 'changeStreams',
@@ -33,20 +34,20 @@ const DRIVER_CLASS_TO_NAME = {
 // meteor/packages/mongo/mongo_connection.js (same logic as server/main.js's
 // resolveConfiguredObserverDriver). The first entry is what Meteor PREFERS;
 // later entries are fall-throughs.
-function resolveConfiguredFirst() {
+function resolveConfiguredFirst(): string {
   const setting = Meteor.settings?.packages?.mongo?.reactivity;
   if (Array.isArray(setting) && setting.length) return setting[0];
   if (typeof setting === 'string' && setting) return setting;
   const envOrder = process.env.METEOR_REACTIVITY_ORDER;
-  if (envOrder) return envOrder.split(',')[0];
+  if (envOrder) return envOrder.split(',')[0] ?? 'changeStreams';
   return 'changeStreams'; // Meteor 3 DEFAULT_REACTIVITY_ORDER first entry
 }
 
-const observeCounts = new Map(); // `configured_to_actual` -> count
+const observeCounts = new Map<string, number>();
 let totalObserves = 0;
-let configuredFirst = null;
+let configuredFirst: string | null = null;
 
-function record(actualName) {
+function record(actualName: string): void {
   totalObserves++;
   const key = actualName === configuredFirst
     ? `${configuredFirst}_no_fallback`
@@ -64,8 +65,8 @@ export function initDriverFallbackTracker() {
 
   configuredFirst = resolveConfiguredFirst();
 
-  const mongo = MongoInternals?.defaultRemoteCollectionDriver?.()?.mongo;
-  if (!mongo || typeof mongo._observeChanges !== 'function') {
+  const mongo = privateMongo(MongoInternals?.defaultRemoteCollectionDriver?.()?.mongo);
+  if (!mongo) {
     process.stderr.write('[driver-fallback] mongo._observeChanges not reachable — metric will be empty\n');
     return;
   }
@@ -74,11 +75,13 @@ export function initDriverFallbackTracker() {
   // mongo connection in a Meteor app; wrapping the instance avoids any
   // risk of double-wrap when other code touches the prototype.
   const orig = mongo._observeChanges.bind(mongo);
-  mongo._observeChanges = async function (...args) {
+  mongo._observeChanges = async function (...args: unknown[]) {
     const handle = await orig(...args);
     try {
       const className = handle?._multiplexer?._observeDriver?.constructor?.name;
-      const actualName = DRIVER_CLASS_TO_NAME[className] || `unknown:${className || 'undefined'}`;
+      const actualName = typeof className === 'string' && className in DRIVER_CLASS_TO_NAME
+        ? DRIVER_CLASS_TO_NAME[className as keyof typeof DRIVER_CLASS_TO_NAME]
+        : `unknown:${className || 'undefined'}`;
       record(actualName);
     } catch {
       // Swallow — observers should never break because of measurement.
@@ -87,7 +90,7 @@ export function initDriverFallbackTracker() {
   };
 
   installDumpOnShutdown(outputPath, () => {
-    const fallbacks = {};
+    const fallbacks: Record<string, number> = {};
     let noFallback = 0;
     for (const [key, count] of observeCounts) {
       if (key.endsWith('_no_fallback')) noFallback += count;

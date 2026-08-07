@@ -1,14 +1,21 @@
 import { ReliabilityCollection, TasksCollection, initializeTaskCollection, registerTaskApi } from './tasks-common';
-import React, { useCallback, useEffect, useState, useRef } from 'react';
+import { useCallback, useEffect, useState, useRef } from 'react';
+import type { Dispatch, SetStateAction } from 'react';
 import { useFind, useSubscribe } from 'meteor/react-meteor-data';
 import { Random } from 'meteor/random';
+import { Meteor } from 'meteor/meteor';
+import type { TaskDocument } from './tasks-collection';
+
+interface TaskListProps { tasks: readonly TaskDocument[] }
+interface ReactiveProps extends TaskListProps { setTasks: Dispatch<SetStateAction<TaskDocument[]>> }
+interface NonReactiveProps extends TaskListProps { fetchTasks: () => Promise<void> }
 
 const App = () => {
   const sessionIdRef = useRef(Random.id());
   const sessionId = sessionIdRef?.current;
 
   const [reactive, setReactive] = useState(true);
-  const [tasks, setTasks] = useState([]);
+  const [tasks, setTasks] = useState<TaskDocument[]>([]);
   const onToggleReactive = useCallback(() => {
     setReactive(!reactive);
     setTasks([]);
@@ -40,7 +47,9 @@ const App = () => {
 
   const fetchTasks = useCallback(async () => {
     if (reactive) return;
-    setTasks(await Meteor.callAsync('fetchTasks'));
+    const fetched: unknown = await Meteor.callAsync('fetchTasks');
+    if (!Array.isArray(fetched)) throw new TypeError('fetchTasks returned a non-array payload');
+    setTasks(fetched as TaskDocument[]);
   }, [reactive, tasks.length]);
 
   return (
@@ -64,13 +73,13 @@ const App = () => {
           <button className="remove-task" onClick={onRemoveClick} style={{ margin: 4 }}>Remove task</button>
           <button className="remove-all-tasks" onClick={onRemoveAllClick} style={{ margin: 4 }}>Remove all tasks</button>
         </div>
-        {reactive ? <AppReactive tasks={tasks} setTasks={setTasks} /> : <AppNonReactive tasks={tasks} setTasks={setTasks} fetchTasks={fetchTasks} />}
+        {reactive ? <AppReactive tasks={tasks} setTasks={setTasks} /> : <AppNonReactive tasks={tasks} fetchTasks={fetchTasks} />}
       </div>
     </div>
   );
 };
 
-const AppReactive = ({ tasks, setTasks }) => {
+const AppReactive = ({ tasks, setTasks }: ReactiveProps) => {
   const isLoading = useSubscribe('fetchTasks');
   const trackerTasks = useFind(() => TasksCollection.find());
   useEffect(() => {
@@ -83,14 +92,14 @@ const AppReactive = ({ tasks, setTasks }) => {
 };
 
 
-const AppNonReactive = ({ tasks, fetchTasks }) => {
+const AppNonReactive = ({ tasks, fetchTasks }: NonReactiveProps) => {
   useEffect(() => {
     fetchTasks();
   }, []);
   return <TasksList tasks={tasks} />;
 };
 
-const TasksList = ({ tasks }) => {
+const TasksList = ({ tasks }: TaskListProps) => {
   return (
     <ul>
       {tasks.map(task => {

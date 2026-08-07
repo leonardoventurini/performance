@@ -24,14 +24,16 @@ import fs from 'node:fs';
 
 const SNAPSHOT_INTERVAL_MS = 5000;
 
-export function installDumpOnShutdown(outputPath, getDump, label) {
+export function installDumpOnShutdown(outputPath: string | undefined, getDump: () => unknown, label: string): void {
   if (!outputPath) return;
+  const resolvedOutputPath = outputPath;
 
-  function write(reason) {
+  function write(reason: string): void {
     try {
-      fs.writeFileSync(outputPath, JSON.stringify(getDump()));
-    } catch (err) {
-      process.stderr.write(`[${label}] dump (${reason}) failed: ${err.message}\n`);
+      fs.writeFileSync(resolvedOutputPath, JSON.stringify(getDump()));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      process.stderr.write(`[${label}] dump (${reason}) failed: ${message}\n`);
     }
   }
 

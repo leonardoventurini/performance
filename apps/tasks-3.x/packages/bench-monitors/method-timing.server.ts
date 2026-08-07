@@ -23,9 +23,16 @@ import { performance } from 'node:perf_hooks';
 import { installDumpOnShutdown } from './_dump-on-shutdown';
 
 const MAX_SAMPLES_PER_METHOD = 100_000;
-const samples = new Map(); // methodName -> number[]
+const samples = new Map<string, number[]>();
+type MethodHandler = (this: object, ...arguments_: unknown[]) => unknown;
+interface MethodRuntime { methods(handlers: Record<string, MethodHandler>): void }
 
-function recordSample(name, ms) {
+function methodRuntime(value: object): MethodRuntime {
+  if (!('methods' in value) || typeof value.methods !== 'function') throw new TypeError('Meteor.methods is unavailable');
+  return value as MethodRuntime;
+}
+
+function recordSample(name: string, ms: number): void {
   let arr = samples.get(name);
   if (!arr) {
     arr = [];
@@ -38,17 +45,18 @@ function recordSample(name, ms) {
 
 let patched = false;
 
-export function initMethodTiming() {
+export function initMethodTiming(): void {
   if (patched) return;
   const outputPath = process.env.METHOD_TIMING_OUTPUT;
   if (!outputPath) return;
   patched = true;
 
-  const origMethods = Meteor.methods.bind(Meteor);
-  Meteor.methods = function (handlers) {
-    const wrapped = {};
+  const runtime = methodRuntime(Meteor);
+  const origMethods = runtime.methods.bind(runtime);
+  runtime.methods = function (handlers: Record<string, MethodHandler>): void {
+    const wrapped: Record<string, MethodHandler> = {};
     for (const [name, fn] of Object.entries(handlers)) {
-      wrapped[name] = async function (...args) {
+      wrapped[name] = async function (this: object, ...args: unknown[]) {
         const start = performance.now();
         try {
           return await fn.apply(this, args);
@@ -61,7 +69,7 @@ export function initMethodTiming() {
   };
 
   installDumpOnShutdown(outputPath, () => {
-    const dump = {};
+    const dump: Record<string, number[]> = {};
     for (const [name, arr] of samples) dump[name] = arr;
     return dump;
   }, 'method-timing');

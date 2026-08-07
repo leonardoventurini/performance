@@ -38,15 +38,17 @@
 
 import { Meteor } from 'meteor/meteor';
 import { installDumpOnShutdown } from './_dump-on-shutdown';
+import { privateMeteor } from './_private-types';
+import type { DdpMessage, PrivateSession } from './_private-types';
 
 const MAX_SAMPLES = 200_000;
 
-const inSizes = [];  // byte sizes of incoming messages (client → server)
-const outSizes = []; // byte sizes of outgoing messages (server → client)
-const byTypeInSum = new Map();  // msgType -> summed bytes in
-const byTypeOutSum = new Map(); // msgType -> summed bytes out
+const inSizes: number[] = [];  // byte sizes of incoming messages (client → server)
+const outSizes: number[] = []; // byte sizes of outgoing messages (server → client)
+const byTypeInSum = new Map<string, number>();  // msgType -> summed bytes in
+const byTypeOutSum = new Map<string, number>(); // msgType -> summed bytes out
 
-function sizeOf(msg) {
+function sizeOf(msg: DdpMessage): number {
   // JSON.stringify can throw on circular refs; DDP messages are plain
   // serializable objects, but guard anyway so a weird msg never crashes
   // the app's hot path. null serializes to "null" (4 bytes) — treat a
@@ -60,14 +62,14 @@ function sizeOf(msg) {
   }
 }
 
-function recordIncoming(msg) {
+function recordIncoming(msg: DdpMessage): void {
   const bytes = sizeOf(msg);
   if (inSizes.length < MAX_SAMPLES) inSizes.push(bytes);
   const type = msg?.msg;
   if (typeof type === 'string') byTypeInSum.set(type, (byTypeInSum.get(type) || 0) + bytes);
 }
 
-function recordOutgoing(msg) {
+function recordOutgoing(msg: DdpMessage): void {
   const bytes = sizeOf(msg);
   if (outSizes.length < MAX_SAMPLES) outSizes.push(bytes);
   const type = msg?.msg;
@@ -83,9 +85,9 @@ let sessionProtoPatched = false;
 // until a DDP `connect` has been processed.
 function tryPatchSessionProto() {
   if (sessionProtoPatched) return true;
-  const sessions = Meteor.server?.sessions;
+  const sessions = privateMeteor(Meteor).server?.sessions;
   if (!sessions) return false;
-  let firstSession = null;
+  let firstSession: PrivateSession | undefined;
   if (sessions instanceof Map) {
     firstSession = sessions.values().next().value;
   } else if (typeof sessions === 'object') {
@@ -96,11 +98,11 @@ function tryPatchSessionProto() {
   }
   if (!firstSession) return false;
 
-  const proto = Object.getPrototypeOf(firstSession);
+  const proto = Object.getPrototypeOf(firstSession) as PrivateSession;
   if (typeof proto?.send !== 'function') return false;
 
   const origSend = proto.send;
-  proto.send = function (msg) {
+  proto.send = function (msg: DdpMessage) {
     recordOutgoing(msg);
     return origSend.call(this, msg);
   };
@@ -114,7 +116,7 @@ export function initFrameSizeCounter() {
   if (!outputPath) return;
   patched = true;
 
-  Meteor.onMessage((msg) => {
+  privateMeteor(Meteor).onMessage((msg) => {
     if (!sessionProtoPatched) tryPatchSessionProto();
     recordIncoming(msg);
   });

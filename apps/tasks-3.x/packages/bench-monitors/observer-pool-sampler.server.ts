@@ -41,15 +41,17 @@
 
 import { MongoInternals } from 'meteor/mongo';
 import { installDumpOnShutdown } from './_dump-on-shutdown';
+import { privateMongo } from './_private-types';
 
 const DEFAULT_INTERVAL_MS = 1000;
 const MAX_SAMPLES = 10_000;
 
-const samples = []; // [{ ts, muxCount, handleCount }]
+interface ObserverPoolSample { ts: number; muxCount: number; handleCount: number }
+const samples: ObserverPoolSample[] = [];
 
-function snapshot() {
-  const mongo = MongoInternals.defaultRemoteCollectionDriver().mongo;
-  const muxers = mongo._observeMultiplexers || {};
+function snapshot(): { muxCount: number; handleCount: number } {
+  const mongo = privateMongo(MongoInternals.defaultRemoteCollectionDriver().mongo);
+  const muxers = mongo?._observeMultiplexers ?? {};
   let muxCount = 0;
   let handleCount = 0;
   for (const key in muxers) {
@@ -61,9 +63,9 @@ function snapshot() {
 }
 
 let started = false;
-let timer = null;
+let timer: NodeJS.Timeout | null = null;
 
-export function initObserverPoolSampler() {
+export function initObserverPoolSampler(): void {
   if (started) return;
   const outputPath = process.env.OBSERVER_POOL_OUTPUT;
   if (!outputPath) return;
