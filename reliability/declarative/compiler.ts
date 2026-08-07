@@ -6,6 +6,7 @@ import {
 } from '../contracts/declarative-audit.js';
 import { contractDigest } from '../contracts/digest.js';
 import type { CaseCoordinate } from '../contracts/release-audit.js';
+import type { CompiledCasePlan } from '../contracts/declarative-audit.js';
 import type { CatalogEntry } from './catalog.js';
 
 export const DECLARATIVE_AUDIT_INTERPRETER_VERSION = 'change-stream-interpreter-v1';
@@ -18,22 +19,23 @@ interface Definition extends CatalogEntry { readonly applicability: readonly App
 interface Profile extends CatalogEntry { readonly parameters: Readonly<Record<string, ParameterValue>>; readonly caseTimeoutMs: number }
 interface CoordinateMatrix { readonly coordinates: readonly (Omit<CaseCoordinate, 'caseId'> & { readonly caseId: string })[] }
 interface CompilerCatalog { readonly contract: CatalogEntry; readonly digest: string; readonly casesById: ReadonlyMap<string, CatalogEntry>; readonly profilesById: ReadonlyMap<string, CatalogEntry> }
-export interface CompiledCasePlan extends Record<string, unknown> { readonly digest: string; readonly resolvedParameters: Readonly<Record<string, ParameterValue>>; readonly budget: Readonly<Record<string, number>> & { readonly caseTimeoutMs: number } }
+function isCompiledCasePlan(value: unknown): value is CompiledCasePlan {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  return Reflect.get(value, 'schemaVersion') === 1
+    && typeof Reflect.get(value, 'contractId') === 'string'
+    && typeof Reflect.get(value, 'contractDigest') === 'string'
+    && typeof Reflect.get(value, 'caseDefinitionDigest') === 'string'
+    && typeof Reflect.get(value, 'profileId') === 'string'
+    && typeof Reflect.get(value, 'digest') === 'string'
+    && Array.isArray(Reflect.get(value, 'steps'));
+}
 
 function compiledPlan(value: unknown): CompiledCasePlan {
   const validated = validateCompiledCasePlan(value);
-  if (typeof validated.digest !== 'string' || !validated.resolvedParameters || typeof validated.resolvedParameters !== 'object' || Array.isArray(validated.resolvedParameters)
-    || !validated.budget || typeof validated.budget !== 'object' || Array.isArray(validated.budget) || !('caseTimeoutMs' in validated.budget) || typeof validated.budget.caseTimeoutMs !== 'number') {
+  if (!isCompiledCasePlan(validated)) {
     throw new TypeError('validated compiled plan has an invalid projected shape');
   }
-  const resolvedParameters: Record<string, ParameterValue> = {};
-  for (const [key, entry] of Object.entries(validated.resolvedParameters)) {
-    if (entry === null || typeof entry === 'string' || typeof entry === 'number' || typeof entry === 'boolean') resolvedParameters[key] = entry;
-    else throw new TypeError(`compiled plan parameter ${key} has an invalid value`);
-  }
-  const budget: Record<string, number> & { caseTimeoutMs: number } = { caseTimeoutMs: validated.budget.caseTimeoutMs };
-  for (const [key, entry] of Object.entries(validated.budget)) if (typeof entry === 'number') budget[key] = entry;
-  return { ...validated, digest: validated.digest, resolvedParameters, budget };
+  return structuredClone(validated);
 }
 
 function assertDefinition(value: CatalogEntry): asserts value is Definition {
@@ -147,3 +149,5 @@ export function compileDeclarativeMatrix({ catalog, matrix, profileId }: { catal
     coordinate,
   })));
 }
+
+export type { CompiledCasePlan };

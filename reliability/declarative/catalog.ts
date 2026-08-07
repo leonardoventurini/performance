@@ -9,21 +9,37 @@ import {
   validateNegativeControlCatalog,
 } from '../contracts/declarative-audit.js';
 import { contractDigest } from '../contracts/digest.js';
+import type { DeclarativeCaseDefinition } from '../contracts/declarative-audit.js';
 
 const DEFAULT_DEFINITIONS_ROOT = path.resolve(import.meta.dirname, '..', 'definitions');
 const MAX_CATALOG_FILE_BYTES = 2 * 1024 * 1024;
 type UnknownRecord = Record<string, unknown>;
 export interface CatalogEntry extends UnknownRecord { readonly id: string }
+/** Coordinate dimensions controlling where an authored case is executable. */
+export interface CatalogApplicability {
+  readonly topologies: readonly string[];
+  readonly transports: readonly string[];
+  readonly observerOrders: readonly (readonly string[])[];
+}
+/** Fully validated case definition plus its catalog-only applicability fields. */
+export interface CatalogCase extends CatalogEntry, DeclarativeCaseDefinition {
+  readonly applicability: readonly CatalogApplicability[];
+}
+/** Closed negative-control descriptor consumed by the runtime sensitivity checks. */
+export interface CatalogNegativeControl extends CatalogEntry {
+  readonly expectedReason: string;
+  readonly mutation: Readonly<{ readonly kind: string }>;
+}
 export interface DeclarativeAuditCatalog {
   readonly contract: CatalogEntry;
   readonly capabilities: readonly CatalogEntry[];
   readonly profiles: readonly CatalogEntry[];
-  readonly cases: readonly CatalogEntry[];
-  readonly negativeControls: readonly CatalogEntry[];
+  readonly cases: readonly CatalogCase[];
+  readonly negativeControls: readonly CatalogNegativeControl[];
   readonly digest: string;
   readonly capabilitiesById: ReadonlyMap<string, CatalogEntry>;
   readonly profilesById: ReadonlyMap<string, CatalogEntry>;
-  readonly casesById: ReadonlyMap<string, CatalogEntry>;
+  readonly casesById: ReadonlyMap<string, CatalogCase>;
 }
 
 function isRecord(value: unknown): value is UnknownRecord {
@@ -33,6 +49,35 @@ function isRecord(value: unknown): value is UnknownRecord {
 function requireEntry(value: unknown, pathLabel: string): CatalogEntry {
   if (!isRecord(value) || typeof value.id !== 'string') throw new TypeError(`${pathLabel} must contain an identifier`);
   return { ...value, id: value.id };
+}
+
+function isCatalogCase(value: unknown): value is CatalogCase {
+  return isRecord(value)
+    && typeof value.id === 'string'
+    && isRecord(value.fixture)
+    && Array.isArray(value.steps)
+    && Array.isArray(value.oracles)
+    && Array.isArray(value.applicability);
+}
+
+function requireCatalogCase(value: unknown, pathLabel: string): CatalogCase {
+  if (!isCatalogCase(value)) throw new TypeError(`${pathLabel} has an invalid validated case shape`);
+  return structuredClone(value);
+}
+
+function isCatalogNegativeControl(value: unknown): value is CatalogNegativeControl {
+  return isRecord(value)
+    && typeof value.id === 'string'
+    && typeof value.expectedReason === 'string'
+    && isRecord(value.mutation)
+    && typeof value.mutation.kind === 'string';
+}
+
+function requireCatalogNegativeControl(value: unknown, pathLabel: string): CatalogNegativeControl {
+  if (!isCatalogNegativeControl(value)) {
+    throw new TypeError(`${pathLabel} has an invalid validated negative-control shape`);
+  }
+  return structuredClone(value);
 }
 
 function requireProfileParameters(profile: CatalogEntry): UnknownRecord {
@@ -170,12 +215,15 @@ export function loadDeclarativeAuditCatalog(definitionsRoot = DEFAULT_DEFINITION
   const negativeControlEnvelope = validateNegativeControlCatalog(
     readJson(path.join(definitionsRoot, 'negative-controls.json')),
   );
-  const negativeControls = requireEntryArray(negativeControlEnvelope, 'controls');
+  const negativeControlEntries = requireEntryArray(negativeControlEnvelope, 'controls');
+  const negativeControls = negativeControlEntries.map((control, index) => (
+    requireCatalogNegativeControl(control, `controls[${index}]`)
+  ));
   const casesRoot = path.join(definitionsRoot, 'cases');
   const caseFiles = fs.readdirSync(casesRoot)
     .filter((entry) => entry.endsWith('.json'))
     .sort();
-  const cases = caseFiles.map((entry, index) => requireEntry(validateDeclarativeCaseDefinition(
+  const cases = caseFiles.map((entry, index) => requireCatalogCase(validateDeclarativeCaseDefinition(
     readJson(path.join(casesRoot, entry)),
     `cases[${index}]`,
   ), `cases[${index}]`));

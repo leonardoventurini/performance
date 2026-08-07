@@ -1,6 +1,16 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildAuditRunValues, runAudit } from '../../cli/audit.js';
+import type { BenchmarkResult } from '../../reporters/json-reporter.js';
+import type { CaseCoordinate } from '../../reliability/contracts/release-audit.js';
+
+interface TestAuditOutcome {
+  readonly coordinate: CaseCoordinate;
+  readonly attemptId: string;
+  readonly status: 'passed';
+  readonly reasons: readonly string[];
+}
+
 
 describe('reliability command', () => {
   test('defaults to the bounded change-stream smoke profile', () => {
@@ -35,7 +45,7 @@ describe('reliability command', () => {
 });
 
 test('audit compiles catalog cases and persists the canonical result envelope', async () => {
-  const written = [];
+  const written: Array<Readonly<{ kind: string; value: BenchmarkResult; output: string }>> = [];
   const definition = {
     id: 'event.insert',
     applicability: [{
@@ -51,7 +61,7 @@ test('audit compiles catalog cases and persists the canonical result envelope', 
     cases: [definition],
     casesById: new Map([[definition.id, definition]]),
   };
-  const executeCase = async ({ coordinate, attemptId }) => ({
+  const executeCase = async ({ coordinate, attemptId }: Readonly<{ coordinate: CaseCoordinate; attemptId: string }>): Promise<TestAuditOutcome> => ({
     coordinate,
     attemptId,
     status: 'passed',
@@ -74,18 +84,23 @@ test('audit compiles catalog cases and persists the canonical result envelope', 
       results: { dir: 'results', history: 'history' },
     },
     dependencies: {
-      resolveMeteorSource: () => ({ version: '3.5.1-beta.0', sha: 'release:3.5.1-beta.0' }),
+      resolveMeteorSource: () => ({
+        mode: 'release', meteorCmd: 'meteor', releaseArg: '--release=3.5.1-beta.0',
+        checkoutPath: null, version: '3.5.1-beta.0', sha: 'release:3.5.1-beta.0',
+      }),
       loadCatalog: () => catalog,
       attestReleaseIdentity: () => ({
         requested: '3.5.1-beta.0', actual: '3.5.1-beta.0', harnessDirty: false,
       }),
       createExecutor: () => executeCase,
-      writeResult: (value, output) => written.push({ kind: 'result', value, output }),
-      appendToHistory: (value, output) => written.push({ kind: 'history', value, output }),
+      writeResult: (value: BenchmarkResult, output: string) => { written.push({ kind: 'result', value, output }); },
+      appendToHistory: (value: BenchmarkResult, output: string) => { written.push({ kind: 'history', value, output }); },
     },
   });
-  assert.equal(result.metrics.change_stream_audit.status, 'passed');
-  assert.equal(result.metrics.change_stream_audit.executed_cases, 1);
+  const metric = result.metrics.change_stream_audit;
+  assert.ok(metric);
+  assert.equal(metric.status, 'passed');
+  assert.equal(metric.executed_cases, 1);
   assert.equal(result.scenario, 'change-stream-audit-smoke');
   assert.deepEqual(written.map(({ kind, output }) => ({ kind, output })), [
     { kind: 'result', output: 'result.json' },

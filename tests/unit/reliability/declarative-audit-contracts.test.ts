@@ -8,7 +8,7 @@ import {
   validateValueRef,
 } from '../../../reliability/contracts/declarative-audit.js';
 
-const literal = (value) => ({ kind: 'literal', value });
+const literal = (value: unknown) => ({ kind: 'literal', value });
 
 function validCase() {
   return {
@@ -80,34 +80,48 @@ test('declarative audit contract accepts and deeply freezes a bounded case', () 
 
 test('declarative audit contract rejects unknown and self-asserted fields', () => {
   assert.throws(() => validateCaseDefinition({ ...validCase(), status: 'passed' }), /case\.status is unknown/);
-  const definition = validCase();
-  definition.oracles[0].passed = true;
+  const authored = validCase();
+  const definition = { ...authored, oracles: authored.oracles.map((oracle, index) => (
+    index === 0 ? { ...oracle, passed: true } : oracle
+  )) };
   assert.throws(() => validateCaseDefinition(definition), /oracles\[0\]\.passed is unknown/);
 });
 
 test('declarative audit contract rejects unsafe selectors and mutations', () => {
-  const unsafeSelector = validCase();
-  unsafeSelector.steps[1].selector = { kind: '$where', value: literal('true') };
+  const selectorCase = validCase();
+  const unsafeSelector = { ...selectorCase, steps: selectorCase.steps.map((step, index) => (
+    index === 1 ? { ...step, selector: { kind: '$where', value: literal('true') } } : step
+  )) };
   assert.throws(() => validateCaseDefinition(unsafeSelector), /not an allowlisted selector|unknown/);
-  const unsafeMutation = validCase();
-  unsafeMutation.steps[2].mutation = { kind: 'set', path: ['runId'], value: literal('forged') };
+  const mutationCase = validCase();
+  const unsafeMutation = { ...mutationCase, steps: mutationCase.steps.map((step, index) => (
+    index === 2 ? { ...step, mutation: { kind: 'set', path: ['runId'], value: literal('forged') } } : step
+  )) };
   assert.throws(() => validateCaseDefinition(unsafeMutation), /interpreter-owned/);
 });
 
 test('declarative audit contract rejects unbounded definitions', () => {
-  const definition = validCase();
-  definition.budget.maximumPayloadBytes = 16_777_217;
+  const authored = validCase();
+  const definition = { ...authored, budget: { ...authored.budget, maximumPayloadBytes: 16_777_217 } };
   assert.throws(() => validateCaseDefinition(definition), /maximumPayloadBytes must be an integer/);
-  definition.budget.maximumPayloadBytes = 1;
-  definition.parameters.subscribers.maximum = Number.MAX_SAFE_INTEGER;
-  definition.parameters.subscribers.default = Number.MAX_SAFE_INTEGER;
-  assert.throws(() => validateCaseDefinition(definition), /maximumSubscribers|parameters/);
+  const invalidParameters = {
+    ...authored,
+    budget: { ...authored.budget, maximumPayloadBytes: 1 },
+    parameters: { subscribers: {
+      ...authored.parameters.subscribers,
+      maximum: Number.MAX_SAFE_INTEGER,
+      default: Number.MAX_SAFE_INTEGER,
+    } },
+  };
+  assert.throws(() => validateCaseDefinition(invalidParameters), /maximumSubscribers|parameters/);
 });
 
 test('declarative audit contract rejects invalid reference shapes and forward references', () => {
   assert.throws(() => validateValueRef({ kind: 'step', stepId: 'insert' }), /output is required/);
-  const definition = validCase();
-  definition.steps[1].mutation = { kind: 'step', stepId: 'unset', output: 'expectedState' };
+  const authored = validCase();
+  const definition = { ...authored, steps: authored.steps.map((step, index) => (
+    index === 1 ? { ...step, mutation: { kind: 'step', stepId: 'unset', output: 'expectedState' } } : step
+  )) };
   assert.throws(() => validateCaseDefinition(definition), /must reference an earlier step/);
 });
 

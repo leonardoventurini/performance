@@ -2,15 +2,25 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { createReleaseCaseExecutor } from '../../../cli/release-audit.js';
+import type { MeteorSource } from '../../../lib/benchmark-types.js';
+
+const TEST_SOURCE: MeteorSource = {
+  mode: 'release', meteorCmd: 'meteor', releaseArg: '--release=test',
+  checkoutPath: null, version: 'test', sha: 'release:test',
+};
+const TEST_CATALOG_ID = 'test-contract';
+const TEST_CATALOG_DIGEST = 'a'.repeat(64);
 
 test('release executor compiles every coordinate without silent support filtering', async () => {
-  const calls = [];
+  const calls: unknown[] = [];
   const environment = { stop: async () => ({ restored: true }) };
   const executeCase = createReleaseCaseExecutor({
-    values: {}, source: {}, appPath: '/app', releaseIdentity: {},
+    values: {}, source: TEST_SOURCE, appPath: '/app', releaseIdentity: {},
     catalog: {
+      contract: { id: TEST_CATALOG_ID },
+      digest: TEST_CATALOG_DIGEST,
       casesById: new Map([['event.insert', { id: 'event.insert' }]]),
-      profilesById: new Map(),
+      profilesById: new Map<string, Readonly<{ id: string }>>(),
     },
     environmentFactory: async () => environment,
     runCase: async (input) => { calls.push(input); return { status: 'passed' }; },
@@ -41,7 +51,7 @@ test('release finalization maps recovery dimensions independently', async () => 
     }),
   };
   const executeCase = createReleaseCaseExecutor({
-    values: {}, source: {}, appPath: '/app', releaseIdentity: {},
+    values: {}, source: TEST_SOURCE, appPath: '/app', releaseIdentity: {},
     environmentFactory: async () => environment,
     runCase: async () => ({ status: 'passed' }),
   });
@@ -62,9 +72,9 @@ test('release finalization maps recovery dimensions independently', async () => 
 test('release executor retires a poisoned environment before the next coordinate', async () => {
   let environmentCount = 0;
   let invocationCount = 0;
-  const stopped = [];
+  const stopped: number[] = [];
   const executeCase = createReleaseCaseExecutor({
-    values: {}, source: {}, appPath: '/app', releaseIdentity: {},
+    values: {}, source: TEST_SOURCE, appPath: '/app', releaseIdentity: {},
     environmentFactory: async () => {
       environmentCount += 1;
       const identity = environmentCount;
