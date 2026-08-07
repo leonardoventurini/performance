@@ -1,7 +1,6 @@
 {
   "name": "task-3.x",
   "private": true,
-  "type": "module",
   "scripts": {
     "start": "meteor run",
     "typecheck": "tsc --build --pretty false",

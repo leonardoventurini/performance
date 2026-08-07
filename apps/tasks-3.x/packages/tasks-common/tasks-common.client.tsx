@@ -1,5 +1,5 @@
 import { ReliabilityCollection, TasksCollection, initializeTaskCollection, registerTaskApi } from './tasks-common';
-import { useCallback, useEffect, useState, useRef } from 'react';
+import React, { useCallback, useEffect, useState, useRef } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 import { useFind, useSubscribe } from 'meteor/react-meteor-data';
 import { Random } from 'meteor/random';
@@ -10,7 +10,7 @@ interface TaskListProps { tasks: readonly TaskDocument[] }
 interface ReactiveProps extends TaskListProps { setTasks: Dispatch<SetStateAction<TaskDocument[]>> }
 interface NonReactiveProps extends TaskListProps { fetchTasks: () => Promise<void> }
 
-const App = () => {
+const App = (): React.JSX.Element => {
   const sessionIdRef = useRef(Random.id());
   const sessionId = sessionIdRef?.current;
 
