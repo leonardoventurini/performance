@@ -23,7 +23,7 @@ import { isJsonObject, parseJson } from '../lib/data-values.js';
 import { collectorResult } from '../reporters/json-reporter.js';
 import type { CollectorResult } from '../reporters/json-reporter.js';
 
-interface SpawnedCollector { proc: Pick<ChildProcess, 'kill'>; name: string; getResult(): string }
+interface SpawnedCollector { proc: ChildProcess; name: string; getResult(): string }
 interface CollectorPaths {
   gcOutputPath?: string | undefined; methodTimingPath?: string | undefined;
   subTimingPath?: string | undefined; propagationTimingPath?: string | undefined;
@@ -45,6 +45,40 @@ const MONGO_CHANGESTREAM_MONITOR = path.resolve(HERE, '..', 'collectors', 'mongo
 const MONGO_WIREDTIGER_MONITOR = path.resolve(HERE, '..', 'collectors', 'mongo-wiredtiger-monitor.js');
 const RESULTS_DIR = path.resolve(HERE, '..', 'results');
 const COLLECTOR_DRAIN_MS = 1000;
+
+async function stopCollectorProcess({ proc, name }: SpawnedCollector): Promise<void> {
+  const hasExited = (): boolean => proc.exitCode !== null || proc.signalCode !== null;
+  const waitForExit = async (): Promise<boolean> => {
+    if (hasExited()) return true;
+    let resolveExit: (exited: true) => void = () => undefined;
+    const exited = (): void => resolveExit(true);
+    const exit = new Promise<true>((resolve) => { resolveExit = resolve; });
+    proc.once('exit', exited);
+    const attested = await Promise.race([
+      exit,
+      io.sleep(COLLECTOR_DRAIN_MS).then(() => false),
+    ]);
+    if (!attested) proc.off('exit', exited);
+    return attested;
+  };
+
+  if (!hasExited() && !proc.kill('SIGTERM') && !hasExited()) {
+    throw new Error(`${name} collector rejected SIGTERM before exit could be attested`);
+  }
+  if (await waitForExit()) return;
+  if (!proc.kill('SIGKILL') && !hasExited()) {
+    throw new Error(`${name} collector rejected SIGKILL before exit could be attested`);
+  }
+  if (!await waitForExit()) {
+    throw new Error(`${name} collector did not attest exit after SIGKILL`);
+  }
+}
+
+async function stopCollectorProcesses(procs: readonly SpawnedCollector[]): Promise<void> {
+  const outcomes = await Promise.allSettled(procs.map(stopCollectorProcess));
+  const failures = outcomes.flatMap((outcome) => outcome.status === 'rejected' ? [outcome.reason] : []);
+  if (failures.length > 0) throw new AggregateError(failures, 'Collector shutdown was incomplete');
+}
 
 /** Allocates the emitted GC preload and its run-owned output path. */
 export function prepareGcOutput(tag: string) {
@@ -295,30 +329,41 @@ function spawnMongoWiredTigerMonitor(mongoUri: string): SpawnedCollector {
 }
 
 /** Starts only the collectors supported by the resolved process and database inputs. */
-export function startCollectors({ appName, mongoUri, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath, frameSizePath, compressionPath, driverFallbackPath }: StartCollectorsInput) {
+export async function startCollectors({ appName, mongoUri, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath, frameSizePath, compressionPath, driverFallbackPath }: StartCollectorsInput) {
   const procs: SpawnedCollector[] = [];
+  try {
+    const appPid = findPid(`${appName}/.meteor/local/build/main.js`);
+    if (appPid) {
+      procs.push(spawnProcessMonitor(appPid, 'APP'));
+    } else {
+      console.error(`No APP pid found for ${appName}; skipping app_resources collector.`);
+    }
 
-  const appPid = findPid(`${appName}/.meteor/local/build/main.js`);
-  if (appPid) {
-    procs.push(spawnProcessMonitor(appPid, 'APP'));
-  } else {
-    console.error(`No APP pid found for ${appName}; skipping app_resources collector.`);
-  }
+    const dbPid = findPid(`${appName}/.meteor/local/db`);
+    if (dbPid) {
+      procs.push(spawnProcessMonitor(dbPid, 'DB'));
+    } else {
+      console.error(`No DB pid found for ${appName}; skipping db_resources collector.`);
+    }
 
-  const dbPid = findPid(`${appName}/.meteor/local/db`);
-  if (dbPid) {
-    procs.push(spawnProcessMonitor(dbPid, 'DB'));
-  } else {
-    console.error(`No DB pid found for ${appName}; skipping db_resources collector.`);
-  }
-
-  if (mongoUri) {
-    procs.push(spawnMongoOpsMonitor(mongoUri));
-    procs.push(spawnMongoSlowQueryMonitor(mongoUri));
-    procs.push(spawnMongoIndexUsageMonitor(mongoUri));
-    procs.push(spawnMongoPoolMonitor(mongoUri));
-    procs.push(spawnMongoChangestreamMonitor(mongoUri));
-    procs.push(spawnMongoWiredTigerMonitor(mongoUri));
+    if (mongoUri) {
+      procs.push(spawnMongoOpsMonitor(mongoUri));
+      procs.push(spawnMongoSlowQueryMonitor(mongoUri));
+      procs.push(spawnMongoIndexUsageMonitor(mongoUri));
+      procs.push(spawnMongoPoolMonitor(mongoUri));
+      procs.push(spawnMongoChangestreamMonitor(mongoUri));
+      procs.push(spawnMongoWiredTigerMonitor(mongoUri));
+    }
+  } catch (startError) {
+    try {
+      await stopCollectorProcesses(procs);
+    } catch (cleanupError) {
+      throw new AggregateError(
+        [startError, cleanupError],
+        `Collector startup failed and compensation was incomplete: ${errorMessage(startError)}`,
+      );
+    }
+    throw startError;
   }
 
   return { procs, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath, frameSizePath, compressionPath, driverFallbackPath };
@@ -328,9 +373,8 @@ export function startCollectors({ appName, mongoUri, gcOutputPath, methodTimingP
 export async function stopCollectors({ procs, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath, frameSizePath, compressionPath, driverFallbackPath }: StopCollectorsInput): Promise<CollectorResult[]> {
   const results: CollectorResult[] = [];
 
-  for (const { proc, name, getResult } of procs) {
-    proc.kill('SIGTERM');
-    await io.sleep(COLLECTOR_DRAIN_MS);
+  await stopCollectorProcesses(procs);
+  for (const { name, getResult } of procs) {
     const raw = getResult().trim();
     if (!raw) continue;
     try {

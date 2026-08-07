@@ -91,7 +91,7 @@ export async function runScriptDriver({ scenario, scenarioName, app, appName, so
     await waitForApp(config.appPort);
     console.log('App started.');
 
-    collectors = startCollectors({ appName, mongoUri, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath, frameSizePath, compressionPath, driverFallbackPath });
+    collectors = await startCollectors({ appName, mongoUri, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath, frameSizePath, compressionPath, driverFallbackPath });
 
   const scriptPath = path.resolve(HERE, '..', scenario.script);
   const scriptArgs = [...(scenario.args || '').split(/\s+/).filter(Boolean), ...extraScriptArgs];

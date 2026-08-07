@@ -42,7 +42,10 @@ afterEach(() => {
 // data lines that the collector code can accumulate.
 function makeFakeChild() {
   const proc = new ChildProcess();
-  proc.kill = (): boolean => true;
+  proc.kill = (_signal?: NodeJS.Signals | number): boolean => {
+    queueMicrotask(() => proc.emit('exit', 0, null));
+    return true;
+  };
   const stdout = new PassThrough();
   const stderr = new PassThrough();
   proc.stdout = stdout;
@@ -62,7 +65,7 @@ function stubPgrep(pidByPattern: Readonly<Record<string, string>>): void {
 }
 
 describe('startCollectors', () => {
-  test('spawns process-monitor for both APP and DB pids when found', () => {
+  test('spawns process-monitor for both APP and DB pids when found', async () => {
     stubPgrep({
       'tasks-3.x/.meteor/local/build/main.js': '11111',
       'tasks-3.x/.meteor/local/db': '22222',
@@ -72,7 +75,7 @@ describe('startCollectors', () => {
       spawnCalls.push({ cmd, args });
       return makeFakeChild().proc;
     });
-    const { procs } = startCollectors({ appName: 'tasks-3.x', gcOutputPath: '/x' });
+    const { procs } = await startCollectors({ appName: 'tasks-3.x', gcOutputPath: '/x' });
     assert.equal(procs.length, 2);
     assert.equal(spawnCalls.length, 2);
     assert.equal(spawnCalls[0]?.cmd, 'node');
@@ -84,35 +87,61 @@ describe('startCollectors', () => {
     assert.equal(spawnCalls[1]?.args[2], 'DB');
   });
 
-  test('skips APP collector cleanly when APP pid is missing (logs, does not crash)', () => {
+  test('skips APP collector cleanly when APP pid is missing (logs, does not crash)', async () => {
     stubPgrep({ 'tasks-3.x/.meteor/local/db': '22222' });
     mock.method(io, 'spawn', () => makeFakeChild().proc);
-    const { procs } = startCollectors({ appName: 'tasks-3.x' });
+    const { procs } = await startCollectors({ appName: 'tasks-3.x' });
     assert.equal(procs.length, 1);
     assert.equal(procs[0]?.name, 'DB');
   });
 
-  test('skips DB collector cleanly when DB pid is missing', () => {
+  test('skips DB collector cleanly when DB pid is missing', async () => {
     stubPgrep({ 'tasks-3.x/.meteor/local/build/main.js': '11111' });
     mock.method(io, 'spawn', () => makeFakeChild().proc);
-    const { procs } = startCollectors({ appName: 'tasks-3.x' });
+    const { procs } = await startCollectors({ appName: 'tasks-3.x' });
     assert.equal(procs.length, 1);
     assert.equal(procs[0]?.name, 'APP');
   });
 
-  test('returns empty procs when neither pid is found (no crash)', () => {
+  test('returns empty procs when neither pid is found (no crash)', async () => {
     stubPgrep({});
     const spawnSpy = mock.method(io, 'spawn', () => makeFakeChild().proc);
-    const { procs } = startCollectors({ appName: 'tasks-3.x' });
+    const { procs } = await startCollectors({ appName: 'tasks-3.x' });
     assert.equal(procs.length, 0);
     assert.equal(spawnSpy.mock.callCount(), 0);
   });
 
-  test('passes gcOutputPath through unchanged for stopCollectors to consume later', () => {
+  test('passes gcOutputPath through unchanged for stopCollectors to consume later', async () => {
     stubPgrep({});
     mock.method(io, 'spawn', () => makeFakeChild().proc);
-    const handle = startCollectors({ appName: 'x', gcOutputPath: '/tmp/gc-output.json' });
+    const handle = await startCollectors({ appName: 'x', gcOutputPath: '/tmp/gc-output.json' });
     assert.equal(handle.gcOutputPath, '/tmp/gc-output.json');
+  });
+
+  test('stops every earlier collector when a later spawn fails', async () => {
+    stubPgrep({
+      'tasks-3.x/.meteor/local/build/main.js': '11111',
+      'tasks-3.x/.meteor/local/db': '22222',
+    });
+    const signals: NodeJS.Signals[] = [];
+    let spawnCount = 0;
+    mock.method(io, 'spawn', () => {
+      spawnCount += 1;
+      if (spawnCount === 3) throw new Error('later collector failed to spawn');
+      const child = makeFakeChild();
+      child.proc.kill = (signal?: NodeJS.Signals | number): boolean => {
+        if (typeof signal === 'string') signals.push(signal);
+        queueMicrotask(() => child.proc.emit('exit', 0, signal));
+        return true;
+      };
+      return child.proc;
+    });
+
+    await assert.rejects(
+      startCollectors({ appName: 'tasks-3.x', mongoUri: 'mongodb://127.0.0.1:3001' }),
+      /later collector failed to spawn/,
+    );
+    assert.deepEqual(signals, ['SIGTERM', 'SIGTERM']);
   });
 });
 
@@ -121,8 +150,16 @@ describe('stopCollectors', () => {
     const appChild = makeFakeChild();
     const dbChild = makeFakeChild();
     const killedSignals: Array<[string, NodeJS.Signals | number | undefined]> = [];
-    appChild.proc.kill = (sig?: NodeJS.Signals | number): boolean => { killedSignals.push(['APP', sig]); return true; };
-    dbChild.proc.kill = (sig?: NodeJS.Signals | number): boolean => { killedSignals.push(['DB', sig]); return true; };
+    appChild.proc.kill = (sig?: NodeJS.Signals | number): boolean => {
+      killedSignals.push(['APP', sig]);
+      queueMicrotask(() => appChild.proc.emit('exit', 0, sig));
+      return true;
+    };
+    dbChild.proc.kill = (sig?: NodeJS.Signals | number): boolean => {
+      killedSignals.push(['DB', sig]);
+      queueMicrotask(() => dbChild.proc.emit('exit', 0, sig));
+      return true;
+    };
 
     // Simulate each child writing JSON to stdout. Emit BEFORE stopCollectors so
     // the data accumulates in the closure before SIGTERM + drain.
@@ -161,6 +198,21 @@ describe('stopCollectors', () => {
     assert.deepEqual(killedSignals, [['APP', 'SIGTERM'], ['DB', 'SIGTERM']]);
     const keys = results.map((r) => r.metric).sort();
     assert.deepEqual(keys, ['app_resources', 'db_resources']);
+  });
+
+  test('escalates and rejects when a collector never attests exit', async () => {
+    const child = makeFakeChild();
+    const signals: Array<NodeJS.Signals | number | undefined> = [];
+    child.proc.kill = (signal?: NodeJS.Signals | number): boolean => {
+      signals.push(signal);
+      return true;
+    };
+
+    await assert.rejects(
+      stopCollectors({ procs: [{ proc: child.proc, name: 'APP', getResult: () => '' }] }),
+      /Collector shutdown was incomplete/,
+    );
+    assert.deepEqual(signals, ['SIGTERM', 'SIGKILL']);
   });
 
   test('drops malformed JSON from one collector but survives, returns others', async () => {
