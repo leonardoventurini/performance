@@ -11,6 +11,7 @@ import { defineConfig, devices } from '@playwright/test';
  * See https://playwright.dev/docs/test-configuration.
  */
 export default defineConfig({
+  tsconfig: './tsconfig.playwright.json',
   globalTimeout: 240_000,
   testDir: './tests',
   testMatch: '**/*.spec.ts',

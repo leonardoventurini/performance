@@ -4,7 +4,7 @@
     { "path": "./tsconfig.node.json" },
     { "path": "./tsconfig.playwright.json" },
     { "path": "./tsconfig.hosts.json" },
-    { "path": "./apps/tasks-3.x" },
-    { "path": "./apps/dashboard" }
+    { "path": "./apps/tasks-3.x/tsconfig.json" },
+    { "path": "./apps/dashboard/tsconfig.json" }
   ]
 }
