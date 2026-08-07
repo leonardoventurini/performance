@@ -15,11 +15,13 @@ import {
 } from '../runner/meteor-process.js';
 import { waitForApp } from '../runner/wait-for-app.js';
 import { buildResult } from '../reporters/json-reporter.js';
+import type { DriverInputs } from '../lib/benchmark-types.js';
 
 const COLD_START_GRACE_MS = 2000;
 
-export async function runColdStartDriver({ scenarioName, app, appName, source, env, tag, config, runs = 3 }) {
-  const startupTimes = [];
+/** Measures repeated clean startup time and reports the median sample. */
+export async function runColdStartDriver({ scenarioName, app, appName, source, env, tag, config, runs = 3 }: DriverInputs): Promise<ReturnType<typeof buildResult>> {
+  const startupTimes: number[] = [];
   let lastGetRuntimeInfo = () => ({});
   console.log(`\nCold-start benchmark: ${runs} runs\n`);
 
@@ -39,9 +41,9 @@ export async function runColdStartDriver({ scenarioName, app, appName, source, e
   }
 
   startupTimes.sort((a, b) => a - b);
-  const median = startupTimes[Math.floor(startupTimes.length / 2)];
-  const min = startupTimes[0];
-  const max = startupTimes[startupTimes.length - 1];
+  const median = startupTimes[Math.floor(startupTimes.length / 2)] ?? 0;
+  const min = startupTimes[0] ?? 0;
+  const max = startupTimes[startupTimes.length - 1] ?? 0;
 
   console.log(`\nResults: median=${(median / 1000).toFixed(1)}s min=${(min / 1000).toFixed(1)}s max=${(max / 1000).toFixed(1)}s`);
 

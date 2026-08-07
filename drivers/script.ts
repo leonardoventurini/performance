@@ -40,11 +40,18 @@ import {
   stopCollectors,
 } from '../runner/collectors.js';
 import { buildResult } from '../reporters/json-reporter.js';
+import type { DriverInputs, ScriptScenario } from '../lib/benchmark-types.js';
+import { errorMessage } from '../lib/benchmark-types.js';
 
 const HERE = import.meta.dirname;
 const SCRIPT_TIMEOUT_MS = 300_000;
 
-export async function runScriptDriver({ scenario, scenarioName, app, appName, source, env, tag, config, scriptArgs: extraScriptArgs = [] }) {
+function parseMetrics(value: unknown): Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+/** Executes a standalone emitted workload and merges its guarded metrics. */
+export async function runScriptDriver({ scenario, scenarioName, app, appName, source, env, tag, config, scriptArgs: extraScriptArgs = [] }: DriverInputs & Readonly<{ scenario: ScriptScenario }>): Promise<ReturnType<typeof buildResult>> {
   const metricName = scenario.metric || 'fanout';
   const configuredBenchMongoUri = env.BENCH_MONGO_URL || process.env.BENCH_MONGO_URL;
   const configuredMeteorMongoUri = env.MONGO_URL || process.env.MONGO_URL;
@@ -89,7 +96,6 @@ export async function runScriptDriver({ scenario, scenarioName, app, appName, so
 
   const scriptStart = Date.now();
   let scriptOutput = '';
-  let scriptError = null;
   try {
     scriptOutput = io.execFileSync('node', [scriptPath, ...scriptArgs], {
       cwd: path.resolve(HERE, '..'),
@@ -104,9 +110,10 @@ export async function runScriptDriver({ scenario, scenarioName, app, appName, so
       timeout: SCRIPT_TIMEOUT_MS,
     });
   } catch (err) {
-    scriptError = err;
-    console.error('Script failed:', err.stderr || err.message);
-    scriptOutput = err.stdout || '';
+    const stderr = typeof err === 'object' && err !== null && 'stderr' in err ? err.stderr : undefined;
+    const stdout = typeof err === 'object' && err !== null && 'stdout' in err ? err.stdout : undefined;
+    console.error('Script failed:', stderr || errorMessage(err));
+    scriptOutput = stdout ? String(stdout) : '';
   }
   const wallClockMs = Date.now() - scriptStart;
 
@@ -114,13 +121,13 @@ export async function runScriptDriver({ scenario, scenarioName, app, appName, so
   // JSON summary line at the end. We grab `.pop()` after split('\n') to
   // get that line. If it fails to parse we keep scriptMetrics = {} so the
   // result JSON still has the right shape (with `fanout` metric just empty).
-  let scriptMetrics = {};
+  let scriptMetrics: Record<string, unknown> = {};
   const jsonLine = scriptOutput.trim().split('\n').pop();
   if (jsonLine) {
     try {
-      scriptMetrics = JSON.parse(jsonLine);
+      scriptMetrics = parseMetrics(JSON.parse(jsonLine));
     } catch (err) {
-      console.error(`Could not parse script metrics JSON from last stdout line: ${err.message}. Last line was: ${jsonLine.slice(0, 200)}`);
+      console.error(`Could not parse script metrics JSON from last stdout line: ${errorMessage(err)}. Last line was: ${jsonLine.slice(0, 200)}`);
     }
   }
   const collectorResults = await stopCollectors(collectors);
@@ -129,7 +136,7 @@ export async function runScriptDriver({ scenario, scenarioName, app, appName, so
   collectorResults.push({ metric: metricName, ...scriptMetrics });
   lifecycleComplete = true;
 
-  if (scriptMetrics.fanout_avg_ms) {
+  if (typeof scriptMetrics.fanout_avg_ms === 'number') {
     console.log(`Fanout: avg=${scriptMetrics.fanout_avg_ms}ms p50=${scriptMetrics.fanout_p50_ms}ms p95=${scriptMetrics.fanout_p95_ms}ms max=${scriptMetrics.fanout_max_ms}ms`);
   }
 
@@ -152,7 +159,7 @@ export async function runScriptDriver({ scenario, scenarioName, app, appName, so
         try {
           await stopCollectors(collectors);
         } catch (error) {
-          console.error(`Could not stop collectors after driver failure: ${error.message}`);
+          console.error(`Could not stop collectors after driver failure: ${errorMessage(error)}`);
         }
       }
       await stopMeteorApp(meteorProc);

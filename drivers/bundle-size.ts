@@ -17,13 +17,14 @@ import path from 'node:path';
 import { io } from '../runner/_io.js';
 import { ensureAppDeps } from '../runner/meteor-process.js';
 import { buildResult } from '../reporters/json-reporter.js';
+import type { DriverInputs, MeteorSource } from '../lib/benchmark-types.js';
 
-function meteorArgv(source, subcommandArgs) {
-  return source.releaseArg ? [source.releaseArg, ...subcommandArgs] : subcommandArgs;
+function meteorArgv(source: MeteorSource, subcommandArgs: readonly string[]): string[] {
+  return source.releaseArg ? [source.releaseArg, ...subcommandArgs] : [...subcommandArgs];
 }
 
 // Recursively sum file sizes under a directory. Returns total bytes.
-function dirSizeBytes(dirPath) {
+function dirSizeBytes(dirPath: string): number {
   if (!io.existsSync(dirPath)) return 0;
   let total = 0;
   for (const entry of io.readdirSync(dirPath)) {
@@ -40,7 +41,8 @@ function dirSizeBytes(dirPath) {
 
 const BYTES_PER_KB = 1024;
 
-export async function runBundleSizeDriver({ scenarioName, app, appName, source, env, tag, config }) {
+/** Builds and measures a production bundle without retaining build artifacts. */
+export async function runBundleSizeDriver({ scenarioName, app, appName, source, env, tag }: DriverInputs): Promise<ReturnType<typeof buildResult>> {
   const buildDir = path.join('/tmp', `meteor-bundle-${Date.now()}`);
   console.log('\nBundle size benchmark\n');
 

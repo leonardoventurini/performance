@@ -25,10 +25,13 @@ import {
   drainPostStopGc,
 } from '../runner/collectors.js';
 import { buildResult } from '../reporters/json-reporter.js';
+import type { ArtilleryScenario, DriverInputs } from '../lib/benchmark-types.js';
+import { errorMessage } from '../lib/benchmark-types.js';
 
 const HERE = import.meta.dirname;
 
-export async function runArtilleryDriver({ scenario, scenarioName, app, appName, source, env, tag, config }) {
+/** Executes one Artillery scenario against an owned Meteor process. */
+export async function runArtilleryDriver({ scenario, scenarioName, app, appName, source, env, tag, config }: DriverInputs & Readonly<{ scenario: ArtilleryScenario }>): Promise<ReturnType<typeof buildResult>> {
   ensureAppDeps(source, app.path);
   resetMeteorApp(source, app.path);
 
@@ -86,10 +89,10 @@ export async function runArtilleryDriver({ scenario, scenarioName, app, appName,
       timeout: ARTILLERY_TIMEOUT_MS,
     });
   } catch (err) {
-    if (err.signal === 'SIGTERM') {
+    if (typeof err === 'object' && err !== null && 'signal' in err && err.signal === 'SIGTERM') {
       console.error(`Artillery exceeded ${ARTILLERY_TIMEOUT_MS / 1000}s timeout — aborted. Partial collector data preserved.`);
     } else {
-      console.error('Artillery failed:', err.message);
+      console.error('Artillery failed:', errorMessage(err));
     }
   }
   const wallClockMs = Date.now() - artilleryStart;

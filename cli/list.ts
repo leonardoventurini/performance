@@ -1,7 +1,12 @@
 // Prints every scenario, every app, and the resolved Meteor source.
 // Pure: takes config and a resolved source as inputs, writes to stdout.
 
-export function runList({ config, source }) {
+import type { BenchmarkConfig, MeteorSource } from '../lib/benchmark-types.js';
+
+interface ListInputs { readonly config: BenchmarkConfig; readonly source: MeteorSource; }
+
+/** Prints all configured scenarios, applications, and the resolved Meteor source. */
+export function runList({ config, source }: ListInputs): void {
   console.log('\nAvailable scenarios:');
   for (const [name, s] of Object.entries(config.scenarios)) {
     console.log(`  ${name.padEnd(20)} ${s.description}`);

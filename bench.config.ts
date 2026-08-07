@@ -6,10 +6,13 @@
  */
 
 import path from 'node:path';
+import type { BenchmarkConfig } from './lib/benchmark-types.js';
 
 const __dirname = import.meta.dirname;
 
-export default {
+const configuredPort = Number.parseInt(process.env.BENCH_PORT ?? '', 10);
+
+const config = {
   // Local Meteor checkout — switch branches here to benchmark different versions
   meteorCheckoutPath: process.env.METEOR_CHECKOUT_PATH || path.resolve(__dirname, '../../meteor'),
 
@@ -22,7 +25,7 @@ export default {
 
   // Port for the Meteor app. BENCH_PORT env var overrides for sharing the
   // box with another local dev server on 3000.
-  appPort: parseInt(process.env.BENCH_PORT, 10) || 3000,
+  appPort: Number.isFinite(configuredPort) ? configuredPort : 3000,
 
   // Apps available for benchmarking
   apps: {
@@ -124,4 +127,6 @@ export default {
     baseline: path.resolve(__dirname, 'results/baseline.json'),
     history: path.resolve(__dirname, 'results/history'),
   },
-};
+} satisfies BenchmarkConfig;
+
+export default config;

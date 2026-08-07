@@ -3,27 +3,30 @@
 
 import { io } from '../runner/_io.js';
 import { compare, toMarkdown } from '../reporters/regression-detector.js';
+import type { CliValues } from '../lib/benchmark-types.js';
+import { errorMessage } from '../lib/benchmark-types.js';
 
-function readResultFile(filePath, label) {
-  let raw;
+function readResultFile(filePath: string, label: string): unknown {
+  let raw: string;
   try {
     raw = io.readFileSync(filePath, 'utf8');
   } catch (err) {
-    console.error(`Could not read ${label} file at ${filePath}: ${err.message}. Check the path or run 'bench.js run' first to produce it.`);
+    console.error(`Could not read ${label} file at ${filePath}: ${errorMessage(err)}. Check the path or run 'bench.js run' first to produce it.`);
     process.exit(1);
   }
   try {
     return JSON.parse(raw);
   } catch (err) {
-    console.error(`Could not parse ${label} file at ${filePath} as JSON: ${err.message}. Is the file a valid bench.js result?`);
+    console.error(`Could not parse ${label} file at ${filePath} as JSON: ${errorMessage(err)}. Is the file a valid bench.js result?`);
     process.exit(1);
   }
 }
 
-export function runCompare({ values }) {
-  const baselinePath = values.baseline;
-  const targetPath = values.target;
-  const format = values.format || 'markdown';
+/** Compares two validated result files and exits with their regression status. */
+export function runCompare({ values }: Readonly<{ values: CliValues }>): never {
+  const baselinePath = typeof values.baseline === 'string' ? values.baseline : undefined;
+  const targetPath = typeof values.target === 'string' ? values.target : undefined;
+  const format = typeof values.format === 'string' ? values.format : 'markdown';
 
   if (!baselinePath || !targetPath) {
     console.error('Usage: node bench.js compare --baseline <file> --target <file>');

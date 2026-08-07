@@ -23,6 +23,7 @@ import { parseArgs } from 'node:util';
 import config from './bench.config.js';
 import { resolveMeteorSource } from './meteor-source.js';
 import * as cli from './cli/index.js';
+import type { Environment } from './lib/benchmark-types.js';
 
 const {
   runList,
@@ -73,18 +74,9 @@ const OPTIONS = {
   'allow-remote-mongo': { type: 'boolean' },
   release: { type: 'string' },
   manifest: { type: 'string' },
-};
+} as const;
 
-const { values, positionals } = parseArgs({
-  args: process.argv.slice(2),
-  options: OPTIONS,
-  allowPositionals: true,
-  strict: false,
-});
-// The first positional is the subcommand name; everything else is flags.
-const command = positionals[0];
-
-function printHelp() {
+function printHelp(): void {
   console.log(`
 Meteor Benchmark Framework
 
@@ -119,37 +111,52 @@ Meteor source:
 // Sync handlers (list, compare) run inline; async handlers (run, push, baseline)
 // get a .catch so an unhandled rejection still surfaces as a non-zero exit
 // code instead of a stack trace and exit 0. Unknown command → help, no error.
+/** Inputs supplied by the stable checked-JavaScript launcher. */
+export interface MainInputs {
+  readonly argv: readonly string[];
+  readonly env: Environment;
+  readonly repositoryRoot: string;
+}
+
+/** Parses and dispatches one CLI invocation without auto-executing on import. */
+export async function main({ argv, env, repositoryRoot }: MainInputs): Promise<void> {
+  void repositoryRoot;
+  const { values, positionals } = parseArgs({
+    args: [...argv], options: OPTIONS, allowPositionals: true, strict: false,
+  });
+  const command = positionals[0];
+
 switch (command) {
   case 'list': {
     // list is the only sync command that needs the resolved source up front
     // (to print "Meteor source: …" in its header). Others resolve internally.
-    const source = resolveMeteorSource({ flags: values, env: process.env, config });
+    const source = resolveMeteorSource({ flags: values, env, config });
     runList({ config, source });
     break;
   }
   case 'run':
-    runBenchmark({ values, config }).catch((err) => { console.error(err); process.exit(1); });
+    await runBenchmark({ values, config });
     break;
   case 'compare':
     runCompare({ values });
     break;
   case 'push':
-    runPush({ values, config }).catch((err) => { console.error(err); process.exit(1); });
+    await runPush({ values, config });
     break;
   case 'baseline':
-    runBaseline({ values, config }).catch((err) => { console.error(err); process.exit(1); });
+    await runBaseline({ values, config });
     break;
   case 'clear':
-    runClear({ values, config }).catch((err) => { console.error(err); process.exit(1); });
+    await runClear({ values, config });
     break;
   case 'bundle-delta':
     runBundleDelta({ values, config });
     break;
   case 'audit':
-    runAudit({ values, config }).catch((err) => { console.error(err); process.exit(1); });
+    await runAudit({ values, config });
     break;
   case 'release-audit':
-    runReleaseAudit({ values, config }).catch((err) => { console.error(err); process.exit(1); });
+    await runReleaseAudit({ values, config });
     break;
   case 'release-audit-validate':
     try {
@@ -161,4 +168,5 @@ switch (command) {
     break;
   default:
     printHelp();
+}
 }

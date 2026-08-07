@@ -27,14 +27,17 @@ import { buildResult } from '../reporters/json-reporter.js';
 import { parseMeteorProfile } from '../runner/meteor-profile-parser.js';
 import { aggregateBuildProfile } from '../runner/build-profile-aggregator.js';
 import { aggregatePluginCompile } from '../runner/plugin-compile-aggregator.js';
+import type { DriverInputs, MeteorSource } from '../lib/benchmark-types.js';
+import { errorMessage } from '../lib/benchmark-types.js';
 
 const PROFILE_MAX_BUFFER = 32 * 1024 * 1024; // 32MB — METEOR_PROFILE can be MBs
 
-function meteorArgv(source, subcommandArgs) {
-  return source.releaseArg ? [source.releaseArg, ...subcommandArgs] : subcommandArgs;
+function meteorArgv(source: MeteorSource, subcommandArgs: readonly string[]): string[] {
+  return source.releaseArg ? [source.releaseArg, ...subcommandArgs] : [...subcommandArgs];
 }
 
-export async function runBuildProfileDriver({ scenarioName, app, appName, source, env, tag, config }) {
+/** Profiles one clean production build and reports both build aggregates. */
+export async function runBuildProfileDriver({ scenarioName, app, appName, source, env, tag }: DriverInputs): Promise<ReturnType<typeof buildResult>> {
   const buildDir = path.join('/tmp', `meteor-build-profile-${Date.now()}`);
   console.log('\nBuild profile benchmark (METEOR_PROFILE=1)\n');
 
@@ -54,8 +57,8 @@ export async function runBuildProfileDriver({ scenarioName, app, appName, source
     });
   } catch (err) {
     // Build failed late — keep whatever profile we captured and parse it.
-    stdout = err.stdout ? String(err.stdout) : '';
-    console.error(`meteor build exited nonzero: ${err.message}. Parsing partial profile (${stdout.length} bytes).`);
+    stdout = typeof err === 'object' && err !== null && 'stdout' in err && err.stdout ? String(err.stdout) : '';
+    console.error(`meteor build exited nonzero: ${errorMessage(err)}. Parsing partial profile (${stdout.length} bytes).`);
   } finally {
     io.rmSync(buildDir, { recursive: true, force: true });
   }
@@ -63,10 +66,10 @@ export async function runBuildProfileDriver({ scenarioName, app, appName, source
   console.log(`Build time: ${(wallClockMs / 1000).toFixed(1)}s`);
 
   const parsed = parseMeteorProfile(stdout);
-  const buildProfile = aggregateBuildProfile(parsed, { topN: 5 });
+  const buildProfile = aggregateBuildProfile({ ...parsed, total_ms: parsed.total_ms ?? 0 }, { topN: 5 });
   const pluginCompile = aggregatePluginCompile(parsed);
 
-  const collectorResults = [];
+  const collectorResults: Array<NonNullable<typeof buildProfile> | NonNullable<typeof pluginCompile>> = [];
   if (buildProfile) {
     collectorResults.push(buildProfile);
     console.log(`Build profile: total ${buildProfile.total_ms}ms, top node "${buildProfile.top_nodes[0]?.name}" ${buildProfile.top_nodes[0]?.self_ms}ms`);
