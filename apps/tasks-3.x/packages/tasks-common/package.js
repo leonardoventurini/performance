@@ -25,7 +25,7 @@ Package.onUse(function(api) {
 Package.onTest(function(api) {
   api.use('ecmascript');
   api.use('typescript@5.11.0-beta351.0');
-  api.use('meteortesting:mocha');
+  api.use('meteortesting:mocha', undefined, { weak: true });
   api.use('tasks-common');
   api.mainModule('tasks-common-tests.ts');
 });

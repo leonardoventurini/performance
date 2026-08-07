@@ -6,7 +6,7 @@ declare const Package: {
 
 interface MeteorPackageApi {
   versionsFrom(version: string): void;
-  use(name: string | readonly string[], architectures?: string | readonly string[]): void;
+  use(name: string | readonly string[], architectures?: string | readonly string[], options?: Readonly<{ weak?: boolean; unordered?: boolean }>): void;
   mainModule(path: string, architectures?: readonly string[]): void;
 }
 

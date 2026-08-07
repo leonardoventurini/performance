@@ -1,4 +1,4 @@
-@import "tailwindcss";
+@import "tailwindcss" source(none);
 
 /* Meteor strips attributes from <body>, so use the canvas tokens here
    instead of via Tailwind utilities on the element. */
@@ -17,9 +17,9 @@ html.dark, html.dark body {
    to this file (and would miss imports/) and `.html` files aren't on the
    default extension list. Glob is rooted at this file. */
 @source "../client/**/*.html";
-@source "../client/**/*.js";
+@source "../client/**/*.ts";
 @source "../imports/**/*.html";
-@source "../imports/**/*.js";
+@source "../imports/**/*.ts";
 
 /* Toggle dark mode via class on <html> so we control it, not OS prefs. */
 @variant dark (&:where(.dark, .dark *));

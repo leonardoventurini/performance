@@ -27,7 +27,7 @@ Package.onUse(function (api) {
 Package.onTest(function (api) {
   api.use('ecmascript');
   api.use('typescript@5.11.0-beta351.0');
-  api.use('meteortesting:mocha');
+  api.use('meteortesting:mocha', undefined, { weak: true });
   api.use('bench-monitors');
   api.mainModule('audit-observer-contract-tests.ts');
 });
