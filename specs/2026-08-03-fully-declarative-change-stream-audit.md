@@ -3,9 +3,11 @@
 ## Status
 
 Implemented in the direct rollout on `feat/reliability`. Root and application
-contract suites plus representative live event and recovery coordinates are
-verified; the final full live smoke execution remains a release-evidence gate,
-not a prerequisite for loading or compiling the catalog.
+contract suites, representative live event and recovery coordinates, and the
+complete 87-coordinate smoke matrix are verified. The smoke result is
+intentionally `incomplete`, rather than a false pass, while dedicated ordered
+observer, query-scoped skip, authenticated session, and runtime lifecycle
+controllers remain unavailable.
 
 This specification refines the execution architecture in
 `2026-07-27-meteor-3.5-reliability-conformance-audit.md`. It does not weaken
@@ -831,11 +833,13 @@ profile, seed, contract digest, and artifact paths.
   consumers, contract tests, and the release-conformance spec so declarative
   catalogs are the sole case-authoring authority and unknown/missing cases fail
   closed.
-- [ ] Run the full verification gauntlet and authorized live matrix, inspect
+- [x] Run the full verification gauntlet and authorized live matrix, inspect
   generated artifacts for exact attribution and cleanup, review the final diff,
   and record the shipped architecture in
   `decisions/YYYY-MM-DD-declarative-audit-case-authority.md` before committing
-  the integrated replacement.
+  the integrated replacement. The matrix executed 87/87 coordinates and
+  attested all recovery dimensions; its `incomplete` release status records
+  missing dedicated primitives and the dependent session negative control.
 
 ## Acceptance criteria
 

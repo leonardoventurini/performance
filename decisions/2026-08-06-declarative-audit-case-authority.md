@@ -47,11 +47,22 @@ network restoration; incomplete teardown prevents conformance.
 
 ## Validation evidence
 
-- Root Node suite passed with 548 tests after the primitive hardening.
-- The tasks fixture Meteor suite passed its server tests.
+- Root Node suite passed with 566 tests after the final case-isolation and
+  barrier validation hardening.
+- The tasks fixture Meteor suite passed both server tests (its existing client
+  `assert` module warning remains diagnostic).
 - The dashboard Meteor suite passed all 16 server contract tests.
 - A live `event.update.set` case passed with subscriber revisions `0 → 1` and
   detected dropped, duplicated, reordered, and payload-corruption controls.
 - A live `recovery.startup_snapshot_concurrent_writes` case passed across both
   Meteor instances with four correlated cursor observations and complete
   topology restoration.
+- The final Meteor 3.5.1-beta.0 smoke run executed all 87 required coordinates,
+  persisted canonical evidence, and attested document cleanup plus topology,
+  profiler, and network restoration. It remained truthfully `incomplete` for
+  dedicated ordered-observer, query-scoped skip, authenticated-session, and
+  runtime-lifecycle primitives that are not yet available.
+- Twelve of thirteen production-gate negative controls detected their sealed
+  evidence mutations. The remaining authenticated-session mutation is
+  explicitly undetected because no authenticated resume evidence can yet be
+  produced, which keeps release conformance fail-closed.
