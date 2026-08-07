@@ -6,15 +6,17 @@
  */
 
 import path from 'node:path';
-import type { BenchmarkConfig } from './lib/benchmark-types.js';
+import type { BenchmarkConfig, Environment } from './lib/benchmark-types.js';
 
 const __dirname = import.meta.dirname;
 
-const configuredPort = Number.parseInt(process.env.BENCH_PORT ?? '', 10);
+/** Builds configuration against the launcher-attested repository root. */
+export function createBenchmarkConfig(repositoryRoot: string, env: Environment): BenchmarkConfig {
+const configuredPort = Number.parseInt(env.BENCH_PORT ?? '', 10);
 
-const config = {
+return {
   // Local Meteor checkout — switch branches here to benchmark different versions
-  meteorCheckoutPath: process.env.METEOR_CHECKOUT_PATH || path.resolve(__dirname, '../../meteor'),
+  meteorCheckoutPath: env.METEOR_CHECKOUT_PATH || path.resolve(repositoryRoot, '../meteor'),
 
   // Pinned Meteor release — uncomment to benchmark a published release without a local checkout.
   // Mutually exclusive with meteorCheckoutPath (and with --meteor-checkout / METEOR_CHECKOUT_PATH).
@@ -30,7 +32,7 @@ const config = {
   // Apps available for benchmarking
   apps: {
     'tasks-3.x': {
-      path: path.resolve(__dirname, 'apps/tasks-3.x'),
+      path: path.resolve(repositoryRoot, 'apps/tasks-3.x'),
       description: 'Meteor 3 React task app',
     },
   },
@@ -118,15 +120,17 @@ const config = {
   },
 
   // Dashboard
-  dashboardUrl: process.env.BENCH_DASHBOARD_URL?.trim() || 'ws://localhost:4000/websocket',
-  dashboardApiKey: process.env.BENCH_API_KEY || 'dev-bench-key-change-in-prod',
+  dashboardUrl: env.BENCH_DASHBOARD_URL?.trim() || 'ws://localhost:4000/websocket',
+  dashboardApiKey: env.BENCH_API_KEY || 'dev-bench-key-change-in-prod',
 
   // Output paths
   results: {
-    dir: path.resolve(__dirname, 'results'),
-    baseline: path.resolve(__dirname, 'results/baseline.json'),
-    history: path.resolve(__dirname, 'results/history'),
+    dir: path.resolve(repositoryRoot, 'results'),
+    baseline: path.resolve(repositoryRoot, 'results/baseline.json'),
+    history: path.resolve(repositoryRoot, 'results/history'),
   },
 } satisfies BenchmarkConfig;
+}
 
-export default config;
+const moduleRepositoryRoot = path.basename(__dirname) === 'dist' ? path.dirname(__dirname) : __dirname;
+export default createBenchmarkConfig(moduleRepositoryRoot, process.env);

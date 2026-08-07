@@ -20,7 +20,7 @@
  */
 
 import { parseArgs } from 'node:util';
-import config from './bench.config.js';
+import { createBenchmarkConfig } from './bench.config.js';
 import { resolveMeteorSource } from './meteor-source.js';
 import * as cli from './cli/index.js';
 import type { Environment } from './lib/benchmark-types.js';
@@ -76,7 +76,7 @@ const OPTIONS = {
   manifest: { type: 'string' },
 } as const;
 
-function printHelp(): void {
+function printHelp(config: Readonly<{ dashboardUrl?: string }>): void {
   console.log(`
 Meteor Benchmark Framework
 
@@ -120,7 +120,7 @@ export interface MainInputs {
 
 /** Parses and dispatches one CLI invocation without auto-executing on import. */
 export async function main({ argv, env, repositoryRoot }: MainInputs): Promise<void> {
-  void repositoryRoot;
+  const config = createBenchmarkConfig(repositoryRoot, env);
   const { values, positionals } = parseArgs({
     args: [...argv], options: OPTIONS, allowPositionals: true, strict: false,
   });
@@ -167,6 +167,6 @@ switch (command) {
     }
     break;
   default:
-    printHelp();
+    printHelp(config);
 }
 }
