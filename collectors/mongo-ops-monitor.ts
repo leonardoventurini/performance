@@ -14,6 +14,7 @@
 
 import { io } from '../runner/_io.js';
 import { computeOpRates } from '../runner/mongo-ops-rates.js';
+import { errorMessage } from '../lib/benchmark-types.js';
 
 const uri = process.argv[2];
 if (!uri) {
@@ -22,17 +23,18 @@ if (!uri) {
 }
 
 const client = new io.MongoClient(uri);
-let startCounters = null;
+let startCounters: Record<string, number | undefined> | null = null;
 let startTime = 0;
 let finished = false;
 
-async function readOpcounters() {
+async function readOpcounters(): Promise<Record<string, number | undefined>> {
   // admin command works on any DB handle; using admin is conventional.
   const status = await client.db('admin').command({ serverStatus: 1 });
-  return status.opcounters;
+  const counters = status.opcounters;
+  return typeof counters === 'object' && counters !== null ? counters as Record<string, number | undefined> : {};
 }
 
-async function finishAndExit() {
+async function finishAndExit(): Promise<void> {
   if (finished) return;
   finished = true;
   try {
@@ -44,7 +46,7 @@ async function finishAndExit() {
     const result = computeOpRates(startCounters, endCounters, Date.now() - startTime);
     process.stdout.write(JSON.stringify(result));
   } catch (err) {
-    process.stderr.write(`[mongo-ops] error reading endpoint: ${err.message}\n`);
+    process.stderr.write(`[mongo-ops] error reading endpoint: ${errorMessage(err)}\n`);
   } finally {
     await client.close().catch(() => {});
     process.exit(0);
@@ -60,6 +62,6 @@ try {
   startTime = Date.now();
   process.stderr.write(`[mongo-ops] baseline captured (${Object.keys(startCounters).join(',')})\n`);
 } catch (err) {
-  process.stderr.write(`[mongo-ops] init failed: ${err.message}\n`);
+  process.stderr.write(`[mongo-ops] init failed: ${errorMessage(err)}\n`);
   process.exit(0);
 }

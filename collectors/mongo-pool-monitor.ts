@@ -36,6 +36,7 @@
 
 import { io } from '../runner/_io.js';
 import { aggregateConnectionPool } from '../runner/connection-pool-aggregator.js';
+import { errorMessage } from '../lib/benchmark-types.js';
 
 const uri = process.argv[2];
 const intervalMs = Number(process.argv[3]) || 1000;
@@ -45,18 +46,18 @@ if (!uri) {
 }
 
 const client = new io.MongoClient(uri);
-const samples = []; // [{ ts, current, active }]
-let totalCreatedStart = null;
-let totalCreatedEnd = null;
-let timer = null;
+const samples: Array<{ ts: number; current: number; active: number }> = [];
+let totalCreatedStart: number | null = null;
+let totalCreatedEnd: number | null = null;
+let timer: NodeJS.Timeout | null = null;
 let finished = false;
 
-async function readConnections() {
+async function readConnections(): Promise<{ current?: number; active?: number; totalCreated?: number } | null> {
   const status = await client.db('admin').command({ serverStatus: 1 });
   return status.connections;
 }
 
-async function sample() {
+async function sample(): Promise<void> {
   try {
     const conn = await readConnections();
     if (!conn) return;
@@ -69,11 +70,11 @@ async function sample() {
     // even though serverStatus is read on every tick.
     if (conn.totalCreated != null) totalCreatedEnd = Number(conn.totalCreated);
   } catch (err) {
-    process.stderr.write(`[mongo-pool] sample failed: ${err.message}\n`);
+    process.stderr.write(`[mongo-pool] sample failed: ${errorMessage(err)}\n`);
   }
 }
 
-function finishAndExit() {
+function finishAndExit(): void {
   if (finished) return;
   finished = true;
   if (timer) clearInterval(timer);
@@ -81,13 +82,13 @@ function finishAndExit() {
     const result = aggregateConnectionPool({
       interval_ms: intervalMs,
       samples,
-      total_created_start: totalCreatedStart,
-      total_created_end: totalCreatedEnd,
+      ...(totalCreatedStart !== null ? { total_created_start: totalCreatedStart } : {}),
+      ...(totalCreatedEnd !== null ? { total_created_end: totalCreatedEnd } : {}),
     });
     if (result) process.stdout.write(JSON.stringify(result));
     else process.stderr.write('[mongo-pool] no samples captured — omitting metric\n');
   } catch (err) {
-    process.stderr.write(`[mongo-pool] error building result: ${err.message}\n`);
+    process.stderr.write(`[mongo-pool] error building result: ${errorMessage(err)}\n`);
   } finally {
     client.close().catch(() => {});
     process.exit(0);
@@ -117,6 +118,6 @@ try {
   timer.unref?.();
   process.stderr.write(`[mongo-pool] baseline captured (current=${conn.current}, active=${conn.active}, totalCreated=${conn.totalCreated}); sampling every ${intervalMs}ms\n`);
 } catch (err) {
-  process.stderr.write(`[mongo-pool] init failed: ${err.message}\n`);
+  process.stderr.write(`[mongo-pool] init failed: ${errorMessage(err)}\n`);
   process.exit(0);
 }

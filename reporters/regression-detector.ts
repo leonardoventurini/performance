@@ -20,15 +20,25 @@
 
 import config from '../bench.config.js';
 
-function compare(baseline, target) {
-  const details = [];
+interface MetricData {
+  metric?: string; name?: string; p99?: number; total_pause_ms?: number; max_pause_ms?: number; count?: number;
+  cpu?: { avg?: number }; memory?: { avg_mb?: number }; major?: { total_ms?: number }; status?: string;
+}
+interface ComparableResult { tag: string; scenario: string; wall_clock_ms?: number; metrics?: Readonly<Record<string, MetricData>> }
+interface MetricPair { key: string; label?: string; baseVal: number | null | undefined; targetVal: number | null | undefined }
+type SkipReason = 'zero_baseline' | 'missing_target' | 'non_finite';
+interface ComparisonDetail { metric: string; baseline: unknown; target: unknown; delta?: number | null; status: 'ok' | 'WARN' | 'FAIL' | 'skip'; reason?: SkipReason }
+export interface ComparisonReport { summary: { baseline_tag: string; target_tag: string; scenario: string; passed: boolean; warnings: number; failures: number }; details: ComparisonDetail[] }
+
+function compare(baseline: ComparableResult, target: ComparableResult): ComparisonReport {
+  const details: ComparisonDetail[] = [];
   let warnings = 0;
   let failures = 0;
 
   // Seed the comparison list with wall_clock — it lives at the top level of
   // the result, not under metrics{}, so it's special-cased before we walk
   // collector outputs below.
-  const metricPairs = [
+  const metricPairs: MetricPair[] = [
     { key: 'wall_clock_ms', baseVal: baseline.wall_clock_ms, targetVal: target.wall_clock_ms },
   ];
 
@@ -58,7 +68,7 @@ function compare(baseline, target) {
       metricPairs.push({
         key: 'cpu_avg_percent',
         label: `${metricData.name} CPU avg`,
-        baseVal: baseMetric.cpu.avg,
+        baseVal: baseMetric.cpu?.avg,
         targetVal: metricData.cpu.avg,
       });
     }
@@ -66,7 +76,7 @@ function compare(baseline, target) {
       metricPairs.push({
         key: 'ram_avg_mb',
         label: `${metricData.name} RAM avg`,
-        baseVal: baseMetric.memory.avg_mb,
+        baseVal: baseMetric.memory?.avg_mb,
         targetVal: metricData.memory.avg_mb,
       });
     }
@@ -101,8 +111,8 @@ function compare(baseline, target) {
       metricPairs.push({
         key: 'gc_major_ms',
         label: 'GC major (full)',
-        baseVal: baseMetric.major.total_ms,
-        targetVal: metricData.major.total_ms,
+        baseVal: baseMetric.major?.total_ms,
+        targetVal: metricData.major?.total_ms,
       });
     }
   }
@@ -153,8 +163,9 @@ function compare(baseline, target) {
     }
 
     const delta = ((targetVal - baseVal) / baseVal) * 100;
-    const threshold = config.thresholds[key];
-    let status = 'ok';
+    const thresholds: Readonly<Record<string, { warn: number; fail: number }>> = config.thresholds;
+    const threshold = thresholds[key];
+    let status: 'ok' | 'WARN' | 'FAIL' = 'ok';
 
     if (threshold) {
       if (delta > threshold.fail) {
@@ -188,13 +199,13 @@ function compare(baseline, target) {
   };
 }
 
-const SKIP_REASON_TEXT = {
+const SKIP_REASON_TEXT: Record<SkipReason, string> = {
   zero_baseline: 'baseline was zero',
   missing_target: 'target metric missing',
   non_finite: 'target value non-finite',
 };
 
-function toMarkdown(report) {
+function toMarkdown(report: ComparisonReport): string {
   const { summary, details } = report;
   const icon = summary.passed ? (summary.warnings > 0 ? '⚠️' : '✅') : '❌';
 
@@ -211,7 +222,7 @@ function toMarkdown(report) {
 
   for (const d of details) {
     if (d.status === 'skip') {
-      const reasonText = SKIP_REASON_TEXT[d.reason] || d.reason;
+      const reasonText = d.reason ? SKIP_REASON_TEXT[d.reason] : 'unknown reason';
       const baselineCell = d.baseline ?? '';
       const targetCell = d.target ?? '';
       md += `| ${d.metric} | ${baselineCell} | ${targetCell} |  | ⏭ (${reasonText}) |\n`;

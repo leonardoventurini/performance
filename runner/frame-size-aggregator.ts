@@ -24,7 +24,8 @@
 
 import { summarize } from '../lib/percentiles.js';
 
-function directionStats(sizes) {
+interface FrameSizeDump { in_sizes?: readonly number[]; out_sizes?: readonly number[]; by_type_in_sum?: Readonly<Record<string, number>>; by_type_out_sum?: Readonly<Record<string, number>> }
+function directionStats(sizes: readonly number[]) {
   const stats = summarize(sizes);
   if (!stats) return { count: 0, avg_bytes: 0, p50_bytes: 0, p95_bytes: 0, p99_bytes: 0, max_bytes: 0 };
   return {
@@ -37,7 +38,7 @@ function directionStats(sizes) {
   };
 }
 
-export function aggregateFrameSize(dump) {
+export function aggregateFrameSize(dump?: FrameSizeDump | null) {
   if (!dump) return null;
   const inSizes = Array.isArray(dump.in_sizes) ? dump.in_sizes : [];
   const outSizes = Array.isArray(dump.out_sizes) ? dump.out_sizes : [];

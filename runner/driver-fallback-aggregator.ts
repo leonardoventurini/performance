@@ -6,7 +6,8 @@
 // Returns null when no observes were recorded (CC-5: collector ran but
 // nothing happened → caller omits the key entirely).
 
-export function aggregateDriverFallback(dump) {
+interface DriverFallbackDump { total_cursors?: number; no_fallback?: number; configured_first?: string | null; fallbacks?: Readonly<Record<string, number>> }
+export function aggregateDriverFallback(dump?: DriverFallbackDump | null) {
   const total = Number(dump?.total_cursors) || 0;
   if (total === 0) return null;
   const noFallback = Number(dump?.no_fallback) || 0;

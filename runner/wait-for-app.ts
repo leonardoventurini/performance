@@ -10,7 +10,7 @@ import { io } from './_io.js';
 const DEFAULT_TIMEOUT_MS = 300_000;
 const POLL_INTERVAL_MS = 1000;
 
-export async function waitForApp(port, { timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
+export async function waitForApp(port: number, { timeoutMs = DEFAULT_TIMEOUT_MS }: { timeoutMs?: number } = {}): Promise<true> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     try {

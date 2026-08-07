@@ -5,14 +5,16 @@
 // app paths and release versions out of shell parsing.
 
 import path from 'node:path';
+import type { ChildProcess } from 'node:child_process';
+import type { MeteorSource } from '../lib/benchmark-types.js';
 import { io } from './_io.js';
 import { createRuntimeInfoExtractor } from './runtime-info-extractor.js';
 
-function meteorArgv(source, subcommandArgs) {
-  return source.releaseArg ? [source.releaseArg, ...subcommandArgs] : subcommandArgs;
+function meteorArgv(source: MeteorSource, subcommandArgs: readonly string[]): string[] {
+  return source.releaseArg ? [source.releaseArg, ...subcommandArgs] : [...subcommandArgs];
 }
 
-export function ensureAppDeps(source, appPath) {
+export function ensureAppDeps(source: MeteorSource, appPath: string): void {
   const nodeModules = path.join(appPath, 'node_modules');
   if (io.existsSync(nodeModules)) return;
   console.log('Installing app dependencies with Meteor npm...');
@@ -22,7 +24,7 @@ export function ensureAppDeps(source, appPath) {
   });
 }
 
-export function resetMeteorApp(source, appPath) {
+export function resetMeteorApp(source: MeteorSource, appPath: string): void {
   console.log('Cleaning app state...');
   io.execFileSync(source.meteorCmd, meteorArgv(source, ['reset']), {
     cwd: appPath,
@@ -41,8 +43,14 @@ export function resetMeteorApp(source, appPath) {
 // / DDP_FRAME_SIZE_OUTPUT / DDP_COMPRESSION_OUTPUT / DRIVER_FALLBACK_OUTPUT
 // and the matching in-app bench-monitors collector dumps to that path
 // on SIGTERM. The harness reads them in stopCollectors.
-export function startMeteorApp({ source, appPath, port, env = {}, gcMonitorPath, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath, frameSizePath, compressionPath, driverFallbackPath }) {
-  const spawnEnv = { ...process.env, ...env, METEOR_NO_DEPRECATION: 'true' };
+export interface StartMeteorAppOptions {
+  source: MeteorSource; appPath: string; port: number; env?: Readonly<Record<string, string>>;
+  gcMonitorPath?: string; gcOutputPath?: string; methodTimingPath?: string; subTimingPath?: string;
+  propagationTimingPath?: string; observerPoolPath?: string; ddpMessagePath?: string;
+  frameSizePath?: string; compressionPath?: string; driverFallbackPath?: string;
+}
+export function startMeteorApp({ source, appPath, port, env = {}, gcMonitorPath, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath, frameSizePath, compressionPath, driverFallbackPath }: StartMeteorAppOptions) {
+  const spawnEnv: Record<string, string | undefined> = { ...process.env, ...env, METEOR_NO_DEPRECATION: 'true' };
   if (gcMonitorPath) {
     /* PATCH-PROF: respect existing SERVER_NODE_OPTIONS (e.g. --prof passed
        via shell). Concat instead of overwrite. */
@@ -64,7 +72,7 @@ export function startMeteorApp({ source, appPath, port, env = {}, gcMonitorPath,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   const runtime = createRuntimeInfoExtractor();
-  const tee = (d) => { runtime.feed(d); process.stderr.write(d); };
+  const tee = (d: Uint8Array): void => { runtime.feed(d); process.stderr.write(d); };
   proc.stdout.on('data', tee);
   proc.stderr.on('data', tee);
   return { proc, getRuntimeInfo: runtime.get };
@@ -73,7 +81,7 @@ export function startMeteorApp({ source, appPath, port, env = {}, gcMonitorPath,
 // pgrep exits 1 when there's no match. That's an "expected absence" — every
 // caller (the collectors layer) treats null as "skip this collector". Catch
 // here so callers don't need to.
-export function findPid(pattern) {
+export function findPid(pattern: string): string | null {
   try {
     const out = io.execFileSync('pgrep', ['-f', pattern], { encoding: 'utf8' });
     return out.trim().split('\n')[0] || null;
@@ -82,7 +90,7 @@ export function findPid(pattern) {
   }
 }
 
-export async function stopMeteorApp(proc, { graceMs = 3000 } = {}) {
+export async function stopMeteorApp(proc: ChildProcess | null | undefined, { graceMs = 3000 }: { graceMs?: number } = {}): Promise<void> {
   if (!proc) return;
   proc.kill('SIGTERM');
   await io.sleep(graceMs);

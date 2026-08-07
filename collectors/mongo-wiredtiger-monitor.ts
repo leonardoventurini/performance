@@ -26,6 +26,7 @@
 
 import { io } from '../runner/_io.js';
 import { aggregateWiredTiger } from '../runner/wiredtiger-aggregator.js';
+import { errorMessage } from '../lib/benchmark-types.js';
 
 const uri = process.argv[2];
 if (!uri) {
@@ -34,17 +35,18 @@ if (!uri) {
 }
 
 const client = new io.MongoClient(uri);
-let startCache = null;
+let startCache: Record<string, number | undefined> | null = null;
 let finished = false;
 
-async function readCache() {
+async function readCache(): Promise<Record<string, number | undefined> | null> {
   const status = await client.db('admin').command({ serverStatus: 1 });
   // wiredTiger is absent on non-WT storage engines; cache is the sub-doc
   // we need. Either being missing means "no WT metric for this run".
-  return status?.wiredTiger?.cache ?? null;
+  const cache = status?.wiredTiger?.cache;
+  return typeof cache === 'object' && cache !== null ? cache as Record<string, number | undefined> : null;
 }
 
-async function finishAndExit() {
+async function finishAndExit(): Promise<void> {
   if (finished) return;
   finished = true;
   try {
@@ -59,7 +61,7 @@ async function finishAndExit() {
     if (result) process.stdout.write(JSON.stringify(result));
     else process.stderr.write('[mongo-wt] no cache activity (or WT absent) — omitting metric\n');
   } catch (err) {
-    process.stderr.write(`[mongo-wt] error reading endpoint: ${err.message}\n`);
+    process.stderr.write(`[mongo-wt] error reading endpoint: ${errorMessage(err)}\n`);
   } finally {
     await client.close().catch(() => {});
     process.exit(0);
@@ -79,6 +81,6 @@ try {
   }
   process.stderr.write('[mongo-wt] cache baseline captured\n');
 } catch (err) {
-  process.stderr.write(`[mongo-wt] init failed: ${err.message}\n`);
+  process.stderr.write(`[mongo-wt] init failed: ${errorMessage(err)}\n`);
   process.exit(0);
 }

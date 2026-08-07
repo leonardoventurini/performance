@@ -17,6 +17,18 @@ import { aggregateDdpMessages } from '../runner/message-rate-aggregator.js';
 import { aggregateFrameSize } from '../runner/frame-size-aggregator.js';
 import { aggregateCompression } from '../runner/compression-aggregator.js';
 import { aggregateDriverFallback } from '../runner/driver-fallback-aggregator.js';
+import type { ChildProcess } from 'node:child_process';
+import { errorMessage } from '../lib/benchmark-types.js';
+import type { CollectorResult } from '../reporters/json-reporter.js';
+
+interface SpawnedCollector { proc: Pick<ChildProcess, 'kill'>; name: string; getResult(): string }
+interface CollectorPaths {
+  gcOutputPath?: string; methodTimingPath?: string; subTimingPath?: string; propagationTimingPath?: string;
+  observerPoolPath?: string; ddpMessagePath?: string; frameSizePath?: string; compressionPath?: string;
+  driverFallbackPath?: string;
+}
+interface StartCollectorsInput extends CollectorPaths { appName: string; mongoUri?: string }
+interface StopCollectorsInput extends CollectorPaths { procs: readonly SpawnedCollector[] }
 
 const HERE = import.meta.dirname;
 const PROCESS_MONITOR = path.resolve(HERE, '..', 'collectors', 'process-monitor.js');
@@ -30,7 +42,7 @@ const MONGO_WIREDTIGER_MONITOR = path.resolve(HERE, '..', 'collectors', 'mongo-w
 const RESULTS_DIR = path.resolve(HERE, '..', 'results');
 const COLLECTOR_DRAIN_MS = 1000;
 
-export function prepareGcOutput(tag) {
+export function prepareGcOutput(tag: string) {
   if (!io.existsSync(RESULTS_DIR)) io.mkdirSync(RESULTS_DIR, { recursive: true });
   return {
     gcMonitorPath: GC_MONITOR,
@@ -41,21 +53,21 @@ export function prepareGcOutput(tag) {
 // Path the in-app method-timing collector dumps to on Meteor's SIGTERM.
 // Passed through startMeteorApp's METHOD_TIMING_OUTPUT env var and read
 // here in stopCollectors.
-export function prepareMethodTimingOutput(tag) {
+export function prepareMethodTimingOutput(tag: string): string {
   if (!io.existsSync(RESULTS_DIR)) io.mkdirSync(RESULTS_DIR, { recursive: true });
   return path.join(RESULTS_DIR, `method-timing-${tag}-${Date.now()}.json`);
 }
 
 // Same pattern as prepareMethodTimingOutput, for the sub-timing collector
 // (SUB_TIMING_OUTPUT env var → metrics.ddp_subscriptions).
-export function prepareSubTimingOutput(tag) {
+export function prepareSubTimingOutput(tag: string): string {
   if (!io.existsSync(RESULTS_DIR)) io.mkdirSync(RESULTS_DIR, { recursive: true });
   return path.join(RESULTS_DIR, `sub-timing-${tag}-${Date.now()}.json`);
 }
 
 // Same pattern, for propagation-timing (PROPAGATION_TIMING_OUTPUT env var
 // → metrics.live_update_propagation).
-export function preparePropagationTimingOutput(tag) {
+export function preparePropagationTimingOutput(tag: string): string {
   if (!io.existsSync(RESULTS_DIR)) io.mkdirSync(RESULTS_DIR, { recursive: true });
   return path.join(RESULTS_DIR, `propagation-timing-${tag}-${Date.now()}.json`);
 }
@@ -63,7 +75,7 @@ export function preparePropagationTimingOutput(tag) {
 // Same pattern, for the observer-pool sampler (OBSERVER_POOL_OUTPUT env var
 // → metrics.observer_pool). The in-app sampler dumps RAW samples; we
 // aggregate to min/max/avg/end in stopCollectors.
-export function prepareObserverPoolOutput(tag) {
+export function prepareObserverPoolOutput(tag: string): string {
   if (!io.existsSync(RESULTS_DIR)) io.mkdirSync(RESULTS_DIR, { recursive: true });
   return path.join(RESULTS_DIR, `observer-pool-${tag}-${Date.now()}.json`);
 }
@@ -71,7 +83,7 @@ export function prepareObserverPoolOutput(tag) {
 // Same pattern, for the ddp-message counter (DDP_MESSAGE_OUTPUT env var
 // → metrics.ddp_messages). The in-app counter dumps RAW in/out counts
 // per message type; we compute per-second rates in stopCollectors.
-export function prepareDdpMessageOutput(tag) {
+export function prepareDdpMessageOutput(tag: string): string {
   if (!io.existsSync(RESULTS_DIR)) io.mkdirSync(RESULTS_DIR, { recursive: true });
   return path.join(RESULTS_DIR, `ddp-messages-${tag}-${Date.now()}.json`);
 }
@@ -79,7 +91,7 @@ export function prepareDdpMessageOutput(tag) {
 // Same pattern, for the frame-size counter (DDP_FRAME_SIZE_OUTPUT env var
 // → metrics.ddp_frame_size). The in-app counter dumps RAW per-message byte
 // sizes + per-type byte sums; we compute size percentiles in stopCollectors.
-export function prepareFrameSizeOutput(tag) {
+export function prepareFrameSizeOutput(tag: string): string {
   if (!io.existsSync(RESULTS_DIR)) io.mkdirSync(RESULTS_DIR, { recursive: true });
   return path.join(RESULTS_DIR, `frame-size-${tag}-${Date.now()}.json`);
 }
@@ -88,7 +100,7 @@ export function prepareFrameSizeOutput(tag) {
 // → metrics.ddp_compression). The in-app tracker dumps post-compression
 // socket byte totals; combined with the frame-size dump (pre-compression
 // byte sums), the harness aggregator emits the ratio + savings_pct.
-export function prepareCompressionOutput(tag) {
+export function prepareCompressionOutput(tag: string): string {
   if (!io.existsSync(RESULTS_DIR)) io.mkdirSync(RESULTS_DIR, { recursive: true });
   return path.join(RESULTS_DIR, `compression-${tag}-${Date.now()}.json`);
 }
@@ -96,7 +108,7 @@ export function prepareCompressionOutput(tag) {
 // Same pattern, for the driver-fallback tracker (DRIVER_FALLBACK_OUTPUT
 // env var → metrics.driver_fallbacks). The in-app tracker already produces
 // the final shape; aggregator just validates + applies absence convention.
-export function prepareDriverFallbackOutput(tag) {
+export function prepareDriverFallbackOutput(tag: string): string {
   if (!io.existsSync(RESULTS_DIR)) io.mkdirSync(RESULTS_DIR, { recursive: true });
   return path.join(RESULTS_DIR, `driver-fallback-${tag}-${Date.now()}.json`);
 }
@@ -111,8 +123,8 @@ export function prepareDriverFallbackOutput(tag) {
 //
 // Returns null when no samples were captured at all (per absence
 // convention CC-5: collector ran but emitted nothing → omit the key).
-export function aggregateMethodTiming(samplesByMethod) {
-  const methods = {};
+export function aggregateMethodTiming(samplesByMethod: Readonly<Record<string, readonly number[]>> | null | undefined) {
+  const methods: Record<string, { count: number; avg_ms: number; p50: number; p95: number; p99: number; max_ms: number }> = {};
   let totalCalls = 0;
   for (const [name, samples] of Object.entries(samplesByMethod || {})) {
     const stats = summarize(samples);
@@ -134,8 +146,8 @@ export function aggregateMethodTiming(samplesByMethod) {
 // Same shape as aggregateMethodTiming but grouped by publication name.
 // `publications` mirrors `methods`; `total_subs` mirrors `total_calls`.
 // Conventions identical (BARE percentile, absence → null, etc.).
-export function aggregateSubTiming(samplesByPub) {
-  const publications = {};
+export function aggregateSubTiming(samplesByPub: Readonly<Record<string, readonly number[]>> | null | undefined) {
+  const publications: Record<string, { count: number; avg_ms: number; p50: number; p95: number; p99: number; max_ms: number }> = {};
   let totalSubs = 0;
   for (const [name, samples] of Object.entries(samplesByPub || {})) {
     const stats = summarize(samples);
@@ -157,7 +169,7 @@ export function aggregateSubTiming(samplesByPub) {
 // Flat-aggregate variant (no grouping by name) — propagation samples are
 // per-emit (every sub × every doc), aggregated into one set. Returns null
 // when no samples (absence convention).
-export function aggregatePropagationTiming(samplesArr) {
+export function aggregatePropagationTiming(samplesArr: readonly number[] | null | undefined) {
   const stats = summarize(samplesArr || []);
   if (!stats) return null;
   return {
@@ -171,7 +183,7 @@ export function aggregatePropagationTiming(samplesArr) {
   };
 }
 
-function spawnProcessMonitor(pid, name) {
+function spawnProcessMonitor(pid: string, name: string): SpawnedCollector {
   const proc = io.spawn('node', [PROCESS_MONITOR, pid, name], {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -185,7 +197,7 @@ function spawnProcessMonitor(pid, name) {
 // serverStatus().opcounters baseline at startup and again on SIGTERM,
 // outputs JSON on stdout. Same shape as spawnProcessMonitor so it
 // flows through stopCollectors' generic JSON-from-stdout drain.
-function spawnMongoOpsMonitor(mongoUri) {
+function spawnMongoOpsMonitor(mongoUri: string): SpawnedCollector {
   const proc = io.spawn('node', [MONGO_OPS_MONITOR, mongoUri], {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -200,7 +212,7 @@ function spawnMongoOpsMonitor(mongoUri) {
 // slow ops, restores the profiler config, and emits metrics.mongo_slow_queries
 // on stdout. Aggregation runs inside the script, so (like mongo-ops) it flows
 // through stopCollectors' generic JSON-from-stdout drain — no read block here.
-function spawnMongoSlowQueryMonitor(mongoUri) {
+function spawnMongoSlowQueryMonitor(mongoUri: string): SpawnedCollector {
   const proc = io.spawn('node', [MONGO_SLOW_QUERY_MONITOR, mongoUri], {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -216,7 +228,7 @@ function spawnMongoSlowQueryMonitor(mongoUri) {
 // stdout. Same { proc, name, getResult } shape as the other spawns, so
 // it rides stopCollectors' generic JSON-from-stdout drain with no special
 // handling.
-function spawnMongoIndexUsageMonitor(mongoUri) {
+function spawnMongoIndexUsageMonitor(mongoUri: string): SpawnedCollector {
   const proc = io.spawn('node', [MONGO_INDEX_MONITOR, mongoUri], {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -231,7 +243,7 @@ function spawnMongoIndexUsageMonitor(mongoUri) {
 // `metrics.mongo_pool` JSON on stdout on SIGTERM. Same shape as
 // spawnMongoOpsMonitor so it flows through stopCollectors' generic
 // JSON-from-stdout drain.
-function spawnMongoPoolMonitor(mongoUri) {
+function spawnMongoPoolMonitor(mongoUri: string): SpawnedCollector {
   const proc = io.spawn('node', [MONGO_POOL_MONITOR, mongoUri], {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -246,7 +258,7 @@ function spawnMongoPoolMonitor(mongoUri) {
 // cursors and emits the aggregated `metrics.mongo_changestream` JSON on
 // stdout on SIGTERM. Same shape as spawnMongoOpsMonitor so it flows
 // through stopCollectors' generic JSON-from-stdout drain.
-function spawnMongoChangestreamMonitor(mongoUri) {
+function spawnMongoChangestreamMonitor(mongoUri: string): SpawnedCollector {
   const proc = io.spawn('node', [MONGO_CHANGESTREAM_MONITOR, mongoUri], {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -262,7 +274,7 @@ function spawnMongoChangestreamMonitor(mongoUri) {
 // and emits the metrics.mongo_wiredtiger JSON on stdout. Same shape as
 // spawnMongoOpsMonitor so it rides stopCollectors' generic
 // JSON-from-stdout drain with no special handling.
-function spawnMongoWiredTigerMonitor(mongoUri) {
+function spawnMongoWiredTigerMonitor(mongoUri: string): SpawnedCollector {
   const proc = io.spawn('node', [MONGO_WIREDTIGER_MONITOR, mongoUri], {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -272,8 +284,8 @@ function spawnMongoWiredTigerMonitor(mongoUri) {
   return { proc, name: 'MONGO_WIREDTIGER', getResult: () => stdout };
 }
 
-export function startCollectors({ appName, mongoUri, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath, frameSizePath, compressionPath, driverFallbackPath }) {
-  const procs = [];
+export function startCollectors({ appName, mongoUri, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath, frameSizePath, compressionPath, driverFallbackPath }: StartCollectorsInput) {
+  const procs: SpawnedCollector[] = [];
 
   const appPid = findPid(`${appName}/.meteor/local/build/main.js`);
   if (appPid) {
@@ -301,8 +313,8 @@ export function startCollectors({ appName, mongoUri, gcOutputPath, methodTimingP
   return { procs, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath, frameSizePath, compressionPath, driverFallbackPath };
 }
 
-export async function stopCollectors({ procs, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath, frameSizePath, compressionPath, driverFallbackPath }) {
-  const results = [];
+export async function stopCollectors({ procs, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath, frameSizePath, compressionPath, driverFallbackPath }: StopCollectorsInput): Promise<CollectorResult[]> {
+  const results: CollectorResult[] = [];
 
   for (const { proc, name, getResult } of procs) {
     proc.kill('SIGTERM');
@@ -312,7 +324,7 @@ export async function stopCollectors({ procs, gcOutputPath, methodTimingPath, su
     try {
       results.push(JSON.parse(raw));
     } catch (err) {
-      console.error(`Dropping malformed JSON from ${name} collector: ${err.message}`);
+      console.error(`Dropping malformed JSON from ${name} collector: ${errorMessage(err)}`);
     }
   }
 
@@ -326,7 +338,7 @@ export async function stopCollectors({ procs, gcOutputPath, methodTimingPath, su
       }
       io.unlinkSync(gcOutputPath);
     } catch (err) {
-      console.error(`Could not read GC metrics from ${gcOutputPath}: ${err.message}`);
+      console.error(`Could not read GC metrics from ${gcOutputPath}: ${errorMessage(err)}`);
     }
   }
 
@@ -344,7 +356,7 @@ export async function stopCollectors({ procs, gcOutputPath, methodTimingPath, su
       }
       io.unlinkSync(methodTimingPath);
     } catch (err) {
-      console.error(`Could not read method timing from ${methodTimingPath}: ${err.message}`);
+      console.error(`Could not read method timing from ${methodTimingPath}: ${errorMessage(err)}`);
     }
   }
 
@@ -359,7 +371,7 @@ export async function stopCollectors({ procs, gcOutputPath, methodTimingPath, su
       }
       io.unlinkSync(subTimingPath);
     } catch (err) {
-      console.error(`Could not read sub timing from ${subTimingPath}: ${err.message}`);
+      console.error(`Could not read sub timing from ${subTimingPath}: ${errorMessage(err)}`);
     }
   }
 
@@ -374,7 +386,7 @@ export async function stopCollectors({ procs, gcOutputPath, methodTimingPath, su
       }
       io.unlinkSync(propagationTimingPath);
     } catch (err) {
-      console.error(`Could not read propagation timing from ${propagationTimingPath}: ${err.message}`);
+      console.error(`Could not read propagation timing from ${propagationTimingPath}: ${errorMessage(err)}`);
     }
   }
 
@@ -390,7 +402,7 @@ export async function stopCollectors({ procs, gcOutputPath, methodTimingPath, su
       }
       io.unlinkSync(observerPoolPath);
     } catch (err) {
-      console.error(`Could not read observer pool samples from ${observerPoolPath}: ${err.message}`);
+      console.error(`Could not read observer pool samples from ${observerPoolPath}: ${errorMessage(err)}`);
     }
   }
 
@@ -408,7 +420,7 @@ export async function stopCollectors({ procs, gcOutputPath, methodTimingPath, su
       }
       io.unlinkSync(ddpMessagePath);
     } catch (err) {
-      console.error(`Could not read DDP message counts from ${ddpMessagePath}: ${err.message}`);
+      console.error(`Could not read DDP message counts from ${ddpMessagePath}: ${errorMessage(err)}`);
     }
   }
 
@@ -428,7 +440,7 @@ export async function stopCollectors({ procs, gcOutputPath, methodTimingPath, su
       }
       io.unlinkSync(frameSizePath);
     } catch (err) {
-      console.error(`Could not read DDP frame sizes from ${frameSizePath}: ${err.message}`);
+      console.error(`Could not read DDP frame sizes from ${frameSizePath}: ${errorMessage(err)}`);
     }
   }
 
@@ -447,7 +459,7 @@ export async function stopCollectors({ procs, gcOutputPath, methodTimingPath, su
       }
       io.unlinkSync(compressionPath);
     } catch (err) {
-      console.error(`Could not read DDP compression from ${compressionPath}: ${err.message}`);
+      console.error(`Could not read DDP compression from ${compressionPath}: ${errorMessage(err)}`);
     }
   }
 
@@ -464,7 +476,7 @@ export async function stopCollectors({ procs, gcOutputPath, methodTimingPath, su
       }
       io.unlinkSync(driverFallbackPath);
     } catch (err) {
-      console.error(`Could not read driver-fallback dump from ${driverFallbackPath}: ${err.message}`);
+      console.error(`Could not read driver-fallback dump from ${driverFallbackPath}: ${errorMessage(err)}`);
     }
   }
 
@@ -476,7 +488,7 @@ export async function stopCollectors({ procs, gcOutputPath, methodTimingPath, su
 // its own drain (1s); this re-checks after stopMeteorApp's grace period in
 // case Meteor took longer than the collector drain to flush. Returns [] when
 // no late-arriving gc data is found.
-export function drainPostStopGc(gcOutputPath) {
+export function drainPostStopGc(gcOutputPath?: string): CollectorResult[] {
   if (!gcOutputPath || !io.existsSync(gcOutputPath)) return [];
   try {
     const gcData = JSON.parse(io.readFileSync(gcOutputPath, 'utf8'));
@@ -484,12 +496,12 @@ export function drainPostStopGc(gcOutputPath) {
     io.unlinkSync(gcOutputPath);
     return [gcData];
   } catch (err) {
-    console.error(`Could not read late GC metrics from ${gcOutputPath}: ${err.message}`);
+    console.error(`Could not read late GC metrics from ${gcOutputPath}: ${errorMessage(err)}`);
     return [];
   }
 }
 
-export function drainPostStopDriverFallback(driverFallbackPath) {
+export function drainPostStopDriverFallback(driverFallbackPath?: string): CollectorResult[] {
   if (!driverFallbackPath || !io.existsSync(driverFallbackPath)) return [];
   try {
     const dump = JSON.parse(io.readFileSync(driverFallbackPath, 'utf8'));
@@ -497,7 +509,7 @@ export function drainPostStopDriverFallback(driverFallbackPath) {
     const aggregated = aggregateDriverFallback(dump);
     return aggregated ? [aggregated] : [];
   } catch (err) {
-    console.error(`Could not read late driver-fallback metrics from ${driverFallbackPath}: ${err.message}`);
+    console.error(`Could not read late driver-fallback metrics from ${driverFallbackPath}: ${errorMessage(err)}`);
     return [];
   }
 }

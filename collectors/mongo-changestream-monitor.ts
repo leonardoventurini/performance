@@ -46,6 +46,7 @@
 
 import { io } from '../runner/_io.js';
 import { aggregateChangestream } from '../runner/changestream-aggregator.js';
+import { errorMessage } from '../lib/benchmark-types.js';
 
 const uri = process.argv[2];
 const intervalMs = Number(process.argv[3]) || 250;
@@ -63,30 +64,30 @@ const CURRENTOP_FILTER = {
 };
 
 const client = new io.MongoClient(uri);
-const samples = []; // [{ ts, cursorCount, perNs: { ns: count } }]
-let timer = null;
+const samples: Array<{ ts: number; cursorCount: number; perNs: Record<string, number> }> = [];
+let timer: NodeJS.Timeout | null = null;
 let finished = false;
 
-async function readChangestreamOps() {
+async function readChangestreamOps(): Promise<readonly { ns?: string }[]> {
   const res = await client.db('admin').command(CURRENTOP_FILTER);
-  return res.inprog || [];
+  return Array.isArray(res.inprog) ? res.inprog : [];
 }
 
-async function sample() {
+async function sample(): Promise<void> {
   try {
     const ops = await readChangestreamOps();
-    const perNs = {};
+    const perNs: Record<string, number> = {};
     for (const op of ops) {
       const ns = op.ns || 'unknown';
       perNs[ns] = (perNs[ns] || 0) + 1;
     }
     samples.push({ ts: Date.now(), cursorCount: ops.length, perNs });
   } catch (err) {
-    process.stderr.write(`[mongo-changestream] sample failed: ${err.message}\n`);
+    process.stderr.write(`[mongo-changestream] sample failed: ${errorMessage(err)}\n`);
   }
 }
 
-function finishAndExit() {
+function finishAndExit(): void {
   if (finished) return;
   finished = true;
   if (timer) clearInterval(timer);
@@ -95,7 +96,7 @@ function finishAndExit() {
     if (result) process.stdout.write(JSON.stringify(result));
     else process.stderr.write('[mongo-changestream] no samples captured — omitting metric\n');
   } catch (err) {
-    process.stderr.write(`[mongo-changestream] error building result: ${err.message}\n`);
+    process.stderr.write(`[mongo-changestream] error building result: ${errorMessage(err)}\n`);
   } finally {
     client.close().catch(() => {});
     process.exit(0);
@@ -114,6 +115,6 @@ try {
   timer.unref?.();
   process.stderr.write(`[mongo-changestream] sampling currentOp every ${intervalMs}ms (initial cursors: ${samples[0]?.cursorCount ?? 0})\n`);
 } catch (err) {
-  process.stderr.write(`[mongo-changestream] init failed: ${err.message}\n`);
+  process.stderr.write(`[mongo-changestream] init failed: ${errorMessage(err)}\n`);
   process.exit(0);
 }

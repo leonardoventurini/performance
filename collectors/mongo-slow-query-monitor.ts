@@ -31,6 +31,8 @@
 
 import { io } from '../runner/_io.js';
 import { aggregateSlowQueries } from '../runner/slow-query-aggregator.js';
+import { errorMessage } from '../lib/benchmark-types.js';
+import type { Db } from 'mongodb';
 
 const uri = process.argv[2];
 if (!uri) {
@@ -42,22 +44,25 @@ const DB_NAME = process.env.BENCH_MONGO_DB || 'meteor';
 const THRESHOLD_MS = Number(process.env.MONGO_SLOWMS) || 100;
 
 const client = new io.MongoClient(uri);
-let db = null;
-let originalProfile = null; // { was, slowms, sampleRate }
-let benchmarkStart = null;
+let db: Db | null = null;
+let originalProfile: { was?: number; slowms?: number; sampleRate?: number } | null = null;
+let benchmarkStart: Date | null = null;
 let startTime = 0;
 let finished = false;
 
-async function restoreProfile() {
-  if (!originalProfile) return;
+async function restoreProfile(): Promise<void> {
+  if (!originalProfile || !db) return;
   // Restore all three fields. sampleRate may be undefined on older servers;
   // only include it when present so we don't send `sampleRate: undefined`.
-  const cmd = { profile: originalProfile.was ?? 0, slowms: originalProfile.slowms };
+  const cmd: { profile: number; slowms?: number; sampleRate?: number } = {
+    profile: originalProfile.was ?? 0,
+    ...(originalProfile.slowms !== undefined ? { slowms: originalProfile.slowms } : {}),
+  };
   if (originalProfile.sampleRate != null) cmd.sampleRate = originalProfile.sampleRate;
   await db.command(cmd);
 }
 
-async function finishAndExit() {
+async function finishAndExit(): Promise<void> {
   if (finished) return;
   finished = true;
   try {
@@ -72,7 +77,7 @@ async function finishAndExit() {
     // Restore BEFORE writing stdout so the developer's Mongo is left clean
     // even if the JSON write or aggregation were to throw.
     await restoreProfile().catch((err) => {
-      process.stderr.write(`[mongo-slow] profile restore failed: ${err.message}\n`);
+      process.stderr.write(`[mongo-slow] profile restore failed: ${errorMessage(err)}\n`);
     });
     const result = aggregateSlowQueries(entries, {
       thresholdMs: THRESHOLD_MS,
@@ -80,7 +85,7 @@ async function finishAndExit() {
     });
     if (result) process.stdout.write(JSON.stringify(result));
   } catch (err) {
-    process.stderr.write(`[mongo-slow] error on finish: ${err.message}\n`);
+    process.stderr.write(`[mongo-slow] error on finish: ${errorMessage(err)}\n`);
     // Best-effort restore even if the read path threw.
     await restoreProfile().catch(() => {});
   } finally {
@@ -97,16 +102,24 @@ try {
   db = client.db(DB_NAME);
   // { profile: -1 } reads the current config WITHOUT changing it:
   // returns { was, slowms, sampleRate, ... }.
-  originalProfile = await db.command({ profile: -1 });
+  const profile = await db.command({ profile: -1 });
+  const was: unknown = profile.was;
+  const slowms: unknown = profile.slowms;
+  const sampleRate: unknown = profile.sampleRate;
+  originalProfile = {
+    ...(typeof was === 'number' ? { was } : {}),
+    ...(typeof slowms === 'number' ? { slowms } : {}),
+    ...(typeof sampleRate === 'number' ? { sampleRate } : {}),
+  };
   benchmarkStart = new Date();
   await db.command({ profile: 1, slowms: THRESHOLD_MS });
   startTime = Date.now();
   process.stderr.write(
     `[mongo-slow] profiling db="${DB_NAME}" at slowms=${THRESHOLD_MS} ` +
-    `(was: level=${originalProfile.was} slowms=${originalProfile.slowms})\n`,
+    `(was: level=${originalProfile?.was} slowms=${originalProfile?.slowms})\n`,
   );
 } catch (err) {
-  process.stderr.write(`[mongo-slow] init failed: ${err.message}\n`);
+  process.stderr.write(`[mongo-slow] init failed: ${errorMessage(err)}\n`);
   // Try to restore in case profiling was enabled before the failure.
   if (db && originalProfile) await restoreProfile().catch(() => {});
   await client.close().catch(() => {});

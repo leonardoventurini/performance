@@ -10,7 +10,7 @@ import pidusage from 'pidusage';
 
 const INTERVAL_MS = 1000;
 
-const pid = parseInt(process.argv[2], 10);
+const pid = parseInt(process.argv[2] ?? '', 10);
 const name = process.argv[3] || 'PROCESS';
 
 if (!pid) {
@@ -18,14 +18,14 @@ if (!pid) {
   process.exit(1);
 }
 
-const samples = [];
+const samples: Array<{ cpu: number; memory: number; ts: number }> = [];
 let totalCpu = 0;
 let totalMemory = 0;
 let maxCpu = 0;
 let maxMemory = 0;
 let count = 0;
 
-const collect = async () => {
+const collect = async (): Promise<void> => {
   try {
     const stats = await pidusage(pid);
     samples.push({ cpu: stats.cpu, memory: stats.memory, ts: Date.now() });
@@ -44,7 +44,7 @@ const collect = async () => {
   }
 };
 
-const outputResults = () => {
+const outputResults = (): void => {
   if (count === 0) return;
   const results = {
     metric: `${name.toLowerCase()}_resources`,
@@ -67,7 +67,7 @@ const outputResults = () => {
 
 const intervalId = setInterval(collect, INTERVAL_MS);
 
-const shutdown = () => {
+const shutdown = (): void => {
   clearInterval(intervalId);
   outputResults();
   process.exit(0);

@@ -19,14 +19,17 @@
 //     savings_pct are null (divide-by-zero, per the README absence
 //     convention for ratios)
 
-function sumArray(arr) {
+interface FrameSizeDump { in_sizes?: readonly number[]; out_sizes?: readonly number[] }
+interface CompressionDump { compressed_bytes_in?: number; compressed_bytes_out?: number }
+interface CompressionInputs { frameSize?: FrameSizeDump | null; compression?: CompressionDump | null }
+function sumArray(arr: readonly number[] | undefined): number {
   if (!Array.isArray(arr)) return 0;
   let total = 0;
   for (const v of arr) total += Number(v) || 0;
   return total;
 }
 
-function directionStats(uncompressed, compressed) {
+function directionStats(uncompressed: number, compressed: number) {
   const u = Number(uncompressed) || 0;
   const c = Number(compressed) || 0;
   if (u <= 0) {
@@ -61,7 +64,7 @@ function directionStats(uncompressed, compressed) {
   };
 }
 
-export function aggregateCompression({ frameSize, compression } = {}) {
+export function aggregateCompression({ frameSize, compression }: CompressionInputs = {}) {
   if (!frameSize || !compression) return null;
   const outUncompressed = sumArray(frameSize.out_sizes);
   const inUncompressed = sumArray(frameSize.in_sizes);

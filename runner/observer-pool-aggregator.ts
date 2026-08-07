@@ -14,7 +14,9 @@
 // count drops back toward 0 after all VUs disconnect). `avg` is rounded to
 // one decimal; min/max/end are integers straight from the samples.
 
-function statsFor(values) {
+interface GaugeStats { min: number; max: number; avg: number; end: number }
+interface ObserverPoolDump { interval_ms?: number; samples?: readonly { muxCount: number; handleCount: number }[] }
+function statsFor(values: readonly number[]): GaugeStats {
   let min = Infinity;
   let max = -Infinity;
   let sum = 0;
@@ -27,11 +29,11 @@ function statsFor(values) {
     min,
     max,
     avg: +(sum / values.length).toFixed(1),
-    end: values[values.length - 1],
+    end: values[values.length - 1] ?? 0,
   };
 }
 
-export function aggregateObserverPool(dump) {
+export function aggregateObserverPool(dump?: ObserverPoolDump | null) {
   const { interval_ms, samples } = dump || {};
   if (!Array.isArray(samples) || samples.length === 0) return null;
   return {

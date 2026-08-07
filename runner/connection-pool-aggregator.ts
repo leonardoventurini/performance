@@ -20,7 +20,9 @@
 // intermediate fluctuation. `avg` is rounded to one decimal; min/max/end
 // are integers straight from the samples.
 
-function statsFor(values) {
+interface GaugeStats { min: number; max: number; avg: number; end: number }
+interface PoolDump { interval_ms?: number; samples?: readonly { current?: number; active?: number }[]; total_created_start?: number; total_created_end?: number }
+function statsFor(values: readonly number[]): GaugeStats {
   let min = Infinity;
   let max = -Infinity;
   let sum = 0;
@@ -33,11 +35,11 @@ function statsFor(values) {
     min,
     max,
     avg: +(sum / values.length).toFixed(1),
-    end: values[values.length - 1],
+    end: values[values.length - 1] ?? 0,
   };
 }
 
-export function aggregateConnectionPool(dump) {
+export function aggregateConnectionPool(dump?: PoolDump | null) {
   const { interval_ms, samples, total_created_start, total_created_end } = dump || {};
   if (!Array.isArray(samples) || samples.length === 0) return null;
 

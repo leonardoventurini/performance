@@ -22,7 +22,11 @@
 // the highest count seen for that ns in any single sample (max-merged
 // across samples). avg rounds to one decimal; min/max/end are integers.
 
-function statsFor(values) {
+interface GaugeStats { min: number; max: number; avg: number; end: number }
+interface ChangestreamSample { cursorCount?: number; perNs?: Readonly<Record<string, number | undefined>> }
+interface ChangestreamDump { interval_ms?: number; samples?: readonly ChangestreamSample[] }
+
+function statsFor(values: readonly number[]): GaugeStats {
   let min = Infinity;
   let max = -Infinity;
   let sum = 0;
@@ -35,19 +39,19 @@ function statsFor(values) {
     min,
     max,
     avg: +(sum / values.length).toFixed(1),
-    end: values[values.length - 1],
+    end: values[values.length - 1] ?? 0,
   };
 }
 
-export function aggregateChangestream(dump) {
+export function aggregateChangestream(dump?: ChangestreamDump | null): { metric: 'mongo_changestream'; samples: number; interval_ms: number | undefined; cursor_count: GaugeStats; by_namespace: Record<string, { max: number; avg: number }> } | null {
   const { interval_ms, samples } = dump || {};
   if (!Array.isArray(samples) || samples.length === 0) return null;
 
   const counts = samples.map((s) => Number(s.cursorCount ?? 0));
 
   // Per-namespace: max in any single sample + avg over all samples.
-  const nsMax = {};
-  const nsSum = {};
+  const nsMax: Record<string, number> = {};
+  const nsSum: Record<string, number> = {};
   for (const s of samples) {
     const perNs = s.perNs || {};
     for (const ns of Object.keys(perNs)) {
@@ -56,11 +60,11 @@ export function aggregateChangestream(dump) {
       nsSum[ns] = (nsSum[ns] || 0) + c;
     }
   }
-  const by_namespace = {};
+  const by_namespace: Record<string, { max: number; avg: number }> = {};
   for (const ns of Object.keys(nsMax)) {
     by_namespace[ns] = {
-      max: nsMax[ns],
-      avg: +(nsSum[ns] / samples.length).toFixed(1),
+      max: nsMax[ns] ?? 0,
+      avg: +((nsSum[ns] ?? 0) / samples.length).toFixed(1),
     };
   }
 

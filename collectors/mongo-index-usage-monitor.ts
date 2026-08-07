@@ -19,6 +19,7 @@
 
 import { io } from '../runner/_io.js';
 import { aggregateIndexUsage } from '../runner/index-usage-aggregator.js';
+import { errorMessage } from '../lib/benchmark-types.js';
 
 const uri = process.argv[2];
 if (!uri) {
@@ -30,7 +31,7 @@ if (!uri) {
 // (tools/runners/run-mongo.js → mongodb://<hosts>/meteor). The harness
 // builds a bare URI without the path, so prefer an explicit db from the
 // URI and fall back to `meteor` rather than the driver's `test` default.
-function dbNameFromUri(mongoUri) {
+function dbNameFromUri(mongoUri: string): string {
   try {
     const { pathname } = new URL(mongoUri);
     const name = pathname.replace(/^\//, '').split('/')[0];
@@ -42,15 +43,17 @@ function dbNameFromUri(mongoUri) {
 
 const client = new io.MongoClient(uri);
 const db = client.db(dbNameFromUri(uri));
-let startSnap = null;
-let collectionNames = [];
+type IndexSnapshot = Record<string, Array<{ name: string; accesses?: { ops?: number; since?: Date }; key?: unknown }>>;
+function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === 'object' && value !== null; }
+let startSnap: IndexSnapshot | null = null;
+let collectionNames: string[] = [];
 let finished = false;
 
 // Non-system, non-internal user collections. Mongo exposes `system.*`
 // (e.g. system.views) and we skip those; the spec also flags possible
 // Meteor-internal namespaces, so we drop anything that isn't a plain
 // alphanumeric-leading name.
-async function listUserCollections() {
+async function listUserCollections(): Promise<string[]> {
   const infos = await db.listCollections({}, { nameOnly: true }).toArray();
   return infos
     .map((c) => c.name)
@@ -59,21 +62,38 @@ async function listUserCollections() {
 
 // One $indexStats snapshot for every tracked collection, keyed by name:
 //   { <coll>: [ { name, accesses: { ops, since }, key }, ... ] }
-async function snapshotIndexStats(names) {
-  const snap = {};
+async function snapshotIndexStats(names: readonly string[]): Promise<IndexSnapshot> {
+  const snap: IndexSnapshot = {};
   for (const coll of names) {
     try {
-      snap[coll] = await db.collection(coll).aggregate([{ $indexStats: {} }]).toArray();
+      const rows = await db.collection(coll).aggregate([{ $indexStats: {} }]).toArray();
+      snap[coll] = rows.flatMap((row) => {
+        const name: unknown = row.name;
+        const rawAccesses: unknown = row.accesses;
+        const key: unknown = row.key;
+        if (typeof name !== 'string') return [];
+        const accesses = isRecord(rawAccesses) ? rawAccesses : null;
+        const ops = accesses?.ops;
+        const since = accesses?.since;
+        return [{
+          name,
+          ...(accesses ? { accesses: {
+            ...(typeof ops === 'number' ? { ops } : {}),
+            ...(since instanceof Date ? { since } : {}),
+          } } : {}),
+          key,
+        }];
+      });
     } catch (err) {
       // A collection can vanish mid-run, or $indexStats can be refused on
       // an exotic collection type — skip it, keep the rest of the run.
-      process.stderr.write(`[mongo-index] $indexStats failed for ${coll}: ${err.message}\n`);
+      process.stderr.write(`[mongo-index] $indexStats failed for ${coll}: ${errorMessage(err)}\n`);
     }
   }
   return snap;
 }
 
-async function finishAndExit() {
+async function finishAndExit(): Promise<void> {
   if (finished) return;
   finished = true;
   try {
@@ -87,7 +107,7 @@ async function finishAndExit() {
     // stdout so the key is omitted (CC-5).
     if (result) process.stdout.write(JSON.stringify(result));
   } catch (err) {
-    process.stderr.write(`[mongo-index] error reading endpoint: ${err.message}\n`);
+    process.stderr.write(`[mongo-index] error reading endpoint: ${errorMessage(err)}\n`);
   } finally {
     await client.close().catch(() => {});
     process.exit(0);
@@ -108,6 +128,6 @@ try {
   startSnap = await snapshotIndexStats(collectionNames);
   process.stderr.write(`[mongo-index] baseline captured for ${collectionNames.join(',')}\n`);
 } catch (err) {
-  process.stderr.write(`[mongo-index] init failed: ${err.message}\n`);
+  process.stderr.write(`[mongo-index] init failed: ${errorMessage(err)}\n`);
   process.exit(0);
 }

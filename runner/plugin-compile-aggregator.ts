@@ -20,12 +20,13 @@
 // recompiled nothing, or the format changed) so the caller omits the key.
 
 const PLUGIN_PREFIX = 'plugin ';
+interface PluginNode { name: string; self_ms?: number; count?: number | null }
 
-export function aggregatePluginCompile(parsed) {
+export function aggregatePluginCompile(parsed?: { nodes?: readonly PluginNode[] } | null) {
   const nodes = parsed?.nodes;
   if (!Array.isArray(nodes)) return null;
 
-  const plugins = {};
+  const plugins: Record<string, { self_ms: number; count: number }> = {};
   let totalPluginMs = 0;
   for (const node of nodes) {
     if (typeof node?.name !== 'string' || !node.name.startsWith(PLUGIN_PREFIX)) continue;
@@ -33,9 +34,10 @@ export function aggregatePluginCompile(parsed) {
     if (!name) continue;
     const selfMs = Number(node.self_ms ?? 0);
     const count = Number(node.count ?? 0);
-    if (!plugins[name]) plugins[name] = { self_ms: 0, count: 0 };
-    plugins[name].self_ms += selfMs;
-    plugins[name].count += count;
+    const plugin = plugins[name] ?? { self_ms: 0, count: 0 };
+    plugin.self_ms += selfMs;
+    plugin.count += count;
+    plugins[name] = plugin;
     totalPluginMs += selfMs;
   }
 

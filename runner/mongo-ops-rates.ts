@@ -15,13 +15,15 @@
 //   - durationMs <= 0 → ops_per_sec = 0 for all keys (avoid divide-by-zero
 //     when the collector is killed before any time passes).
 
-export function computeOpRates(start, end, durationMs) {
+type CounterSnapshot = Readonly<Record<string, number | undefined>>;
+
+export function computeOpRates(start: CounterSnapshot | undefined, end: CounterSnapshot | undefined, durationMs: number): { metric: 'mongo_ops'; duration_s: number; ops_per_sec: Record<string, number>; totals: Record<string, number> } {
   const durationS = Math.max(0, durationMs) / 1000;
-  const totals = {};
-  const opsPerSec = {};
+  const totals: Record<string, number> = {};
+  const opsPerSec: Record<string, number> = {};
   for (const op of Object.keys(end || {})) {
     const startVal = Number(start?.[op] ?? 0);
-    const endVal = Number(end[op] ?? 0);
+    const endVal = Number(end?.[op] ?? 0);
     const delta = endVal < startVal ? endVal : endVal - startVal;
     totals[op] = delta;
     opsPerSec[op] = durationS > 0 ? +(delta / durationS).toFixed(2) : 0;

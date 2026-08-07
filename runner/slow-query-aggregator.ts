@@ -24,18 +24,34 @@
 // KEY NAMES of command.filter, never the values — the profile doc contains
 // the full query predicate, which on prod-like data could be sensitive.
 
-function filterKeysOf(entry) {
+interface SlowQueryEntry { op?: string; ns?: string; millis?: number; planSummary?: string; command?: { filter?: Readonly<Record<string, unknown>> } }
+function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === 'object' && value !== null; }
+function normalizeEntry(value: unknown): SlowQueryEntry {
+  if (!isRecord(value)) return {};
+  const command = isRecord(value.command) && isRecord(value.command.filter) ? { filter: value.command.filter } : undefined;
+  return {
+    ...(typeof value.op === 'string' ? { op: value.op } : {}),
+    ...(typeof value.ns === 'string' ? { ns: value.ns } : {}),
+    ...((typeof value.millis === 'number' || typeof value.millis === 'string') && Number.isFinite(Number(value.millis))
+      ? { millis: Number(value.millis) }
+      : {}),
+    ...(typeof value.planSummary === 'string' ? { planSummary: value.planSummary } : {}),
+    ...(command ? { command } : {}),
+  };
+}
+function filterKeysOf(entry: SlowQueryEntry): string[] {
   const filter = entry?.command?.filter;
   if (!filter || typeof filter !== 'object') return [];
   return Object.keys(filter);
 }
 
-export function aggregateSlowQueries(rawEntries, { thresholdMs = 100, durationMs = 0 } = {}) {
+export function aggregateSlowQueries(rawEntries: readonly unknown[] | null | undefined, { thresholdMs = 100, durationMs = 0 }: { thresholdMs?: number; durationMs?: number } = {}) {
   if (!Array.isArray(rawEntries) || rawEntries.length === 0) return null;
 
-  const byOp = {};
-  let slowest = null;
-  for (const entry of rawEntries) {
+  const byOp: Record<string, number> = {};
+  let slowest: SlowQueryEntry | null = null;
+  for (const rawEntry of rawEntries) {
+    const entry = normalizeEntry(rawEntry);
     const op = entry?.op ?? 'unknown';
     byOp[op] = (byOp[op] || 0) + 1;
     const millis = Number(entry?.millis ?? 0);

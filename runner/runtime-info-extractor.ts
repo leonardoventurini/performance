@@ -11,19 +11,23 @@
 
 const LINE_RE = /^\[runtime-info\] (\w+)=(.+)$/;
 
-export function createRuntimeInfoExtractor() {
+export interface RuntimeInfoExtractor { feed(chunk: Uint8Array | string): void; get(): Record<string, string> }
+
+export function createRuntimeInfoExtractor(): RuntimeInfoExtractor {
   let buffer = '';
-  const captured = {};
+  const captured: Record<string, string> = {};
 
   return {
-    feed(chunk) {
+    feed(chunk: Uint8Array | string): void {
       buffer += chunk.toString();
       let nl;
       while ((nl = buffer.indexOf('\n')) >= 0) {
         const line = buffer.slice(0, nl);
         buffer = buffer.slice(nl + 1);
         const m = LINE_RE.exec(line);
-        if (m) captured[m[1]] = m[2];
+        const key = m?.[1];
+        const value = m?.[2];
+        if (key !== undefined && value !== undefined) captured[key] = value;
       }
     },
     get: () => ({ ...captured }),

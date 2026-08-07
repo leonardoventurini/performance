@@ -16,15 +16,17 @@
 // captured before any wall-clock time passed). Per-second rates use the
 // `<name>_per_sec` convention (CC-4: no percentiles here, just rates).
 
-function sumCounts(byType) {
+type CountMap = Readonly<Record<string, number | undefined>>;
+interface MessageDump { startTime?: number; endTime?: number; by_in?: CountMap; by_out?: CountMap }
+function sumCounts(byType: CountMap | undefined): number {
   let total = 0;
-  for (const key of Object.keys(byType || {})) {
-    total += Number(byType[key] ?? 0);
+  for (const key of Object.keys(byType ?? {})) {
+    total += Number(byType?.[key] ?? 0);
   }
   return total;
 }
 
-export function aggregateDdpMessages(dump) {
+export function aggregateDdpMessages(dump?: MessageDump | null) {
   if (!dump) return null;
   const { startTime, endTime, by_in, by_out } = dump;
   const totalIn = sumCounts(by_in);
@@ -33,7 +35,7 @@ export function aggregateDdpMessages(dump) {
 
   const durationMs = Math.max(0, Number(endTime ?? 0) - Number(startTime ?? 0));
   const durationS = durationMs / 1000;
-  const perSec = (total) => (durationS > 0 ? +(total / durationS).toFixed(2) : 0);
+  const perSec = (total: number): number => (durationS > 0 ? +(total / durationS).toFixed(2) : 0);
 
   return {
     metric: 'ddp_messages',

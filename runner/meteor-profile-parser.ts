@@ -43,13 +43,15 @@ const INDENT_UNIT = /^(?:│\s{2}|├─\s|└─\s|\s{3})/;
 const DATA_RE = /^(.*?)[.\s]*(\d[\d,]*)\s*ms(?:\s*\((\d[\d,]*)\))?\s*$/;
 const TOTAL_RE = /Total:\s*([\d,]+)\s*ms/;
 
-function toNum(s) {
+import type { ParsedProfile, ProfileNode } from './build-profile-aggregator.js';
+
+function toNum(s: string): number {
   return Number(String(s).replace(/,/g, ''));
 }
 
-export function parseMeteorProfile(text) {
-  const nodes = [];
-  let totalMs = null;
+export function parseMeteorProfile(text: string): ParsedProfile {
+  const nodes: ProfileNode[] = [];
+  let totalMs: number | null = null;
   // "Top leaves:" is a trailing block of pre-ranked leaf rows that DUPLICATE
   // tree entries (e.g. files.readFile appears both in-tree and as a top leaf).
   // Counting both would double-rank it, so we skip the whole block: from its
@@ -67,7 +69,8 @@ export function parseMeteorProfile(text) {
     // loosely, so handle it first). Also ends the Top-leaves block.
     if (rest.includes('Total:')) {
       const m = rest.match(TOTAL_RE);
-      if (m) totalMs = toNum(m[1]);
+      const total = m?.[1];
+      if (total !== undefined) totalMs = toNum(total);
       inTopLeaves = false;
       continue;
     }
@@ -93,11 +96,11 @@ export function parseMeteorProfile(text) {
 
     const data = rest.match(DATA_RE);
     if (!data) continue;
-    const name = data[1].trim();
+    const name = data[1]?.trim() ?? '';
     if (!name) continue;
     nodes.push({
       name,
-      self_ms: toNum(data[2]),
+      self_ms: toNum(data[2] ?? '0'),
       count: data[3] != null ? toNum(data[3]) : null,
       depth,
     });

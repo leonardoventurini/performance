@@ -35,13 +35,14 @@ const READ_IN = 'pages read into cache';
 const WRITTEN = 'pages written from the cache';
 const BYTES_IN_CACHE = 'bytes currently in the cache';
 
-function delta(start, end, key) {
+type CacheSnapshot = Readonly<Record<string, number | undefined>>;
+function delta(start: CacheSnapshot, end: CacheSnapshot, key: string): number {
   const s = Number(start?.[key] ?? 0);
   const e = Number(end?.[key] ?? 0);
   return e < s ? e : e - s;
 }
 
-export function aggregateWiredTiger({ start, end } = {}) {
+export function aggregateWiredTiger({ start, end }: { start?: CacheSnapshot | null; end?: CacheSnapshot | null } = {}) {
   if (!start || !end) return null;
 
   const requested = delta(start, end, REQUESTED);

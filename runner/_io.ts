@@ -30,7 +30,7 @@ export const io = {
   sleep: _sleep,
   // Wrapper (not a bound reference) so tests can replace globalThis.fetch
   // without re-loading this module. mock.method(io, 'fetch', ...) also works.
-  fetch: (...args) => globalThis.fetch(...args),
+  fetch: (...args: Parameters<typeof globalThis.fetch>): ReturnType<typeof globalThis.fetch> => globalThis.fetch(...args),
   SimpleDDP: _SimpleDDP,
   ws: _ws,
   MongoClient: _MongoClient,

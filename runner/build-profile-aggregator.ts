@@ -23,17 +23,23 @@
 // Sum self_ms of the descendants of nodes[i]: the contiguous run of nodes
 // after i whose depth is greater than nodes[i].depth (stops at the next
 // sibling-or-shallower node).
-function childrenMsAt(nodes, i) {
-  const parentDepth = nodes[i].depth;
+export interface ProfileNode { name: string; self_ms: number; count: number | null; depth: number }
+export interface ParsedProfile { total_ms: number | null; nodes: readonly ProfileNode[] }
+
+function childrenMsAt(nodes: readonly ProfileNode[], i: number): number {
+  const parent = nodes[i];
+  if (!parent) return 0;
+  const parentDepth = parent.depth;
   let sum = 0;
   for (let j = i + 1; j < nodes.length; j++) {
-    if (nodes[j].depth <= parentDepth) break;
-    sum += nodes[j].self_ms;
+    const node = nodes[j];
+    if (!node || node.depth <= parentDepth) break;
+    sum += node.self_ms;
   }
   return sum;
 }
 
-export function aggregateBuildProfile(parsed, { topN = 5 } = {}) {
+export function aggregateBuildProfile(parsed: ParsedProfile | null | undefined, { topN = 5 }: { topN?: number } = {}) {
   const nodes = parsed?.nodes;
   if (!Array.isArray(nodes) || nodes.length === 0) return null;
 

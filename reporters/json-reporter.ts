@@ -31,7 +31,18 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-function buildResult({ scenario, app, tag, meteor, runtime = {}, collectorResults, wallClockMs }) {
+export interface CollectorResult { readonly metric: string; readonly [key: string]: unknown }
+export interface BenchmarkResult {
+  readonly timestamp: string; readonly tag: string; readonly meteor: { readonly version: string; readonly sha: string };
+  readonly runtime: Readonly<Record<string, unknown>>; readonly scenario: string; readonly app: string;
+  readonly wall_clock_ms: number; readonly metrics: Readonly<Record<string, CollectorResult>>;
+}
+export interface BuildResultInput {
+  scenario: string; app: string; tag?: string; meteor: { version: string; sha: string };
+  runtime?: Readonly<Record<string, unknown>>; collectorResults: readonly CollectorResult[]; wallClockMs: number;
+}
+
+function buildResult({ scenario, app, tag, meteor, runtime = {}, collectorResults, wallClockMs }: BuildResultInput): BenchmarkResult {
   // The throw is deliberate — there used to be a silent
   // `meteor ?? { version: 'unknown', sha: 'unknown' }` fallback here, but
   // that masked the worst failure mode (omitted meteor info silently lands
@@ -60,14 +71,14 @@ function buildResult({ scenario, app, tag, meteor, runtime = {}, collectorResult
   };
 }
 
-function writeResult(result, outputPath) {
+function writeResult(result: BenchmarkResult | Readonly<Record<string, unknown>>, outputPath: string): void {
   const dir = path.dirname(outputPath);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   // Trailing newline keeps `git diff` happy when results land in commits.
   fs.writeFileSync(outputPath, JSON.stringify(result, null, 2) + '\n');
 }
 
-function appendToHistory(result, historyDir) {
+function appendToHistory(result: BenchmarkResult, historyDir: string): void {
   if (!fs.existsSync(historyDir)) fs.mkdirSync(historyDir, { recursive: true });
   // Date.now() in the filename guarantees uniqueness across rapid re-runs
   // with the same tag (CI nightly that triggers twice in a minute, etc.).

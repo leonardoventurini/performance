@@ -26,7 +26,11 @@
 // Returns null when no index rows exist across any collection (absence
 // convention CC-5: collector ran but found nothing → omit the key).
 
-function toIso(since) {
+interface IndexRow { name: string; accesses?: { ops?: number; since?: Date | string | number | null }; key?: unknown }
+type IndexSnapshot = Readonly<Record<string, readonly IndexRow[] | undefined>>;
+interface IndexUsageInput { start?: IndexSnapshot; end?: IndexSnapshot; collections?: readonly string[] }
+
+function toIso(since: Date | string | number | null | undefined): string | null {
   if (since == null) return null;
   if (since instanceof Date) return since.toISOString();
   // $indexStats `since` is a BSON Date; the driver hands it back as a JS
@@ -36,12 +40,12 @@ function toIso(since) {
   return Number.isNaN(d.getTime()) ? null : d.toISOString();
 }
 
-export function aggregateIndexUsage({ start, end, collections } = {}) {
+export function aggregateIndexUsage({ start, end, collections }: IndexUsageInput = {}) {
   const startSnap = start || {};
   const endSnap = end || {};
   const names = collections || Object.keys(endSnap);
 
-  const out = {};
+  const out: Record<string, Array<{ name: string; ops_in_window: number; since: string | null; key: unknown }>> = {};
   let totalRows = 0;
 
   for (const coll of names) {
