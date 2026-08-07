@@ -1,13 +1,20 @@
-import { Template } from 'meteor/templating';
+import { Template, type TemplateStaticTyped } from 'meteor/templating';
 import { ReactiveVar } from 'meteor/reactive-var';
 import { Meteor } from 'meteor/meteor';
-import { Runs } from '../../api/runs';
+import { Runs, type RunDocument } from '../../api/runs';
 import './dashboard.html';
 
 const PAGE_SIZE = 30;
+type DashboardState = Record<string, unknown> & {
+  limit: ReactiveVar<number>;
+  scenarioFilter: ReactiveVar<string>;
+  tagFilter: ReactiveVar<string>;
+  scenarios: ReactiveVar<string[]>;
+};
+const Dashboard = Template as TemplateStaticTyped<'dashboard', unknown, DashboardState>;
 
 // "When" column — relative time. Stitch shows "2m ago / 1h ago / 3d ago".
-function whenAgo(ts) {
+function whenAgo(ts: Date | string | number | undefined): string {
   if (!ts) return '-';
   const d = ts instanceof Date ? ts : new Date(ts);
   const diff = Date.now() - d.getTime();
@@ -24,7 +31,7 @@ function whenAgo(ts) {
 
 // Pull a usable version label from the run. Most local results have
 // meteor.version = "system"; fall back to the runtime channel or "—".
-function versionLabel(run) {
+function versionLabel(run: RunDocument): string {
   const v = run.meteor?.version;
   if (v && v !== 'system' && v !== 'unknown') return v;
   if (run.runtime?.channel) return run.runtime.channel;
@@ -32,7 +39,7 @@ function versionLabel(run) {
   return 'local';
 }
 
-Template.dashboard.onCreated(function () {
+Dashboard.dashboard.onCreated(function () {
   this.limit = new ReactiveVar(PAGE_SIZE);
   this.scenarioFilter = new ReactiveVar('');
   this.tagFilter = new ReactiveVar('');
@@ -42,15 +49,15 @@ Template.dashboard.onCreated(function () {
     this.subscribe('runs.recent', this.limit.get());
   });
 
-  Meteor.callAsync('runs.distinctScenarios').then((s) => this.scenarios.set(s));
+  Meteor.callAsync('runs.distinctScenarios').then((scenarios: string[]) => this.scenarios.set(scenarios));
 });
 
-Template.dashboard.helpers({
-  scenarios() { return Template.instance().scenarios.get(); },
+Dashboard.dashboard.helpers({
+  scenarios(): string[] { return Dashboard.instance().scenarios.get(); },
 
   runs() {
-    const t = Template.instance();
-    const q = {};
+    const t = Dashboard.instance();
+    const q: { scenario?: string } = {};
     const sc = t.scenarioFilter.get();
     const tag = t.tagFilter.get().trim().toLowerCase();
     if (sc) q.scenario = sc;
@@ -74,33 +81,37 @@ Template.dashboard.helpers({
 
   hasRuns() { return Runs.find().count() > 0; },
   hasMore() {
-    const t = Template.instance();
+    const t = Dashboard.instance();
     return Runs.find().count() >= t.limit.get();
   },
   runCount() { return Runs.find().count(); },
-  scenarioCount() { return Template.instance().scenarios.get().length; },
+  scenarioCount() { return Dashboard.instance().scenarios.get().length; },
   hasActiveFilters() {
-    const t = Template.instance();
+    const t = Dashboard.instance();
     return t.scenarioFilter.get() || t.tagFilter.get();
   },
 });
 
-Template.dashboard.events({
-  'change #filterScenario'(event, instance) {
-    instance.scenarioFilter.set(event.target.value);
+Dashboard.dashboard.events({
+  'change #filterScenario'(event: Meteor.Event, instance): boolean {
+    if (event.target instanceof HTMLSelectElement) instance.scenarioFilter.set(event.target.value);
+    return false;
   },
-  'input #filterTag'(event, instance) {
-    instance.tagFilter.set(event.target.value);
+  'input #filterTag'(event: Meteor.Event, instance): boolean {
+    if (event.target instanceof HTMLInputElement) instance.tagFilter.set(event.target.value);
+    return false;
   },
-  'click #clearFilters'(event, instance) {
+  'click #clearFilters'(_event: Meteor.Event, instance): boolean {
     instance.scenarioFilter.set('');
     instance.tagFilter.set('');
     const sc = instance.find('#filterScenario');
     const tg = instance.find('#filterTag');
-    if (sc) sc.value = '';
-    if (tg) tg.value = '';
+    if (sc instanceof HTMLSelectElement) sc.value = '';
+    if (tg instanceof HTMLInputElement) tg.value = '';
+    return false;
   },
-  'click #loadMore'(event, instance) {
+  'click #loadMore'(_event: Meteor.Event, instance): boolean {
     instance.limit.set(instance.limit.get() + PAGE_SIZE);
+    return false;
   },
 });

@@ -2,15 +2,15 @@ import { Meteor } from 'meteor/meteor';
 import { FlowRouter } from 'meteor/ostrio:flow-router-extra';
 
 // Layouts
-import '../imports/ui/layouts/main.js';
+import '../imports/ui/layouts/main.ts';
 
 // Pages
-import '../imports/ui/pages/dashboard.js';
-import '../imports/ui/pages/compare.js';
-import '../imports/ui/pages/trends.js';
-import '../imports/ui/pages/detail.js';
-import '../imports/ui/pages/scenario.js';
-import '../imports/ui/pages/audits.js';
+import '../imports/ui/pages/dashboard.ts';
+import '../imports/ui/pages/compare.ts';
+import '../imports/ui/pages/trends.ts';
+import '../imports/ui/pages/detail.ts';
+import '../imports/ui/pages/scenario.ts';
+import '../imports/ui/pages/audits.ts';
 
 // Apply persisted theme before Blaze paints. Dark is the default.
 Meteor.startup(() => {

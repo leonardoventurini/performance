@@ -11,6 +11,25 @@ import {
   presentAuditExecution,
 } from "../imports/ui/pages/audit-presentation";
 
+const TEST_AUDIT_REQUEST = {
+  profile: "smoke",
+  observerDriver: "changeStreams",
+  meteorVersion: "3.5.1-beta.0",
+  seed: null,
+  tag: null,
+} as const;
+
+interface TestCursor {
+  fetch(): unknown;
+}
+
+interface TestMeteorServer {
+  method_handlers: Record<string, (this: unknown, ...args: unknown[]) => Promise<unknown>>;
+  publish_handlers: Record<string, (this: unknown, ...args: unknown[]) => TestCursor>;
+}
+
+const TestMeteor = Meteor as typeof Meteor & { server: TestMeteorServer };
+
 describe("dashboard", function () {
   it("package.json has correct name", async function () {
     const { name } = await import("../package.json");
@@ -74,7 +93,7 @@ describe("dashboard", function () {
       const { createLineConsumer } = await import(
         "../server/audit-control-plane"
       );
-      const lines = [];
+      const lines: string[] = [];
       const consumer = createLineConsumer((line) => lines.push(line));
       consumer.push("Starting Met");
       consumer.push("eor\nWaiting");
@@ -101,7 +120,12 @@ describe("dashboard", function () {
         fs.writeFileSync(outsidePath, "{}\n");
         fs.symlinkSync(outsidePath, linkedPath);
         assert.throws(
-          () => readAuditResult(linkedPath, {}, temporaryRoot),
+          () => readAuditResult(linkedPath, {
+            profile: "smoke",
+            observerDriver: "changeStreams",
+            expectedTag: "dashboard:test",
+            meteorVersion: null,
+          }, temporaryRoot),
           /did not produce a result artifact/,
         );
       } finally {
@@ -112,26 +136,29 @@ describe("dashboard", function () {
 
     it("exposes bounded audit controls and publications without connection authorization", async function () {
       await import("../server/audit-control-plane");
-      const handlers = Meteor.server.method_handlers;
-      const publications = Meteor.server.publish_handlers;
-      const executionCursor = publications["auditExecutions.recent"].apply({}, [1]);
-      const eventCursor = publications["auditEvents.forExecution"].apply(
-        {},
-        ["public-execution"],
-      );
+      const handlers = TestMeteor.server.method_handlers;
+      const publications = TestMeteor.server.publish_handlers;
+      const recentPublication = publications["auditExecutions.recent"];
+      const eventPublication = publications["auditEvents.forExecution"];
+      const startHandler = handlers["auditExecutions.start"];
+      assert.ok(recentPublication);
+      assert.ok(eventPublication);
+      assert.ok(startHandler);
+      const executionCursor = recentPublication.call({}, 1);
+      const eventCursor = eventPublication.call({}, "public-execution");
 
       assert.strictEqual(typeof executionCursor.fetch, "function");
       assert.strictEqual(typeof eventCursor.fetch, "function");
       assert.strictEqual(handlers["auditExecutions.authorize"], undefined);
       assert.strictEqual(handlers["auditExecutions.revoke"], undefined);
       await assert.rejects(
-        handlers["auditExecutions.start"].apply({}, [{
+        startHandler.call({}, {
           profile: "unbounded",
           observerDriver: "changeStreams",
           meteorVersion: "3.5.1-beta.0",
           seed: "",
           tag: "",
-        }]),
+        }),
         /Audit profile must be smoke or extreme/,
       );
     });
@@ -152,7 +179,7 @@ describe("dashboard", function () {
             _id,
             activeLease: "dashboard-audit",
             status: "queued",
-            request: {},
+            request: TEST_AUDIT_REQUEST,
             createdAt: new Date(),
           })
         )));
@@ -179,7 +206,9 @@ describe("dashboard", function () {
       } = await import("../imports/api/audit-executions");
       await auditControlPlaneReady;
 
-      const handlers = Meteor.server.method_handlers;
+      const handlers = TestMeteor.server.method_handlers;
+      const resolveInterrupted = handlers["auditExecutions.resolveInterrupted"];
+      assert.ok(resolveInterrupted);
       const context = {};
       const executionId = `recovery-${Date.now().toString(36)}`;
       const child = childProcess.spawn(
@@ -191,6 +220,8 @@ describe("dashboard", function () {
         child.once("spawn", resolve);
         child.once("error", reject);
       });
+      assert.notStrictEqual(child.pid, undefined);
+      if (child.pid === undefined) throw new Error("Test process did not receive a PID.");
 
       try {
         await AuditExecutions.insertAsync({
@@ -199,30 +230,28 @@ describe("dashboard", function () {
           status: "interrupted",
           recoveryRequired: true,
           processId: child.pid,
-          request: {},
+          request: TEST_AUDIT_REQUEST,
           createdAt: new Date(),
         });
         await assert.rejects(
-          handlers["auditExecutions.resolveInterrupted"].apply(
-            context,
-            [executionId],
-          ),
+          resolveInterrupted.call(context, executionId),
           /process group is still running/,
         );
         const retained = await AuditExecutions.findOneAsync(executionId);
+        assert.ok(retained);
+        if (!retained) throw new Error("Interrupted execution was not retained.");
         assert.strictEqual(retained.activeLease, "dashboard-audit");
         assert.strictEqual(retained.processId, child.pid);
 
         process.kill(-child.pid, "SIGTERM");
         await new Promise((resolve) => child.once("close", resolve));
         assert.strictEqual(
-          await handlers["auditExecutions.resolveInterrupted"].apply(
-            context,
-            [executionId],
-          ),
+          await resolveInterrupted.call(context, executionId),
           true,
         );
         const resolved = await AuditExecutions.findOneAsync(executionId);
+        assert.ok(resolved);
+        if (!resolved) throw new Error("Interrupted execution was not resolved.");
         assert.strictEqual(resolved.recoveryRequired, false);
         assert.strictEqual(resolved.activeLease, undefined);
         assert.strictEqual(resolved.processId, undefined);
@@ -340,7 +369,7 @@ describe("dashboard result contract", function () {
       meteorVersion: "3.5.1-beta.0",
     });
     assert.strictEqual(
-      normalized.metrics.change_stream_audit.status,
+      normalized.metrics.change_stream_audit?.status,
       "passed",
     );
   });
@@ -383,7 +412,7 @@ describe("dashboard result contract", function () {
       meteorVersion: "3.5.1-beta.0",
     });
     assert.strictEqual(
-      normalized.metrics.change_stream_audit.status,
+      normalized.metrics.change_stream_audit?.status,
       "failed",
     );
   });

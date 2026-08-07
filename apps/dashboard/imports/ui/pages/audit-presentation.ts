@@ -1,4 +1,16 @@
-import { ACTIVE_AUDIT_STATUSES } from '../../api/audit-contract';
+import { ACTIVE_AUDIT_STATUSES, type AuditLaunchRequest, type AuditStatus } from '../../api/audit-contract';
+
+/** Persisted fields consumed by the audit execution presenter. */
+export interface AuditExecutionPresentationSource {
+  _id?: string;
+  status: AuditStatus;
+  createdAt: Date | string;
+  startedAt?: Date | string;
+  finishedAt?: Date | string;
+  request?: Partial<AuditLaunchRequest>;
+  auditStatus?: string | null;
+  recoveryRequired?: boolean;
+}
 
 /** Human-readable labels for durable execution states. */
 export const AUDIT_STATUS_LABELS = Object.freeze({
@@ -35,7 +47,10 @@ export const NEUTRAL_STATUS_CLASS =
  * @param {number} now Current wall-clock timestamp.
  * @returns {Record<string, unknown>} Execution with view fields.
  */
-export function presentAuditExecution(execution, now = Date.now()) {
+export function presentAuditExecution(
+  execution: AuditExecutionPresentationSource,
+  now: number = Date.now(),
+): AuditExecutionPresentationSource & Record<string, unknown> {
   const createdAt = new Date(execution.createdAt);
   const startedAt = execution.startedAt ? new Date(execution.startedAt) : createdAt;
   const finishedAt = execution.finishedAt ? new Date(execution.finishedAt) : new Date(now);
@@ -55,10 +70,10 @@ export function presentAuditExecution(execution, now = Date.now()) {
     elapsedLabel: formatAuditDuration(elapsedMs),
     meteorVersionLabel: execution.request?.meteorVersion || 'server default',
     auditStatusLabel: execution.auditStatus || 'not established',
-    canCancel: ['queued', 'starting', 'running'].includes(execution.status),
+    canCancel: execution.status === 'queued' || execution.status === 'starting' || execution.status === 'running',
     canResolveRecovery: execution.status === 'interrupted'
       && execution.recoveryRequired === true,
-    isActive: ACTIVE_AUDIT_STATUSES.includes(execution.status),
+    isActive: ACTIVE_AUDIT_STATUSES.some((candidate) => candidate === execution.status),
     failureTitle: execution.status === 'interrupted'
       ? 'Execution interrupted'
       : 'Audit did not pass',
@@ -71,8 +86,8 @@ export function presentAuditExecution(execution, now = Date.now()) {
  * @param {unknown} status Execution status.
  * @returns {string} CSS class string.
  */
-export function auditStatusClass(status) {
-  if (ACTIVE_AUDIT_STATUSES.includes(status)) return ACTIVE_STATUS_CLASS;
+export function auditStatusClass(status: unknown): string {
+  if (typeof status === 'string' && ACTIVE_AUDIT_STATUSES.some((candidate) => candidate === status)) return ACTIVE_STATUS_CLASS;
   if (status === 'passed') return PASSED_STATUS_CLASS;
   if (status === 'failed' || status === 'interrupted') return FAILED_STATUS_CLASS;
   return NEUTRAL_STATUS_CLASS;
@@ -84,7 +99,7 @@ export function auditStatusClass(status) {
  * @param {number} milliseconds Elapsed duration.
  * @returns {string} Human-readable duration.
  */
-export function formatAuditDuration(milliseconds) {
+export function formatAuditDuration(milliseconds: number): string {
   const seconds = Math.floor(milliseconds / 1000);
   const minutes = Math.floor(seconds / 60);
   const remainder = seconds % 60;

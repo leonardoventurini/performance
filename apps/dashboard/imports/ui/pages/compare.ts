@@ -1,8 +1,8 @@
-import { Template } from 'meteor/templating';
+import { Template, type TemplateStaticTyped } from 'meteor/templating';
 import { ReactiveVar } from 'meteor/reactive-var';
 import { ReactiveDict } from 'meteor/reactive-dict';
 import { Meteor } from 'meteor/meteor';
-import { Runs } from '../../api/runs';
+import { Runs, type RunDocument } from '../../api/runs';
 import './compare.html';
 
 // ── Metric extractors ─────────────────────────────────────────────────
@@ -14,7 +14,37 @@ import './compare.html';
 // Unit: 'ms' / 'pct' / 'mb' / 'count' / 'bytes' — used to format display
 // and decide whether the metric is "lower is better".
 
-const M = [
+type MetricUnit = 'ms' | 'pct' | 'mb' | 'count' | 'bytes';
+type DrilldownValue = number | { avg_ms?: number; count?: number };
+type DrilldownMap = Record<string, DrilldownValue>;
+interface MetricDefinition {
+  key: string;
+  label?: string;
+  unit: MetricUnit;
+  get(run: RunDocument): number | null | undefined;
+  drilldown?(run: RunDocument): DrilldownMap | undefined;
+}
+type StatusKind = keyof typeof STATUS_STYLES;
+interface ComparisonRow {
+  key: string;
+  aDisplay: string;
+  bDisplay: string;
+  deltaAbs: string;
+  deltaPct: string;
+  _absPct: number;
+  _kind: StatusKind;
+}
+type CompareState = Record<string, unknown> & {
+  scenarios: ReactiveVar<string[]>;
+  selectedScenario: ReactiveVar<string>;
+  selectedA: ReactiveVar<string>;
+  selectedB: ReactiveVar<string>;
+  hideNoise: ReactiveVar<boolean>;
+  expanded: ReactiveDict<Record<string, boolean>>;
+};
+const Compare = Template as TemplateStaticTyped<'compare', unknown, CompareState>;
+
+const M: MetricDefinition[] = [
   { key: 'wall_clock', label: 'duration', unit: 'ms',
     get: (r) => r.wall_clock_ms },
   { key: 'app_cpu.avg', unit: 'pct',
@@ -80,7 +110,7 @@ const M = [
     get: (r) => r.metrics?.plugin_compile?.total_plugin_ms },
 ];
 
-function fmt(value, unit) {
+function fmt(value: number | null | undefined, unit: MetricUnit): string {
   if (value == null || !Number.isFinite(value)) return '-';
   switch (unit) {
     case 'ms':
@@ -94,7 +124,7 @@ function fmt(value, unit) {
   }
 }
 
-function pctDelta(a, b) {
+function pctDelta(a: number | null | undefined, b: number | null | undefined): number | null {
   if (a == null || b == null || a === 0) return null;
   return ((b - a) / a) * 100;
 }
@@ -104,10 +134,10 @@ function pctDelta(a, b) {
 // higher = worse (wall, mem, latency), positive Δ = regression. For
 // count-style metrics the sign is informational, not graded — clamp to
 // "warn" tier at most.
-function classify(deltaPct, unit) {
+function classify(deltaPct: number | null, unit: MetricUnit): { tier: string; kind: StatusKind } {
   if (deltaPct == null) return { tier: 'neutral', kind: 'neutral' };
   const abs = Math.abs(deltaPct);
-  let tier;
+  let tier: 'neutral' | 'warn' | 'big';
   if (abs < 5) tier = 'neutral';
   else if (abs < 25) tier = 'warn';
   else tier = 'big';
@@ -136,7 +166,7 @@ const STATUS_STYLES = {
                  pill: 'bg-neutral-200 dark:bg-neutral-800 text-neutral-500' },
 };
 
-function whenAgo(ts) {
+function whenAgo(ts: Date | string | number | undefined): string {
   if (!ts) return '';
   const d = ts instanceof Date ? ts : new Date(ts);
   const diff = Date.now() - d.getTime();
@@ -149,17 +179,17 @@ function whenAgo(ts) {
   return `${Math.round(h / 24)}d ago`;
 }
 
-function runOptionLabel(r) {
+function runOptionLabel(r: RunDocument): string {
   const v = r.meteor?.version && r.meteor.version !== 'system' ? r.meteor.version : 'local';
   return `${v} · ${r.tag} · ${r.scenario} · ${whenAgo(r.timestamp)}`;
 }
 
-function runShortLabel(r) {
+function runShortLabel(r: RunDocument): string {
   const v = r.meteor?.version && r.meteor.version !== 'system' ? r.meteor.version : 'local';
   return `${v} · ${r.tag}`;
 }
 
-Template.compare.onCreated(function () {
+Compare.compare.onCreated(function () {
   this.scenarios = new ReactiveVar([]);
   this.selectedScenario = new ReactiveVar('');
   this.selectedA = new ReactiveVar('');
@@ -168,19 +198,23 @@ Template.compare.onCreated(function () {
   this.expanded = new ReactiveDict();
 
   this.subscribe('runs.recent', 200);
-  Meteor.callAsync('runs.distinctScenarios').then((s) => this.scenarios.set(s));
+  Meteor.callAsync('runs.distinctScenarios').then((value: unknown) => {
+    this.scenarios.set(Array.isArray(value)
+      ? value.filter((item): item is string => typeof item === 'string')
+      : []);
+  });
 });
 
-Template.compare.helpers({
-  scenarios() { return Template.instance().scenarios.get(); },
-  selectedScenario() { return Template.instance().selectedScenario.get(); },
-  selectedA() { return Template.instance().selectedA.get(); },
-  selectedB() { return Template.instance().selectedB.get(); },
-  hideNoise() { return Template.instance().hideNoise.get(); },
-  isSelected(id, sel) { return id === sel; },
+Compare.compare.helpers({
+  scenarios() { return Compare.instance().scenarios.get(); },
+  selectedScenario() { return Compare.instance().selectedScenario.get(); },
+  selectedA() { return Compare.instance().selectedA.get(); },
+  selectedB() { return Compare.instance().selectedB.get(); },
+  hideNoise() { return Compare.instance().hideNoise.get(); },
+  isSelected(id: string, selected: string) { return id === selected; },
 
   runOptions() {
-    const t = Template.instance();
+    const t = Compare.instance();
     const sc = t.selectedScenario.get();
     const q = sc ? { scenario: sc } : {};
     return Runs.find(q, { sort: { timestamp: -1 } }).fetch().map((r) => ({
@@ -190,21 +224,23 @@ Template.compare.helpers({
   },
 
   bothPicked() {
-    const t = Template.instance();
+    const t = Compare.instance();
     return t.selectedA.get() && t.selectedB.get();
   },
 
   runALabel() {
-    const r = Runs.findOne(Template.instance().selectedA.get());
+    const selected = Compare.instance().selectedA.get();
+    const r = selected ? Runs.findOne(selected) : undefined;
     return r ? runShortLabel(r) : '';
   },
   runBLabel() {
-    const r = Runs.findOne(Template.instance().selectedB.get());
+    const selected = Compare.instance().selectedB.get();
+    const r = selected ? Runs.findOne(selected) : undefined;
     return r ? runShortLabel(r) : '';
   },
 
   summary() {
-    const rows = computeRows(Template.instance());
+    const rows = computeRows(Compare.instance());
     let regressions = 0, improvements = 0, neutral = 0;
     for (const r of rows) {
       if (r._kind === 'regression') regressions += 1;
@@ -215,7 +251,7 @@ Template.compare.helpers({
   },
 
   comparisonRows() {
-    const t = Template.instance();
+    const t = Compare.instance();
     const rows = computeRows(t);
     const hide = t.hideNoise.get();
     const filtered = hide ? rows.filter((r) => r._kind !== 'neutral') : rows;
@@ -224,16 +260,19 @@ Template.compare.helpers({
     const b = Runs.findOne(t.selectedB.get());
     return filtered.map((row) => {
       const isExpanded = t.expanded.get(row.key);
-      let drilldownRows = [];
+      let drilldownRows: Array<{
+        subKey: string; aDisplay: string; bDisplay: string;
+        deltaPct: string; deltaClass: string;
+      }> = [];
       if (isExpanded) {
         const def = M.find((m) => m.key === row.key);
         if (def?.drilldown) {
-          const da = def.drilldown(a) || {};
-          const db = def.drilldown(b) || {};
+          const da = a ? def.drilldown(a) ?? {} : {};
+          const db = b ? def.drilldown(b) ?? {} : {};
           const keys = Array.from(new Set([...Object.keys(da), ...Object.keys(db)]));
           drilldownRows = keys.map((k) => {
-            const av = typeof da[k] === 'object' ? (da[k].avg_ms ?? da[k].count) : da[k];
-            const bv = typeof db[k] === 'object' ? (db[k].avg_ms ?? db[k].count) : db[k];
+            const av = drilldownNumber(da[k]);
+            const bv = drilldownNumber(db[k]);
             const dp = pctDelta(av, bv);
             const cls = classify(dp, def.unit);
             return {
@@ -270,14 +309,14 @@ Template.compare.helpers({
   },
 
   onlyInOneCount() {
-    const t = Template.instance();
+    const t = Compare.instance();
     const a = Runs.findOne(t.selectedA.get());
     const b = Runs.findOne(t.selectedB.get());
     if (!a || !b) return 0;
     return computeOnlyInOne(a, b).length;
   },
   onlyInOneText() {
-    const t = Template.instance();
+    const t = Compare.instance();
     const a = Runs.findOne(t.selectedA.get());
     const b = Runs.findOne(t.selectedB.get());
     if (!a || !b) return '';
@@ -285,11 +324,13 @@ Template.compare.helpers({
   },
 });
 
-function computeRows(instance) {
-  const a = Runs.findOne(instance.selectedA.get());
-  const b = Runs.findOne(instance.selectedB.get());
+function computeRows(instance: CompareState): ComparisonRow[] {
+  const selectedA = instance.selectedA.get();
+  const selectedB = instance.selectedB.get();
+  const a = selectedA ? Runs.findOne(selectedA) : undefined;
+  const b = selectedB ? Runs.findOne(selectedB) : undefined;
   if (!a || !b) return [];
-  const out = [];
+  const out: ComparisonRow[] = [];
   for (const def of M) {
     const av = def.get(a);
     const bv = def.get(b);
@@ -310,8 +351,8 @@ function computeRows(instance) {
   return out.sort((x, y) => y._absPct - x._absPct);
 }
 
-function computeOnlyInOne(a, b) {
-  const out = [];
+function computeOnlyInOne(a: RunDocument, b: RunDocument): string[] {
+  const out: string[] = [];
   for (const def of M) {
     const av = def.get(a);
     const bv = def.get(b);
@@ -321,29 +362,42 @@ function computeOnlyInOne(a, b) {
   return out;
 }
 
-Template.compare.events({
-  'change #filterScenario'(event, instance) {
-    instance.selectedScenario.set(event.target.value);
+Compare.compare.events({
+  'change #filterScenario'(event: Meteor.Event, instance): boolean {
+    if (event.target instanceof HTMLSelectElement) instance.selectedScenario.set(event.target.value);
     instance.selectedA.set('');
     instance.selectedB.set('');
+    return false;
   },
-  'change #runA'(event, instance) {
-    instance.selectedA.set(event.target.value);
+  'change #runA'(event: Meteor.Event, instance): boolean {
+    if (event.target instanceof HTMLSelectElement) instance.selectedA.set(event.target.value);
+    return false;
   },
-  'change #runB'(event, instance) {
-    instance.selectedB.set(event.target.value);
+  'change #runB'(event: Meteor.Event, instance): boolean {
+    if (event.target instanceof HTMLSelectElement) instance.selectedB.set(event.target.value);
+    return false;
   },
-  'click #swapAB'(event, instance) {
+  'click #swapAB'(_event: Meteor.Event, instance): boolean {
     const a = instance.selectedA.get();
     const b = instance.selectedB.get();
     instance.selectedA.set(b);
     instance.selectedB.set(a);
+    return false;
   },
-  'change #hideNoise'(event, instance) {
-    instance.hideNoise.set(event.target.checked);
+  'change #hideNoise'(event: Meteor.Event, instance): boolean {
+    if (event.target instanceof HTMLInputElement) instance.hideNoise.set(event.target.checked);
+    return false;
   },
-  'click .js-row-toggle'(event, instance) {
+  'click .js-row-toggle'(event: Meteor.Event, instance): boolean {
+    if (!(event.currentTarget instanceof HTMLElement)) return false;
     const key = event.currentTarget.dataset.key;
+    if (!key) return false;
     instance.expanded.set(key, !instance.expanded.get(key));
+    return false;
   },
 });
+
+function drilldownNumber(value: DrilldownValue | undefined): number | undefined {
+  if (typeof value === 'number') return value;
+  return value?.avg_ms ?? value?.count;
+}

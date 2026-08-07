@@ -3,17 +3,32 @@ const AUDIT_STATUSES = new Set(['passed', 'failed', 'incomplete']);
 const AUDIT_PROFILES = new Set(['smoke', 'extreme']);
 const AUDIT_DRIVERS = new Set(['changeStreams', 'oplog']);
 
-/**
- * @typedef {object} NormalizedRunResult
- * @property {Date} timestamp Canonical run timestamp.
- * @property {string} tag Operator-facing result label.
- * @property {{version: string, sha: string}} meteor Meteor identity.
- * @property {Record<string, unknown>} runtime Runtime evidence.
- * @property {string} scenario Scenario identifier.
- * @property {string} app Fixture identifier.
- * @property {number} wall_clock_ms Measured workload duration.
- * @property {Record<string, unknown>} metrics Metric families.
- */
+/** Canonical persisted benchmark result after boundary validation. */
+export interface NormalizedRunResult extends Record<string, unknown> {
+  timestamp: Date;
+  tag: string;
+  meteor: { version: string; sha: string };
+  runtime: Record<string, unknown>;
+  scenario: string;
+  app: string;
+  wall_clock_ms: number;
+  metrics: Record<string, unknown> & {
+    change_stream_audit?: {
+      status: string;
+      profile: string;
+      requested_driver: string;
+      actual_driver: string;
+    };
+  };
+}
+
+/** Correlation fields required for an audit result import. */
+export interface ExpectedAuditResult {
+  profile: 'smoke' | 'extreme';
+  observerDriver: 'changeStreams' | 'oplog';
+  expectedTag: string;
+  meteorVersion: string | null;
+}
 
 /**
  * Validates and clones the canonical result envelope before Mongo insertion.
@@ -21,7 +36,7 @@ const AUDIT_DRIVERS = new Set(['changeStreams', 'oplog']);
  * @param {unknown} value Untrusted result payload.
  * @returns {NormalizedRunResult & Record<string, unknown>} Normalized result.
  */
-export function normalizeRunResult(value) {
+export function normalizeRunResult(value: unknown): NormalizedRunResult {
   assertPlainObject(value, 'Result');
   assertBoundedString(value.tag, 'Result tag');
   assertBoundedString(value.scenario, 'Result scenario');
@@ -32,18 +47,18 @@ export function normalizeRunResult(value) {
   assertPlainObject(value.runtime, 'Result runtime');
   assertPlainObject(value.metrics, 'Result metrics');
 
-  if (!Number.isFinite(value.wall_clock_ms) || value.wall_clock_ms < 0) {
+  if (typeof value.wall_clock_ms !== 'number' || !Number.isFinite(value.wall_clock_ms) || value.wall_clock_ms < 0) {
     throw new Error('Result wall_clock_ms must be a finite non-negative number.');
   }
 
   const timestamp = value.timestamp instanceof Date
     ? new Date(value.timestamp.getTime())
-    : new Date(value.timestamp);
+    : new Date(typeof value.timestamp === 'string' || typeof value.timestamp === 'number' ? value.timestamp : Number.NaN);
   if (Number.isNaN(timestamp.getTime())) {
     throw new Error('Result timestamp must be a valid date.');
   }
 
-  const normalized = structuredClone(value);
+  const normalized = structuredClone(value) as NormalizedRunResult;
   normalized.timestamp = timestamp;
   return normalized;
 }
@@ -60,7 +75,7 @@ export function normalizeRunResult(value) {
  * }} expected Correlation contract.
  * @returns {NormalizedRunResult & Record<string, unknown>} Validated result.
  */
-export function normalizeAuditRunResult(value, expected) {
+export function normalizeAuditRunResult(value: unknown, expected: ExpectedAuditResult): NormalizedRunResult {
   const normalized = normalizeRunResult(value);
   const expectedScenario = `change-stream-audit-${expected.profile}`;
   if (normalized.scenario !== expectedScenario || normalized.app !== 'tasks-3.x') {
@@ -78,14 +93,15 @@ export function normalizeAuditRunResult(value, expected) {
 
   const audit = normalized.metrics.change_stream_audit;
   assertPlainObject(audit, 'Change-stream audit metric');
-  if (!AUDIT_STATUSES.has(audit.status)) {
+  if (typeof audit.status !== 'string' || !AUDIT_STATUSES.has(audit.status)) {
     throw new Error('Change-stream audit status is missing or unsupported.');
   }
-  if (!AUDIT_PROFILES.has(audit.profile) || audit.profile !== expected.profile) {
+  if (typeof audit.profile !== 'string' || !AUDIT_PROFILES.has(audit.profile) || audit.profile !== expected.profile) {
     throw new Error('Change-stream audit profile does not match the request.');
   }
   if (
-    !AUDIT_DRIVERS.has(audit.requested_driver)
+    typeof audit.requested_driver !== 'string'
+    || !AUDIT_DRIVERS.has(audit.requested_driver)
     || audit.requested_driver !== expected.observerDriver
   ) {
     throw new Error('Change-stream audit observer driver does not match the request.');
@@ -105,7 +121,7 @@ export function normalizeAuditRunResult(value, expected) {
  * @param {unknown} value Candidate label.
  * @param {string} label Error-message subject.
  */
-function assertBoundedString(value, label) {
+function assertBoundedString(value: unknown, label: string): asserts value is string {
   if (
     typeof value !== 'string'
     || value.length === 0
@@ -121,7 +137,7 @@ function assertBoundedString(value, label) {
  * @param {unknown} value Candidate object.
  * @param {string} label Error-message subject.
  */
-function assertPlainObject(value, label) {
+function assertPlainObject(value: unknown, label: string): asserts value is Record<string, unknown> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error(`${label} must be an object.`);
   }

@@ -5,26 +5,32 @@ export const MAX_AUDIT_TAG_LENGTH = 80;
 export const MAX_AUDIT_SEED = 0xFFFFFFFF;
 
 /** Audit profiles exposed by the dashboard control plane. */
-export const AUDIT_PROFILES = Object.freeze(['smoke', 'extreme']);
+export const AUDIT_PROFILES = ['smoke', 'extreme'] as const;
+export type AuditProfile = (typeof AUDIT_PROFILES)[number];
 
 /** Observer drivers exposed by the dashboard control plane. */
-export const AUDIT_OBSERVER_DRIVERS = Object.freeze(['changeStreams', 'oplog']);
+export const AUDIT_OBSERVER_DRIVERS = ['changeStreams', 'oplog'] as const;
+export type AuditObserverDriver = (typeof AUDIT_OBSERVER_DRIVERS)[number];
 
 /** Non-terminal execution states that hold the global audit lease. */
-export const ACTIVE_AUDIT_STATUSES = Object.freeze([
+export const ACTIVE_AUDIT_STATUSES = [
   'queued',
   'starting',
   'running',
   'cancelling',
-]);
+] as const;
 
 /** Terminal execution states. */
-export const TERMINAL_AUDIT_STATUSES = Object.freeze([
+export const TERMINAL_AUDIT_STATUSES = [
   'passed',
   'failed',
   'cancelled',
   'interrupted',
-]);
+] as const;
+
+export type AuditStatus =
+  | (typeof ACTIVE_AUDIT_STATUSES)[number]
+  | (typeof TERMINAL_AUDIT_STATUSES)[number];
 
 const REQUEST_KEYS = new Set([
   'profile',
@@ -37,14 +43,14 @@ const METEOR_VERSION_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/;
 const TAG_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/:+-]{0,79}$/;
 const SEED_PATTERN = /^\d{1,10}$/;
 
-/**
- * @typedef {object} AuditLaunchRequest
- * @property {'smoke'|'extreme'} profile Bounded workload profile.
- * @property {'changeStreams'|'oplog'} observerDriver Requested observer path.
- * @property {string|null} meteorVersion Optional published Meteor release.
- * @property {string|null} seed Optional unsigned 32-bit deterministic seed.
- * @property {string|null} tag Optional operator-facing result label.
- */
+/** Strict browser-to-control-plane request contract. */
+export interface AuditLaunchRequest {
+  profile: AuditProfile;
+  observerDriver: AuditObserverDriver;
+  meteorVersion: string | null;
+  seed: string | null;
+  tag: string | null;
+}
 
 /**
  * Determines whether a value is a plain data object suitable for validation.
@@ -52,7 +58,7 @@ const SEED_PATTERN = /^\d{1,10}$/;
  * @param {unknown} value Candidate value.
  * @returns {value is Record<string, unknown>} Whether the value is plain.
  */
-function isPlainObject(value) {
+function isPlainObject(value: unknown): value is Record<string, unknown> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     return false;
   }
@@ -69,7 +75,7 @@ function isPlainObject(value) {
  * @param {unknown} value Untrusted DDP method input.
  * @returns {AuditLaunchRequest} Frozen normalized request.
  */
-export function validateAuditLaunchRequest(value) {
+export function validateAuditLaunchRequest(value: unknown): Readonly<AuditLaunchRequest> {
   if (!isPlainObject(value)) {
     throw new Error('Audit request must be an object.');
   }
@@ -80,12 +86,12 @@ export function validateAuditLaunchRequest(value) {
   }
 
   const profile = value.profile ?? 'smoke';
-  if (!AUDIT_PROFILES.includes(profile)) {
+  if (typeof profile !== 'string' || !AUDIT_PROFILES.some((candidate) => candidate === profile)) {
     throw new Error('Audit profile must be smoke or extreme.');
   }
 
   const observerDriver = value.observerDriver ?? 'changeStreams';
-  if (!AUDIT_OBSERVER_DRIVERS.includes(observerDriver)) {
+  if (typeof observerDriver !== 'string' || !AUDIT_OBSERVER_DRIVERS.some((candidate) => candidate === observerDriver)) {
     throw new Error('Observer driver must be changeStreams or oplog.');
   }
 
@@ -110,8 +116,8 @@ export function validateAuditLaunchRequest(value) {
   }
 
   return Object.freeze({
-    profile,
-    observerDriver,
+    profile: profile as AuditProfile,
+    observerDriver: observerDriver as AuditObserverDriver,
     meteorVersion,
     seed,
     tag,
@@ -126,7 +132,10 @@ export function validateAuditLaunchRequest(value) {
  * and correlation identity.
  * @returns {ReadonlyArray<string>} Shell-free CLI arguments.
  */
-export function buildAuditArgv(request, { outputPath, executionId }) {
+export function buildAuditArgv(
+  request: AuditLaunchRequest,
+  { outputPath, executionId }: { outputPath: string; executionId: string },
+): ReadonlyArray<string> {
   const tag = request.tag ?? `dashboard:${executionId}`;
   return Object.freeze([
     'bench.js',
@@ -152,8 +161,8 @@ export function buildAuditArgv(request, { outputPath, executionId }) {
  * @param {unknown} status Candidate status.
  * @returns {boolean} Whether no further lifecycle transition is allowed.
  */
-export function isTerminalAuditStatus(status) {
-  return TERMINAL_AUDIT_STATUSES.includes(status);
+export function isTerminalAuditStatus(status: unknown): status is (typeof TERMINAL_AUDIT_STATUSES)[number] {
+  return typeof status === 'string' && TERMINAL_AUDIT_STATUSES.some((candidate) => candidate === status);
 }
 
 /**
@@ -162,7 +171,7 @@ export function isTerminalAuditStatus(status) {
  * @param {unknown} value Candidate value.
  * @returns {string|null} Trimmed value or null.
  */
-function normalizeOptionalString(value) {
+function normalizeOptionalString(value: unknown): string | null {
   if (value === undefined || value === null || value === '') return null;
   if (typeof value !== 'string') {
     throw new Error('Optional audit fields must be strings.');

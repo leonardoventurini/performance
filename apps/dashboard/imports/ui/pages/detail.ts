@@ -1,40 +1,46 @@
-import { Template } from 'meteor/templating';
+import { Template, type TemplateStaticTyped } from 'meteor/templating';
 import { FlowRouter } from 'meteor/ostrio:flow-router-extra';
-import { Runs } from '../../api/runs';
+import { Runs, type CompressionDistribution, type MetricDistribution, type RunDocument } from '../../api/runs';
 import './detail.html';
 
 // ── Helpers ──────────────────────────────────────────────────────────
-const fmtMs = (n) => (n == null || !Number.isFinite(n)) ? '-' : n.toFixed(2);
-const fmtInt = (n) => (n == null || !Number.isFinite(n)) ? '-' : Math.round(n).toString();
-const fmtRate = (n) => (n == null || !Number.isFinite(n)) ? '-' : n.toFixed(2);
-const fmtPctValue = (n) => (n == null || !Number.isFinite(n)) ? '-' : `${n.toFixed(1)}%`;
-const fmtMb = (n) => (n == null || !Number.isFinite(n)) ? '-' : `${n.toFixed(0)} MB`;
-const fmt1 = (n) => (n == null || !Number.isFinite(n)) ? '-' : n.toFixed(1);
+const fmtMs = (n: number | null | undefined): string => (n == null || !Number.isFinite(n)) ? '-' : n.toFixed(2);
+const fmtInt = (n: number | null | undefined): string => (n == null || !Number.isFinite(n)) ? '-' : Math.round(n).toString();
+const fmtRate = (n: number | null | undefined): string => (n == null || !Number.isFinite(n)) ? '-' : n.toFixed(2);
+const fmtPctValue = (n: number | null | undefined): string => (n == null || !Number.isFinite(n)) ? '-' : `${n.toFixed(1)}%`;
+const fmtMb = (n: number | null | undefined): string => (n == null || !Number.isFinite(n)) ? '-' : `${n.toFixed(0)} MB`;
+const fmt1 = (n: number | null | undefined): string => (n == null || !Number.isFinite(n)) ? '-' : n.toFixed(1);
+const Detail = Template as TemplateStaticTyped<'detail', RunDocument, Record<string, never>>;
 
 // Cells render via {{{value}}} (raw HTML) so the <code>/<span> wrappers below
 // take effect. That means any interpolated DATA must be HTML-escaped first —
 // run fields (mongo namespaces, index/plugin names, tags) are machine-generated
 // but still untrusted, so escape every dynamic value to prevent stored XSS.
-const esc = (s) => String(s).replace(/[&<>"']/g, (c) => (
-  { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
-));
+const esc = (value: unknown): string => String(value).replace(/[&<>"']/g, (character) => {
+  const entities: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+  return entities[character] ?? character;
+});
 
 // Build a cells[] array for the metricCard tableRows partial. Each cell
 // has { value, cls } so the partial can right-align numbers.
-function row(...cells) {
-  return { cells: cells.map((c) => (typeof c === 'object' ? c : { value: c, cls: 'text-right' })) };
+interface TableCell { value: unknown; cls: string }
+function row(...cells: Array<TableCell | unknown>): { cells: TableCell[] } {
+  return { cells: cells.map((cell) => isTableCell(cell) ? cell : { value: cell, cls: 'text-right' }) };
 }
-const left = (value) => ({ value, cls: 'text-left' });
-const right = (value) => ({ value, cls: 'text-right' });
+function isTableCell(value: unknown): value is TableCell {
+  return value !== null && typeof value === 'object' && 'value' in value && 'cls' in value;
+}
+const left = (value: unknown): TableCell => ({ value, cls: 'text-left' });
+const right = (value: unknown): TableCell => ({ value, cls: 'text-right' });
 
-function versionLabelFor(run) {
+function versionLabelFor(run: RunDocument): string {
   const v = run.meteor?.version;
   if (v && v !== 'system' && v !== 'unknown') return v;
   if (run.runtime?.channel) return run.runtime.channel;
   return 'local';
 }
 
-Template.detail.onCreated(function () {
+Detail.detail.onCreated(function () {
   this.autorun(() => {
     const runId = FlowRouter.getParam('id');
     if (runId) {
@@ -47,15 +53,18 @@ Template.detail.onCreated(function () {
 // FlowRouter intercepts all <a> clicks as route changes — hash anchors
 // would fall through silently. Capture sidebar nav-pill clicks and scroll
 // to the section manually instead of relying on browser default.
-Template.detail.events({
-  'click a[href^="#"]'(event, template) {
+Detail.detail.events({
+  'click a[href^="#"]'(event: Meteor.Event, template): boolean {
     event.preventDefault();
-    const id = event.currentTarget.getAttribute('href').slice(1);
+    if (!(event.currentTarget instanceof HTMLAnchorElement)) return false;
+    const id = event.currentTarget.getAttribute('href')?.slice(1);
+    if (!id) return false;
     const target = template.find('#' + id);
     if (target) {
       target.scrollIntoView({ behavior: 'smooth', block: 'start' });
       if (history.replaceState) history.replaceState(null, '', '#' + id);
     }
+    return false;
   },
 });
 
@@ -68,7 +77,7 @@ const observerKeys = ['observer_pool', 'driver_fallbacks'];
 const buildKeys = ['build_profile', 'plugin_compile'];
 const reliabilityKeys = ['change_stream_audit'];
 
-function anyOf(metrics, keys) {
+function anyOf(metrics: RunDocument['metrics'], keys: string[]): boolean {
   return keys.some((k) => metrics?.[k] != null);
 }
 
@@ -83,18 +92,18 @@ const ALL_FAMILIES = [
   'change_stream_audit',
 ];
 
-Template.detail.helpers({
+const detailHelpers: Record<string, unknown> & ThisType<RunDocument> = {
   run() {
     return Runs.findOne(FlowRouter.getParam('id'));
   },
-  formatDate(date) {
+  formatDate(date: Date | string | number | undefined) {
     if (!date) return '-';
     return new Date(date).toLocaleString('en-GB', {
       day: '2-digit', month: 'short', year: 'numeric',
       hour: '2-digit', minute: '2-digit',
     });
   },
-  formatMs(ms) {
+  formatMs(ms: number | undefined) {
     if (!ms) return '-';
     return `${(ms / 1000).toFixed(1)}s`;
   },
@@ -104,7 +113,7 @@ Template.detail.helpers({
     return s && s !== 'unknown' ? s.slice(0, 8) : '';
   },
 
-  pillClass(active) {
+  pillClass(active: boolean) {
     return active
       ? 'block pl-3 pr-2 py-1.5 border-l-2 border-indigo-500 text-neutral-950 dark:text-neutral-100 bg-neutral-100 dark:bg-neutral-800/60 rounded-r-md'
       : 'block pl-3 pr-2 py-1.5 border-l-2 border-transparent text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-200 hover:bg-neutral-50 dark:hover:bg-neutral-900/40 rounded-r-md transition';
@@ -173,7 +182,7 @@ Template.detail.helpers({
     ];
   },
   reliabilityFailureRows() {
-    return (this.metrics?.change_stream_audit?.failure_reasons || []).map((reason) => ({
+    return (this.metrics?.change_stream_audit?.failure_reasons || []).map((reason: string) => ({
       label: 'Failure',
       value: esc(reason),
     }));
@@ -263,7 +272,7 @@ Template.detail.helpers({
   ddpMethodsRows() {
     const methods = this.metrics?.ddp_methods?.methods ?? {};
     return Object.entries(methods)
-      .sort((a, b) => b[1].count - a[1].count)
+      .sort((a, b) => (b[1].count ?? 0) - (a[1].count ?? 0))
       .map(([name, m]) => row(
         left(`<code class="font-mono text-[12px]">${esc(name)}</code>`),
         right(fmtInt(m.count)),
@@ -283,7 +292,7 @@ Template.detail.helpers({
   ddpSubsRows() {
     const pubs = this.metrics?.ddp_subscriptions?.publications ?? {};
     return Object.entries(pubs)
-      .sort((a, b) => b[1].count - a[1].count)
+      .sort((a, b) => (b[1].count ?? 0) - (a[1].count ?? 0))
       .map(([name, p]) => row(
         left(`<code class="font-mono text-[12px]">${esc(name)}</code>`),
         right(fmtInt(p.count)),
@@ -361,7 +370,7 @@ Template.detail.helpers({
   ],
   ddpFrameRows() {
     const f = this.metrics?.ddp_frame_size || {};
-    const dir = (d, label) => row(
+    const dir = (d: MetricDistribution | undefined, label: string) => row(
       left(label),
       right(fmtInt(d?.count)),
       right(fmtInt(d?.avg_bytes)),
@@ -384,7 +393,7 @@ Template.detail.helpers({
   ],
   ddpCompRows() {
     const c = this.metrics?.ddp_compression || {};
-    const dir = (d, label) => row(
+    const dir = (d: CompressionDistribution | undefined, label: string) => row(
       left(label),
       right(fmtInt(d?.uncompressed_bytes)),
       right(fmtInt(d?.compressed_bytes)),
@@ -651,4 +660,6 @@ Template.detail.helpers({
         right(fmtInt(v.count)),
       ));
   },
-});
+};
+
+Detail.detail.helpers(detailHelpers as Blaze.HelpersMap);

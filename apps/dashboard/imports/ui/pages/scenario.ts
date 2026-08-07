@@ -1,7 +1,7 @@
-import { Template } from 'meteor/templating';
+import { Template, type TemplateStaticTyped } from 'meteor/templating';
 import { ReactiveVar } from 'meteor/reactive-var';
 import { FlowRouter } from 'meteor/ostrio:flow-router-extra';
-import { Runs } from '../../api/runs.js';
+import { Runs, type RunDocument } from '../../api/runs';
 import './scenario.html';
 
 // Static per-scenario metadata. Same content as the v1 file (it didn't
@@ -206,9 +206,17 @@ const SCENARIOS = {
       'and emits build_profile (top hot nodes by self_ms) and plugin_compile (per-plugin total). ' +
       'Useful for catching long-tail build regressions across Meteor versions.',
   },
-};
+} as const;
 
-function whenAgo(ts) {
+type ScenarioName = keyof typeof SCENARIOS;
+type ScenarioState = Record<string, unknown> & { techOpen: ReactiveVar<boolean> };
+const Scenario = Template as TemplateStaticTyped<'scenario', unknown, ScenarioState>;
+
+function isScenarioName(value: string): value is ScenarioName {
+  return Object.hasOwn(SCENARIOS, value);
+}
+
+function whenAgo(ts: Date | string | number | undefined): string {
   if (!ts) return '-';
   const d = ts instanceof Date ? ts : new Date(ts);
   const diff = Date.now() - d.getTime();
@@ -221,25 +229,25 @@ function whenAgo(ts) {
   return `${Math.round(h / 24)}d ago`;
 }
 
-function versionLabel(run) {
+function versionLabel(run: RunDocument): string {
   const v = run.meteor?.version;
   if (v && v !== 'system' && v !== 'unknown') return v;
   if (run.runtime?.channel) return run.runtime.channel;
   return 'local';
 }
 
-Template.scenario.onCreated(function () {
+Scenario.scenario.onCreated(function () {
   this.subscribe('runs.recent', 200);
   this.techOpen = new ReactiveVar(false);
 });
 
-Template.scenario.helpers({
+Scenario.scenario.helpers({
   scenarioName() {
     return FlowRouter.getParam('name');
   },
   info() {
     const name = FlowRouter.getParam('name');
-    return SCENARIOS[name] || null;
+    return isScenarioName(name) ? SCENARIOS[name] : null;
   },
   runCount() {
     const name = FlowRouter.getParam('name');
@@ -264,12 +272,13 @@ Template.scenario.helpers({
         ? `${r.metrics.gc.total_pause_ms.toFixed(0)} ms` : '-',
     }));
   },
-  techOpen() { return Template.instance().techOpen.get(); },
-  techArrow() { return Template.instance().techOpen.get() ? '▾' : '▸'; },
+  techOpen() { return Scenario.instance().techOpen.get(); },
+  techArrow() { return Scenario.instance().techOpen.get() ? '▾' : '▸'; },
 });
 
-Template.scenario.events({
-  'click #techToggle'(event, instance) {
+Scenario.scenario.events({
+  'click #techToggle'(_event: Meteor.Event, instance): boolean {
     instance.techOpen.set(!instance.techOpen.get());
+    return false;
   },
 });

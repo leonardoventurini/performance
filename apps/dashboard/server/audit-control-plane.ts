@@ -3,7 +3,8 @@ import { Random } from 'meteor/random';
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcessByStdio } from 'node:child_process';
+import type { Readable } from 'node:stream';
 import {
   ACTIVE_AUDIT_STATUSES,
   buildAuditArgv,
@@ -13,6 +14,7 @@ import {
   AuditEvents,
   AuditExecutions,
 } from '../imports/api/audit-executions';
+import type { AuditExecutionDocument } from '../imports/api/audit-executions';
 import {
   insertRunResult,
 } from '../imports/api/runs';
@@ -39,7 +41,37 @@ const MINIMUM_NODE_MAJOR = 24;
 /** Published release used by the current audit fixture. */
 const DEFAULT_ALLOWED_METEOR_VERSION = '3.5.1-beta.0';
 
-const ownedProcesses = new Map();
+interface ExecutorCapability {
+  available: boolean;
+  reasonCode: string | null;
+  allowedMeteorVersions: ReadonlyArray<string>;
+  oplogAvailable: boolean;
+}
+
+interface ExecutorConfig {
+  repositoryRoot: string;
+  outputRoot: string;
+  nodeCommand: string;
+}
+
+interface AuditProcessRuntime {
+  child: ChildProcessByStdio<null, Readable, Readable>;
+  executionId: string;
+  outputPath: string;
+  outputRoot: string;
+  expectedTag: string;
+  repositoryRoot: string;
+  sequence: number;
+  eventQueue: Promise<void>;
+  eventCount: number;
+  spawnError: Error | null;
+  timeout: NodeJS.Timeout | null;
+  killTimer: NodeJS.Timeout | null;
+  cancellationReason: string | null;
+  settled: boolean;
+}
+
+const ownedProcesses = new Map<string, AuditProcessRuntime>();
 let shuttingDown = false;
 
 /**
@@ -52,7 +84,7 @@ let shuttingDown = false;
  *   oplogAvailable: boolean
  * }} Public capability.
  */
-export function getAuditExecutorCapability() {
+export function getAuditExecutorCapability(): ExecutorCapability {
   const allowedMeteorVersions = getAllowedMeteorVersions();
   const oplogAvailable = Boolean(process.env.MONGO_OPLOG_URL);
   if (process.platform === 'win32') {
@@ -80,10 +112,10 @@ export function getAuditExecutorCapability() {
       allowedMeteorVersions,
       oplogAvailable,
     };
-  } catch (error) {
+  } catch (error: unknown) {
     return {
       available: false,
-      reasonCode: error.code || 'executor_preflight_failed',
+      reasonCode: String(getErrorCode(error) ?? 'executor_preflight_failed'),
       allowedMeteorVersions,
       oplogAvailable,
     };
@@ -99,7 +131,7 @@ export function getAuditExecutorCapability() {
  *   nodeCommand: string
  * }} Verified configuration.
  */
-export function resolveExecutorConfig() {
+export function resolveExecutorConfig(): ExecutorConfig {
   const configuredRoot = process.env.BENCH_REPOSITORY_ROOT;
   if (!configuredRoot) {
     throw executorError(
@@ -139,7 +171,7 @@ export function resolveExecutorConfig() {
     timeout: 5_000,
   });
   const major = Number.parseInt(
-    String(nodeCheck.stdout || '').trim().replace(/^v/, '').split('.')[0],
+    String(nodeCheck.stdout || '').trim().replace(/^v/, '').split('.')[0] ?? '',
     10,
   );
   if (nodeCheck.status !== 0 || !Number.isInteger(major) || major < MINIMUM_NODE_MAJOR) {
@@ -165,7 +197,7 @@ export function resolveExecutorConfig() {
  * @param {string} repositoryRoot Verified repository root.
  * @returns {string} Bounded safe output.
  */
-export function sanitizeAuditLogLine(value, repositoryRoot) {
+export function sanitizeAuditLogLine(value: unknown, repositoryRoot: string): string {
   const escapedRoot = escapeRegExp(repositoryRoot);
   const homeRelativeRoot = process.env.HOME
     && repositoryRoot.startsWith(`${process.env.HOME}${path.sep}`)
@@ -190,16 +222,19 @@ export function sanitizeAuditLogLine(value, repositoryRoot) {
  * @param {(line: string) => void} onLine Consumer.
  * @returns {{ push(chunk: Buffer|string): void, flush(): void }} Consumer API.
  */
-export function createLineConsumer(onLine) {
+export function createLineConsumer(onLine: (line: string) => void): {
+  push(chunk: Buffer | string): void;
+  flush(): void;
+} {
   let buffered = '';
   return {
-    push(chunk) {
+    push(chunk: Buffer | string): void {
       buffered += chunk.toString();
       const lines = buffered.split(/\r?\n/);
       buffered = lines.pop() ?? '';
       for (const line of lines) onLine(line);
     },
-    flush() {
+    flush(): void {
       if (buffered !== '') onLine(buffered);
       buffered = '';
     },
@@ -212,7 +247,7 @@ export function createLineConsumer(onLine) {
  * @param {unknown} rawRequest Untrusted method input.
  * @returns {Promise<string>} Execution identifier.
  */
-async function createAuditExecution(rawRequest) {
+async function createAuditExecution(rawRequest: unknown): Promise<string> {
   try {
     await auditControlPlaneReady;
   } catch {
@@ -241,7 +276,7 @@ async function createAuditExecution(rawRequest) {
   const request = Object.freeze({
     ...validatedRequest,
     meteorVersion: validatedRequest.meteorVersion
-      ?? capability.allowedMeteorVersions[0],
+      ?? capability.allowedMeteorVersions[0] ?? DEFAULT_ALLOWED_METEOR_VERSION,
   });
   if (request.observerDriver === 'oplog' && !process.env.MONGO_OPLOG_URL) {
     throw new Meteor.Error(
@@ -295,7 +330,7 @@ async function createAuditExecution(rawRequest) {
  *
  * @param {string} executionId Durable execution identifier.
  */
-async function executeAudit(executionId) {
+async function executeAudit(executionId: string): Promise<void> {
   const execution = await AuditExecutions.findOneAsync(executionId);
   if (!execution) return;
   if (execution.status === 'cancelling') {
@@ -327,7 +362,7 @@ async function executeAudit(executionId) {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
-  const runtime = {
+  const runtime: AuditProcessRuntime = {
     child,
     executionId,
     outputPath,
@@ -354,6 +389,10 @@ async function executeAudit(executionId) {
     queueAuditEvent(runtime, 'system', `Runner failed to start: ${error.message}`);
   });
   child.on('spawn', () => {
+    if (child.pid === undefined) {
+      queueAuditEvent(runtime, 'system', 'Runner started without a process-group identifier.');
+      return;
+    }
     AuditExecutions.updateAsync(
       { _id: executionId, status: 'queued' },
       {
@@ -404,17 +443,25 @@ async function executeAudit(executionId) {
  * @param {number|null} exitCode Child exit code.
  * @param {NodeJS.Signals|null} signal Closing signal.
  */
-async function settleAuditProcess(runtime, exitCode, signal) {
+async function settleAuditProcess(
+  runtime: AuditProcessRuntime,
+  exitCode: number | null,
+  signal: NodeJS.Signals | null,
+): Promise<void> {
   if (runtime.settled) return;
   runtime.settled = true;
-  clearTimeout(runtime.timeout);
-  clearTimeout(runtime.killTimer);
+  if (runtime.timeout) clearTimeout(runtime.timeout);
+  if (runtime.killTimer) clearTimeout(runtime.killTimer);
   await runtime.eventQueue;
 
   const execution = await AuditExecutions.findOneAsync(runtime.executionId);
-  let result = null;
-  let resultRunId = null;
-  let evidenceError = null;
+  if (!execution) {
+    ownedProcesses.delete(runtime.executionId);
+    return;
+  }
+  let result: ReturnType<typeof normalizeAuditRunResult> | null = null;
+  let resultRunId: string | null = null;
+  let evidenceError: unknown = null;
   try {
     result = readAuditResult(runtime.outputPath, {
       ...execution.request,
@@ -461,11 +508,15 @@ async function settleAuditProcess(runtime, exitCode, signal) {
       exitCode,
       exitSignal: signal,
       failureCode: 'audit_evidence_invalid',
-      failureMessage: evidenceError.message,
+      failureMessage: getErrorMessage(evidenceError),
     });
     return;
   }
 
+  if (!result?.metrics.change_stream_audit) {
+    await failExecution(runtime.executionId, 'audit_evidence_missing', 'The validated audit result omitted its audit metric.');
+    return;
+  }
   resultRunId = await insertRunResult(result);
   const auditStatus = result.metrics.change_stream_audit.status;
   const passed = exitCode === 0 && auditStatus === 'passed';
@@ -491,10 +542,10 @@ async function settleAuditProcess(runtime, exitCode, signal) {
  * @returns {Record<string, unknown>} Validated canonical result.
  */
 export function readAuditResult(
-  outputPath,
-  expected,
-  outputRoot = path.dirname(outputPath),
-) {
+  outputPath: string,
+  expected: Parameters<typeof normalizeAuditRunResult>[1],
+  outputRoot: string = path.dirname(outputPath),
+): ReturnType<typeof normalizeAuditRunResult> {
   const stats = fs.lstatSync(outputPath, { throwIfNoEntry: false });
   if (!stats?.isFile() || stats.isSymbolicLink()) {
     throw new Error('The audit runner did not produce a result artifact.');
@@ -504,7 +555,7 @@ export function readAuditResult(
   if (stats.size > MAX_RESULT_BYTES) {
     throw new Error('The audit result exceeded the dashboard safety limit.');
   }
-  let parsed;
+  let parsed: unknown;
   try {
     parsed = JSON.parse(fs.readFileSync(realOutputPath, 'utf8'));
   } catch {
@@ -519,7 +570,7 @@ export function readAuditResult(
  * @param {string} executionId Execution identifier.
  * @returns {Promise<string>} Current lifecycle status.
  */
-async function cancelAuditExecution(executionId) {
+async function cancelAuditExecution(executionId: string): Promise<string> {
   if (typeof executionId !== 'string' || executionId.length > 40) {
     throw new Meteor.Error('audit-invalid-id', 'Audit execution ID is invalid.');
   }
@@ -527,12 +578,12 @@ async function cancelAuditExecution(executionId) {
   if (!execution) {
     throw new Meteor.Error('audit-not-found', 'Audit execution was not found.');
   }
-  if (!ACTIVE_AUDIT_STATUSES.includes(execution.status)) {
+  if (!ACTIVE_AUDIT_STATUSES.some((status) => status === execution.status)) {
     return execution.status;
   }
 
   await AuditExecutions.updateAsync(
-    { _id: executionId, status: { $in: ACTIVE_AUDIT_STATUSES } },
+    { _id: executionId, status: { $in: [...ACTIVE_AUDIT_STATUSES] } },
     { $set: { status: 'cancelling', updatedAt: new Date() } },
   );
   const runtime = ownedProcesses.get(executionId);
@@ -554,7 +605,7 @@ async function cancelAuditExecution(executionId) {
  * @param {string} executionId Execution identifier.
  * @returns {Promise<boolean>} Whether recovery was resolved.
  */
-async function resolveInterruptedExecution(executionId) {
+async function resolveInterruptedExecution(executionId: string): Promise<boolean> {
   if (typeof executionId !== 'string' || executionId.length > 40) {
     throw new Meteor.Error('audit-invalid-id', 'Audit execution ID is invalid.');
   }
@@ -598,13 +649,13 @@ async function resolveInterruptedExecution(executionId) {
  * @param {object} runtime In-memory execution runtime.
  * @param {string} reason Stable cancellation reason.
  */
-async function requestProcessCancellation(runtime, reason) {
+async function requestProcessCancellation(runtime: AuditProcessRuntime, reason: string): Promise<void> {
   if (runtime.killTimer) return;
   runtime.cancellationReason = reason;
   queueAuditEvent(runtime, 'system', `Stopping audit: ${reason}`);
   try {
     await AuditExecutions.updateAsync(
-      { _id: runtime.executionId, status: { $in: ACTIVE_AUDIT_STATUSES } },
+      { _id: runtime.executionId, status: { $in: [...ACTIVE_AUDIT_STATUSES] } },
       {
         $set: {
           status: 'cancelling',
@@ -631,7 +682,11 @@ async function requestProcessCancellation(runtime, reason) {
  * @param {'stdout'|'stderr'|'system'} stream Output source.
  * @param {string} line Raw output line.
  */
-function queueAuditEvent(runtime, stream, line) {
+function queueAuditEvent(
+  runtime: AuditProcessRuntime,
+  stream: 'stdout' | 'stderr' | 'system',
+  line: string,
+): void {
   if (runtime.eventCount >= MAX_EVENT_COUNT) return;
   const message = sanitizeAuditLogLine(line, runtime.repositoryRoot);
   if (message === '') return;
@@ -660,9 +715,12 @@ function queueAuditEvent(runtime, stream, line) {
  * @param {string} executionId Execution identifier.
  * @param {Record<string, unknown>} fields Terminal fields.
  */
-async function finishExecution(executionId, fields) {
+async function finishExecution(
+  executionId: string,
+  fields: Partial<AuditExecutionDocument>,
+): Promise<void> {
   await AuditExecutions.updateAsync(
-    { _id: executionId, status: { $in: ACTIVE_AUDIT_STATUSES } },
+    { _id: executionId, status: { $in: [...ACTIVE_AUDIT_STATUSES] } },
     {
       $set: {
         ...fields,
@@ -684,7 +742,7 @@ async function finishExecution(executionId, fields) {
  * @param {string} failureCode Stable failure code.
  * @param {string} message Non-secret failure detail.
  */
-async function failExecution(executionId, failureCode, message) {
+async function failExecution(executionId: string, failureCode: string, message: string): Promise<void> {
   const runtime = ownedProcesses.get(executionId);
   const repositoryRoot = runtime?.repositoryRoot
     || process.env.BENCH_REPOSITORY_ROOT;
@@ -705,7 +763,7 @@ async function failExecution(executionId, failureCode, message) {
  *
  * @returns {NodeJS.ProcessEnv} Executor environment.
  */
-function buildExecutorEnvironment() {
+function buildExecutorEnvironment(): NodeJS.ProcessEnv {
   const allowedKeys = [
     'PATH',
     'HOME',
@@ -729,7 +787,7 @@ function buildExecutorEnvironment() {
 /**
  * Reconciles stale active records after a dashboard server restart.
  */
-async function reconcileInterruptedExecutions() {
+async function reconcileInterruptedExecutions(): Promise<void> {
   await AuditExecutions.updateAsync(
     {
       status: { $in: ['running', 'cancelling', 'starting'] },
@@ -770,7 +828,7 @@ async function reconcileInterruptedExecutions() {
 /**
  * Terminates only process groups owned by this live server instance.
  */
-function terminateOwnedProcesses() {
+function terminateOwnedProcesses(): void {
   shuttingDown = true;
   for (const runtime of ownedProcesses.values()) {
     signalProcessGroup(runtime.child.pid, 'SIGTERM');
@@ -782,13 +840,13 @@ function terminateOwnedProcesses() {
  *
  * @returns {ReadonlyArray<string>} Allowed releases.
  */
-function getAllowedMeteorVersions() {
+function getAllowedMeteorVersions(): ReadonlyArray<string> {
   const configured = process.env.BENCH_AUDIT_METEOR_VERSIONS
     ?.split(',')
     .map((value) => value.trim())
     .filter(Boolean);
   return Object.freeze(
-    configured?.length > 0 ? configured : [DEFAULT_ALLOWED_METEOR_VERSION],
+    configured && configured.length > 0 ? configured : [DEFAULT_ALLOWED_METEOR_VERSION],
   );
 }
 
@@ -798,13 +856,13 @@ function getAllowedMeteorVersions() {
  * @param {number|undefined} pid Process-group leader.
  * @param {NodeJS.Signals} signal Signal name.
  */
-function signalProcessGroup(pid, signal) {
-  if (!Number.isInteger(pid) || pid <= 1) return;
+function signalProcessGroup(pid: number | undefined, signal: NodeJS.Signals): void {
+  if (typeof pid !== 'number' || !Number.isInteger(pid) || pid <= 1) return;
   try {
     process.kill(-pid, signal);
-  } catch (error) {
-    if (error.code !== 'ESRCH') {
-      console.error(`Could not signal audit process group: ${error.message}`);
+  } catch (error: unknown) {
+    if (getErrorCode(error) !== 'ESRCH') {
+      console.error(`Could not signal audit process group: ${getErrorMessage(error)}`);
     }
   }
 }
@@ -815,8 +873,8 @@ function signalProcessGroup(pid, signal) {
  * @param {number|undefined} pid Process-group leader.
  * @returns {boolean} Whether the group exists.
  */
-function groupExists(pid) {
-  if (!Number.isInteger(pid) || pid <= 1) return false;
+function groupExists(pid: number | undefined): boolean {
+  if (typeof pid !== 'number' || !Number.isInteger(pid) || pid <= 1) return false;
   try {
     process.kill(-pid, 0);
     return true;
@@ -831,7 +889,7 @@ function groupExists(pid) {
  * @param {string} root Allowed root.
  * @param {string} candidate Candidate path.
  */
-function assertPathContained(root, candidate) {
+function assertPathContained(root: string, candidate: string): void {
   const relative = path.relative(root, candidate);
   if (relative.startsWith('..') || path.isAbsolute(relative)) {
     throw executorError(
@@ -848,9 +906,8 @@ function assertPathContained(root, candidate) {
  * @param {string} message Operator-facing message.
  * @returns {Error & {code: string}} Error.
  */
-function executorError(code, message) {
-  const error = new Error(message);
-  error.code = code;
+function executorError(code: string, message: string): Error & { code: string } {
+  const error = Object.assign(new Error(message), { code });
   return error;
 }
 
@@ -860,8 +917,8 @@ function executorError(code, message) {
  * @param {unknown} error Candidate error.
  * @returns {boolean} Whether it is a duplicate-key error.
  */
-function isDuplicateKeyError(error) {
-  return error?.code === 11000 || /duplicate key/i.test(error?.message || '');
+function isDuplicateKeyError(error: unknown): boolean {
+  return getErrorCode(error) === 11000 || /duplicate key/i.test(getErrorMessage(error));
 }
 
 /**
@@ -870,7 +927,7 @@ function isDuplicateKeyError(error) {
  * @param {string} value Literal string.
  * @returns {string} Escaped string.
  */
-function escapeRegExp(value) {
+function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
@@ -880,7 +937,7 @@ function escapeRegExp(value) {
  * @param {string|null} reasonCode Capability reason.
  * @returns {string} Operator-facing explanation.
  */
-function capabilityMessage(reasonCode) {
+function capabilityMessage(reasonCode: string | null): string {
   const messages = {
     process_groups_unsupported: 'Dashboard audit execution requires POSIX process-group support.',
     server_shutting_down: 'The dashboard server is shutting down.',
@@ -890,7 +947,19 @@ function capabilityMessage(reasonCode) {
     node_incompatible: `The dashboard audit runner requires Node ${MINIMUM_NODE_MAJOR} or newer.`,
     executor_preflight_failed: 'The dashboard audit executor failed its server preflight.',
   };
-  return messages[reasonCode] || messages.executor_preflight_failed;
+  return reasonCode && Object.hasOwn(messages, reasonCode)
+    ? messages[reasonCode as keyof typeof messages]
+    : messages.executor_preflight_failed;
+}
+
+function getErrorCode(error: unknown): string | number | undefined {
+  if (error === null || typeof error !== 'object' || !('code' in error)) return undefined;
+  const code = error.code;
+  return typeof code === 'string' || typeof code === 'number' ? code : undefined;
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 /**
@@ -898,7 +967,7 @@ function capabilityMessage(reasonCode) {
  *
  * @returns {Promise<void>} Initialization completion.
  */
-async function initializeAuditControlPlane() {
+async function initializeAuditControlPlane(): Promise<void> {
   await Promise.all([
     AuditExecutions.createIndexAsync({ createdAt: -1 }),
     AuditEvents.createIndexAsync(
