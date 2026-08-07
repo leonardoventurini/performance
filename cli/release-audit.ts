@@ -102,6 +102,7 @@ export function createReleaseCaseExecutor({
   runCase?: (input: CaseRunInput) => Promise<unknown>;
 }>): CaseExecutor {
   const environments = new Map<string, ReleaseEnvironment>();
+  const retiredRestorations: EnvironmentStopResult[] = [];
   const caseOutcomes: CaseOutcome[] = [];
   const executionRecords: NegativeControlRecord[] = [];
   const extraEnvironment = Object.fromEntries((Array.isArray(values.env) ? values.env : values.env ? [values.env] : [])
@@ -129,6 +130,7 @@ export function createReleaseCaseExecutor({
     const key = environmentKey(coordinate);
     if (environments.get(key) === environment) environments.delete(key);
     const restoration = await environment.stop();
+    retiredRestorations.push(restoration);
     if (restoration?.restored !== true) {
       throw new Error('audit environment could not be restored after an executor failure');
     }
@@ -161,7 +163,7 @@ export function createReleaseCaseExecutor({
   };
 
   executeCase.finalize = async () => {
-    const restorations: EnvironmentStopResult[] = [];
+    const restorations: EnvironmentStopResult[] = [...retiredRestorations];
     for (const environment of environments.values()) restorations.push(await environment.stop());
     environments.clear();
     const recoveryPayload = {

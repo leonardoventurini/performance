@@ -106,6 +106,10 @@ test('release executor retires a poisoned environment before the next coordinate
   await executeCase({ coordinate, attemptId: 'attempt-2' });
   assert.equal(environmentCount, 2);
   assert.deepEqual(stopped, [1]);
-  await executeCase.finalize();
+  const finalization = await executeCase.finalize();
   assert.deepEqual(stopped, [1, 2]);
+  assert.equal(finalization.recovery.runDocumentsRemoved, true);
+  assert.equal(finalization.recovery.topologyRestored, true);
+  assert.equal(finalization.recovery.profilerRestored, true);
+  assert.equal(finalization.recovery.networkRestored, true);
 });

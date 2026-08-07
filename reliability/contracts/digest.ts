@@ -6,21 +6,25 @@ import { createHash } from 'node:crypto';
  * Arrays retain their declared order because contract order is semantically
  * significant for observer preferences and attempt evidence.
  */
-export function canonicalJson(value: unknown): string {
+function canonicalJsonAt(value: unknown, location: string): string {
   if (Array.isArray(value)) {
-    return `[${value.map(canonicalJson).join(',')}]`;
+    return `[${value.map((entry, index) => canonicalJsonAt(entry, `${location}[${index}]`)).join(',')}]`;
   }
   if (value && typeof value === 'object') {
     const entries = Object.entries(value)
       .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`);
+      .map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJsonAt(entry, `${location}.${key}`)}`);
     return `{${entries.join(',')}}`;
   }
   const serialized = JSON.stringify(value);
   if (serialized === undefined) {
-    throw new TypeError('contract values must be JSON-serializable');
+    throw new TypeError(`contract value at ${location} must be JSON-serializable`);
   }
   return serialized;
+}
+
+export function canonicalJson(value: unknown): string {
+  return canonicalJsonAt(value, '$');
 }
 
 /**

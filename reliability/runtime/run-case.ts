@@ -33,6 +33,20 @@ interface FaultArtifact {
   readonly restored: boolean;
 }
 
+/** Digests oracle evidence without confusing absent evidence with an observed null. */
+export function oracleEvidenceDigest(
+  result: OracleEvaluation,
+  observed: unknown,
+  planDigest: string,
+): string {
+  return contractDigest({
+    result,
+    observedPresent: observed !== undefined,
+    ...(observed === undefined ? {} : { observed }),
+    planDigest,
+  });
+}
+
 /** Owned runtime resources required to execute one declarative audit case. */
 export interface RuntimeEnvironment {
   readonly auditId: string;
@@ -63,11 +77,11 @@ function oracleArtifact(
     digest: oracle.family === 'fault_witness' && fault ? contractDigest({
       activationEvidenceDigest: fault.activationEvidenceDigest,
       restorationEvidenceDigest: fault.restorationEvidenceDigest,
-    }) : contractDigest({
+    }) : oracleEvidenceDigest(
       result,
-      observed: execution.evidence.outputs[oracle.observed.stepId]?.[oracle.observed.ledger],
-      planDigest: execution.evidence.planDigest,
-    }),
+      execution.evidence.outputs[oracle.observed.stepId]?.[oracle.observed.ledger],
+      execution.evidence.planDigest,
+    ),
     assertions: 1,
     passed: result.passed,
     failures: result.passed ? [] : [result.reason],

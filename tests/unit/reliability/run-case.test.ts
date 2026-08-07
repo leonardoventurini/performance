@@ -4,8 +4,16 @@ import { MongoClient } from 'mongodb';
 
 import { loadDeclarativeAuditCatalog } from '../../../reliability/declarative/catalog.js';
 import { compileDeclarativeCase } from '../../../reliability/declarative/compiler.js';
-import { runDeclarativeCase } from '../../../reliability/runtime/run-case.js';
+import { oracleEvidenceDigest, runDeclarativeCase } from '../../../reliability/runtime/run-case.js';
 import type { RuntimeEnvironment } from '../../../reliability/runtime/run-case.js';
+
+test('oracle evidence digests bind absence separately from an observed null', () => {
+  const evaluation = { passed: false, reason: 'required_evidence_missing' };
+  const absent = oracleEvidenceDigest(evaluation, undefined, 'plan');
+  const observedNull = oracleEvidenceDigest(evaluation, null, 'plan');
+  assert.match(absent, /^[a-f0-9]{64}$/u);
+  assert.notEqual(absent, observedNull);
+});
 
 test('event insert compiles with the exact runtime adapter inputs', () => {
   const catalog = loadDeclarativeAuditCatalog();
