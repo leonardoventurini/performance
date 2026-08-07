@@ -1,12 +1,4 @@
-declare const Package: {
-  describe(options: Record<string, unknown>): void;
-  onUse(callback: (api: MeteorPackageApi) => void): void;
-  onTest(callback: (api: MeteorPackageApi) => void): void;
-};
-
-interface MeteorPackageApi {
-  versionsFrom(version: string): void;
-  use(name: string | readonly string[], architectures?: string | readonly string[], options?: Readonly<{ weak?: boolean; unordered?: boolean }>): void;
+interface PackageAPI {
   mainModule(path: string, architectures?: readonly string[]): void;
 }
 
