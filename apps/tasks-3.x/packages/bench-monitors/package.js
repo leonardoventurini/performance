@@ -23,3 +23,11 @@ Package.onUse(function (api) {
   api.use('typescript@5.11.0-beta351.0');
   api.mainModule('bench-monitors.server.ts', ['server']);
 });
+
+Package.onTest(function (api) {
+  api.use('ecmascript');
+  api.use('typescript@5.11.0-beta351.0');
+  api.use('meteortesting:mocha');
+  api.use('bench-monitors');
+  api.mainModule('audit-observer-contract-tests.ts');
+});

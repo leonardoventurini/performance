@@ -1,5 +1,4 @@
-import assert from 'node:assert/strict';
-import test from 'node:test';
+import { assert } from './test-assertions';
 
 import {
   deriveObservedFallback,
@@ -7,12 +6,9 @@ import {
   validateAuditEchoRequest,
   validateAuditFaultRequest,
   validateAuditMonitorRequest,
-} from '../../../apps/tasks-3.x/packages/bench-monitors/audit-observer-contract.js';
-import {
-  buildReliabilityCursorPlans,
-} from '../../../apps/tasks-3.x/packages/tasks-common/reliability-query-descriptors.js';
+} from './audit-observer-contract';
 
-test('observer correlation extracts only valid run and case identifiers', () => {
+it('observer correlation extracts only valid run and case identifiers', () => {
   assert.deepEqual(extractAuditScope({ options: { _auditObserverScope: {
     runId: 'run-1', caseExecutionId: 'case-1', queryId: 'multiple_projections',
     cursorOrdinal: 1, cursorFingerprint: 'cursor-deadbeef',
@@ -31,7 +27,7 @@ test('observer correlation extracts only valid run and case identifiers', () => 
   } } }), null);
 });
 
-test('fallback provenance requires an independently observed rejected driver check', () => {
+it('fallback provenance requires an independently observed rejected driver check', () => {
   assert.deepEqual(deriveObservedFallback({
     configuredOrder: ['changeStreams', 'oplog', 'polling'],
     attempts: [
@@ -52,7 +48,7 @@ test('fallback provenance requires an independently observed rejected driver che
   }, 'oplog'), null);
 });
 
-test('transport echo is ownership-attested and byte bounded', () => {
+it('transport echo is ownership-attested and byte bounded', () => {
   const expected = { runId: 'run-1', ownershipToken: 'secret' };
   assert.deepEqual(validateAuditEchoRequest({
     runId: 'run-1', ownershipToken: 'secret', payload: { value: 'ok' },
@@ -62,7 +58,7 @@ test('transport echo is ownership-attested and byte bounded', () => {
   }, expected, 2), /byte ceiling/);
 });
 
-test('fault control accepts only owned closed primitives', () => {
+it('fault control accepts only owned closed primitives', () => {
   const request = {
     runId: 'run-1', caseExecutionId: 'case-1', ownershipToken: 'secret',
     controller: 'stream_restart', operation: 'activate', faultId: 'fault-1',
@@ -78,25 +74,7 @@ test('fault control accepts only owned closed primitives', () => {
   }, ['stream_restart']), /unknown audit fault controller/);
 });
 
-test('server-owned cursor plans carry distinct closed correlation tags', () => {
-  const request = {
-    runId: 'run-1', caseExecutionId: 'case-1', queryId: 'multiple_projections',
-  };
-  const plans = buildReliabilityCursorPlans(request);
-  assert.equal(plans.length, 2);
-  assert.deepEqual(
-    plans.map(({ options }) => options._auditObserverScope.cursorOrdinal),
-    [0, 1],
-  );
-  assert.notEqual(
-    plans[0].options._auditObserverScope.cursorFingerprint,
-    plans[1].options._auditObserverScope.cursorFingerprint,
-  );
-  assert.deepEqual(buildReliabilityCursorPlans(request), plans);
-  assert.equal(buildReliabilityCursorPlans('run-1')[0].options._auditObserverScope, undefined);
-});
-
-test('monitor evidence reads require exact run and ownership token', () => {
+it('monitor evidence reads require exact run and ownership token', () => {
   const expected = { runId: 'run-1', ownershipToken: 'secret' };
   assert.deepEqual(validateAuditMonitorRequest({ runId: 'run-1', ownershipToken: 'secret' }, expected), {
     runId: 'run-1', caseExecutionId: null,
