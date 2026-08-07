@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "target": "ES2024",
+    "lib": ["ES2024"],
+    "types": ["node"],
+    "rootDir": "typescript-tools",
+    "outDir": ".typescript-tools",
+    "declaration": false,
+    "sourceMap": false
+  },
+  "include": ["typescript-tools/**/*.ts"]
+}

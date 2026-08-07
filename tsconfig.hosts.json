@@ -1,0 +1,26 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "target": "ES2024",
+    "lib": ["ES2024", "DOM"],
+    "types": ["node"],
+    "paths": {
+      "@meteorjs/rspack": ["./types/rspack-host.d.ts"]
+    },
+    "tsBuildInfoFile": "node_modules/.cache/typescript/hosts.tsbuildinfo"
+  },
+  "files": [
+    "bench.js",
+    "apps/tasks-3.x/packages/bench-monitors/package.js",
+    "apps/tasks-3.x/packages/tasks-common/package.js",
+    "apps/dashboard/rspack.config.js",
+    "types/hosts.d.ts",
+    "types/rspack-host.d.ts"
+  ]
+}

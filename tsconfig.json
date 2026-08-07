@@ -1,0 +1,10 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./tsconfig.node.json" },
+    { "path": "./tsconfig.playwright.json" },
+    { "path": "./tsconfig.hosts.json" },
+    { "path": "./apps/tasks-3.x" },
+    { "path": "./apps/dashboard" }
+  ]
+}
