@@ -44,7 +44,7 @@ function exitUnknown(kind: string, name: string, validNames: readonly string[]):
   process.exit(1);
 }
 
-// Maps scenario.driver (declared in bench.config.js) to one of the four
+// Maps scenario.driver (declared in bench.config.ts) to one of the four
 // driver functions. The `cli` driver is a meta-type — bench.config.js uses
 // it for special scenarios that don't fit the artillery/script pattern
 // (cold-start, bundle-size); we dispatch on the scenario name itself for

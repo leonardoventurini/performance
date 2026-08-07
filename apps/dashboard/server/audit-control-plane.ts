@@ -152,7 +152,8 @@ export function resolveExecutorConfig(): ExecutorConfig {
 
   const requiredPaths = [
     'bench.js',
-    'bench.config.js',
+    'bench.config.ts',
+    path.join('dist', 'build-manifest.json'),
     path.join('apps', 'tasks-3.x', '.meteor', 'release'),
   ];
   if (requiredPaths.some((relativePath) => (

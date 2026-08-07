@@ -38,6 +38,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Build benchmark harness
+        run: npm run build
+
       - name: Install Playwright browsers
         if: contains(inputs.scenario, 'reactive-light') || contains(inputs.scenario, 'reactive-crud')
         run: npx playwright install chromium

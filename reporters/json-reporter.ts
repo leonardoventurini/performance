@@ -3,7 +3,7 @@
 //   buildResult(...) → object
 //     Shapes drivers' collector outputs into the dashboard-contract shape.
 //     PURE: meteor info comes in as a parameter, never derived here. The
-//     caller (cli/run.js, via meteor-source.js) is the sole owner of git
+//     caller (cli/run.ts, via meteor-source.ts) is the sole owner of git
 //     introspection — keeps this file side-effect-free aside from disk
 //     writes done by writeResult / appendToHistory.
 //

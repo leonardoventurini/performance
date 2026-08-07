@@ -23,9 +23,11 @@ import type { CollectorResult } from '../reporters/json-reporter.js';
 
 interface SpawnedCollector { proc: Pick<ChildProcess, 'kill'>; name: string; getResult(): string }
 interface CollectorPaths {
-  gcOutputPath?: string; methodTimingPath?: string; subTimingPath?: string; propagationTimingPath?: string;
-  observerPoolPath?: string; ddpMessagePath?: string; frameSizePath?: string; compressionPath?: string;
-  driverFallbackPath?: string;
+  gcOutputPath?: string | undefined; methodTimingPath?: string | undefined;
+  subTimingPath?: string | undefined; propagationTimingPath?: string | undefined;
+  observerPoolPath?: string | undefined; ddpMessagePath?: string | undefined;
+  frameSizePath?: string | undefined; compressionPath?: string | undefined;
+  driverFallbackPath?: string | undefined;
 }
 interface StartCollectorsInput extends CollectorPaths { appName: string; mongoUri?: string }
 interface StopCollectorsInput extends CollectorPaths { procs: readonly SpawnedCollector[] }

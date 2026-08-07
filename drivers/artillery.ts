@@ -71,7 +71,7 @@ export async function runArtilleryDriver({ scenario, scenarioName, app, appName,
   // Override the YAML's hard-coded target so artillery hits whichever
   // port the harness picked via BENCH_PORT (defaults to 3000). Also
   // export REMOTE_URL with the same value so artillery processor scripts
-  // (tests/ddp-helpers.js) that open their own DDP connection in
+  // (tests/ddp-helpers.ts) that open their own DDP connection in
   // beforeScenario hit the same port — without it they default to
   // http://localhost:3000 hard-coded and hang on a closed/wrong port.
   // The 5-minute timeout caps the whole artillery exec: a hung VU

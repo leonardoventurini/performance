@@ -59,10 +59,9 @@ playwright-list:
 playwright remote_url="http://localhost:3000":
     REMOTE_URL={{ quote(remote_url) }} ./node_modules/.bin/playwright test
 
-# Check all maintained shell and legacy Node helper files.
+# Check all maintained shell files; TypeScript helper syntax is covered by typecheck.
 syntax-check:
     for file in scripts/*.sh; do bash -n "$file"; done
-    for file in scripts/helpers/*.js; do node --check "$file"; done
 
 # List configured benchmark scenarios, apps, and the resolved Meteor source.
 bench-list:
@@ -95,7 +94,8 @@ release-audit release="3.5.1-beta.0" *args:
 
 # Qualify the release decision oracles with deterministic negative controls.
 release-audit-negative-controls:
-    node --test tests/unit/reliability/release-aggregate.test.js
+    npm run build
+    node --test dist/tests/unit/reliability/release-aggregate.test.js
 
 # Validate a sealed release manifest and every referenced case artifact.
 release-audit-validate manifest:
@@ -141,6 +141,7 @@ dashboard-start port="4000":
 
 # Start the dashboard and its local audit control plane.
 dashboard port="4000":
+    npm run build
     just dashboard-start {{ quote(port) }}
 
 # Rebuild the dashboard's tracked Tailwind output.

@@ -180,7 +180,7 @@ The `Runtime Matrix Benchmark` workflow (`.github/workflows/benchmark-runtime-ma
 
 ## Configuration
 
-The framework is configured via `bench.config.js`. You can define:
+The framework is configured via `bench.config.ts`. You can define:
 - `meteorCheckoutPath`: Default path for local Meteor checkout.
 - `defaultApp`: Default app to benchmark.
 - `apps`: Available apps.
@@ -190,8 +190,8 @@ The framework is configured via `bench.config.js`. You can define:
 ## Meteor Source Configuration
 
 You can benchmark different Meteor versions by specifying the source. These are mutually exclusive:
-1. **Local Checkout:** Set `METEOR_CHECKOUT_PATH` env var, use `--meteor-checkout` flag, or configure `meteorCheckoutPath` in `bench.config.js`.
-2. **Pinned Release:** Set `METEOR_RELEASE` env var, use `--meteor-version` flag, or configure `meteorVersion` in `bench.config.js`.
+1. **Local Checkout:** Set `METEOR_CHECKOUT_PATH` env var, use `--meteor-checkout` flag, or configure `meteorCheckoutPath` in `bench.config.ts`.
+2. **Pinned Release:** Set `METEOR_RELEASE` env var, use `--meteor-version` flag, or configure `meteorVersion` in `bench.config.ts`.
 
 ## Project Structure
 

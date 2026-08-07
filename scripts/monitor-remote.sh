@@ -181,6 +181,6 @@ artPid="$!"
 # Wait for artillery script to finish the process
 wait "${artPid}"
 
-GALAXY_APP="${galaxyAppHost}" node ./scripts/helpers/monitor-remote-cpu-ram.js
+GALAXY_APP="${galaxyAppHost}" node ./dist/scripts/helpers/monitor-remote-cpu-ram.cjs
 
 cleanup "true"
