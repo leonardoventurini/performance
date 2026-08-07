@@ -46,6 +46,7 @@ const MONGO_WIREDTIGER_MONITOR = path.resolve(HERE, '..', 'collectors', 'mongo-w
 const RESULTS_DIR = path.resolve(HERE, '..', 'results');
 const COLLECTOR_DRAIN_MS = 1000;
 
+/** Allocates the emitted GC preload and its run-owned output path. */
 export function prepareGcOutput(tag: string) {
   if (!io.existsSync(RESULTS_DIR)) io.mkdirSync(RESULTS_DIR, { recursive: true });
   return {
@@ -54,64 +55,49 @@ export function prepareGcOutput(tag: string) {
   };
 }
 
-// Path the in-app method-timing collector dumps to on Meteor's SIGTERM.
-// Passed through startMeteorApp's METHOD_TIMING_OUTPUT env var and read
-// here in stopCollectors.
+/** Allocates the run-owned method-timing output path consumed after shutdown. */
 export function prepareMethodTimingOutput(tag: string): string {
   if (!io.existsSync(RESULTS_DIR)) io.mkdirSync(RESULTS_DIR, { recursive: true });
   return path.join(RESULTS_DIR, `method-timing-${tag}-${Date.now()}.json`);
 }
 
-// Same pattern as prepareMethodTimingOutput, for the sub-timing collector
-// (SUB_TIMING_OUTPUT env var → metrics.ddp_subscriptions).
+/** Allocates the run-owned subscription-timing output path. */
 export function prepareSubTimingOutput(tag: string): string {
   if (!io.existsSync(RESULTS_DIR)) io.mkdirSync(RESULTS_DIR, { recursive: true });
   return path.join(RESULTS_DIR, `sub-timing-${tag}-${Date.now()}.json`);
 }
 
-// Same pattern, for propagation-timing (PROPAGATION_TIMING_OUTPUT env var
-// → metrics.live_update_propagation).
+/** Allocates the run-owned propagation-timing output path. */
 export function preparePropagationTimingOutput(tag: string): string {
   if (!io.existsSync(RESULTS_DIR)) io.mkdirSync(RESULTS_DIR, { recursive: true });
   return path.join(RESULTS_DIR, `propagation-timing-${tag}-${Date.now()}.json`);
 }
 
-// Same pattern, for the observer-pool sampler (OBSERVER_POOL_OUTPUT env var
-// → metrics.observer_pool). The in-app sampler dumps RAW samples; we
-// aggregate to min/max/avg/end in stopCollectors.
+/** Allocates the run-owned observer-pool sample path. */
 export function prepareObserverPoolOutput(tag: string): string {
   if (!io.existsSync(RESULTS_DIR)) io.mkdirSync(RESULTS_DIR, { recursive: true });
   return path.join(RESULTS_DIR, `observer-pool-${tag}-${Date.now()}.json`);
 }
 
-// Same pattern, for the ddp-message counter (DDP_MESSAGE_OUTPUT env var
-// → metrics.ddp_messages). The in-app counter dumps RAW in/out counts
-// per message type; we compute per-second rates in stopCollectors.
+/** Allocates the run-owned DDP message counter path. */
 export function prepareDdpMessageOutput(tag: string): string {
   if (!io.existsSync(RESULTS_DIR)) io.mkdirSync(RESULTS_DIR, { recursive: true });
   return path.join(RESULTS_DIR, `ddp-messages-${tag}-${Date.now()}.json`);
 }
 
-// Same pattern, for the frame-size counter (DDP_FRAME_SIZE_OUTPUT env var
-// → metrics.ddp_frame_size). The in-app counter dumps RAW per-message byte
-// sizes + per-type byte sums; we compute size percentiles in stopCollectors.
+/** Allocates the run-owned DDP frame-size counter path. */
 export function prepareFrameSizeOutput(tag: string): string {
   if (!io.existsSync(RESULTS_DIR)) io.mkdirSync(RESULTS_DIR, { recursive: true });
   return path.join(RESULTS_DIR, `frame-size-${tag}-${Date.now()}.json`);
 }
 
-// Same pattern, for the compression tracker (DDP_COMPRESSION_OUTPUT env var
-// → metrics.ddp_compression). The in-app tracker dumps post-compression
-// socket byte totals; combined with the frame-size dump (pre-compression
-// byte sums), the harness aggregator emits the ratio + savings_pct.
+/** Allocates the run-owned compression tracker path. */
 export function prepareCompressionOutput(tag: string): string {
   if (!io.existsSync(RESULTS_DIR)) io.mkdirSync(RESULTS_DIR, { recursive: true });
   return path.join(RESULTS_DIR, `compression-${tag}-${Date.now()}.json`);
 }
 
-// Same pattern, for the driver-fallback tracker (DRIVER_FALLBACK_OUTPUT
-// env var → metrics.driver_fallbacks). The in-app tracker already produces
-// the final shape; aggregator just validates + applies absence convention.
+/** Allocates the run-owned observer-driver fallback path. */
 export function prepareDriverFallbackOutput(tag: string): string {
   if (!io.existsSync(RESULTS_DIR)) io.mkdirSync(RESULTS_DIR, { recursive: true });
   return path.join(RESULTS_DIR, `driver-fallback-${tag}-${Date.now()}.json`);
@@ -308,6 +294,7 @@ function spawnMongoWiredTigerMonitor(mongoUri: string): SpawnedCollector {
   return { proc, name: 'MONGO_WIREDTIGER', getResult: () => stdout };
 }
 
+/** Starts only the collectors supported by the resolved process and database inputs. */
 export function startCollectors({ appName, mongoUri, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath, frameSizePath, compressionPath, driverFallbackPath }: StartCollectorsInput) {
   const procs: SpawnedCollector[] = [];
 
@@ -337,6 +324,7 @@ export function startCollectors({ appName, mongoUri, gcOutputPath, methodTimingP
   return { procs, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath, frameSizePath, compressionPath, driverFallbackPath };
 }
 
+/** Stops collectors and admits only validated JSON metrics into the result envelope. */
 export async function stopCollectors({ procs, gcOutputPath, methodTimingPath, subTimingPath, propagationTimingPath, observerPoolPath, ddpMessagePath, frameSizePath, compressionPath, driverFallbackPath }: StopCollectorsInput): Promise<CollectorResult[]> {
   const results: CollectorResult[] = [];
 
@@ -514,6 +502,7 @@ export async function stopCollectors({ procs, gcOutputPath, methodTimingPath, su
 // its own drain (1s); this re-checks after stopMeteorApp's grace period in
 // case Meteor took longer than the collector drain to flush. Returns [] when
 // no late-arriving gc data is found.
+/** Drains a GC metric that arrived after the initial collector shutdown window. */
 export function drainPostStopGc(gcOutputPath?: string): CollectorResult[] {
   if (!gcOutputPath || !io.existsSync(gcOutputPath)) return [];
   try {
@@ -529,6 +518,7 @@ export function drainPostStopGc(gcOutputPath?: string): CollectorResult[] {
   }
 }
 
+/** Drains and validates a late observer-driver fallback metric. */
 export function drainPostStopDriverFallback(driverFallbackPath?: string): CollectorResult[] {
   if (!driverFallbackPath || !io.existsSync(driverFallbackPath)) return [];
   try {
