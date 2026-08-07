@@ -8,8 +8,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { execSync } from 'node:child_process';
 import { resolveMeteorSource, getMeteorInfo } from '../../meteor-source.js';
+import type { MeteorSource } from '../../lib/benchmark-types.js';
 
-let tmpRoot;
+let tmpRoot = '';
 
 beforeEach(() => {
   tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'meteor-source-'));
@@ -21,7 +22,7 @@ afterEach(() => {
 
 // Build a directory that looks like a Meteor checkout: a `meteor` file at the
 // root. Does NOT make it a git repo — pass { git: true } for that.
-function makeFakeCheckout({ git = false } = {}) {
+function makeFakeCheckout({ git = false }: { readonly git?: boolean } = {}): string {
   const dir = fs.mkdtempSync(path.join(tmpRoot, 'checkout-'));
   fs.writeFileSync(path.join(dir, 'meteor'), '#!/usr/bin/env bash\n');
   if (git) {
@@ -33,7 +34,7 @@ function makeFakeCheckout({ git = false } = {}) {
 
 // Directory with no `meteor` binary, so the "checkout binary missing" branch
 // is taken and resolution falls through to system mode.
-function makeEmptyDir() {
+function makeEmptyDir(): string {
   return fs.mkdtempSync(path.join(tmpRoot, 'empty-'));
 }
 
@@ -132,7 +133,7 @@ describe('resolveMeteorSource — system mode', () => {
 describe('getMeteorInfo', () => {
   test('returns non-empty {version, sha} for a real git checkout', () => {
     const dir = makeFakeCheckout({ git: true });
-    const info = getMeteorInfo({ mode: 'checkout', checkoutPath: dir });
+    const info = getMeteorInfo({ mode: 'checkout', meteorCmd: path.join(dir, 'meteor'), releaseArg: null, checkoutPath: dir, version: 'unknown', sha: 'unknown' });
     assert.ok(typeof info.version === 'string' && info.version.length > 0, 'version is a non-empty string');
     assert.ok(typeof info.sha === 'string' && info.sha.length > 0, 'sha is a non-empty string');
     // short-sha is typically 7 chars, but git can use 4+ — just assert no whitespace.
@@ -143,7 +144,7 @@ describe('getMeteorInfo', () => {
   test('throws (no silent "unknown") when checkout path is not a git repo', () => {
     const dir = makeFakeCheckout({ git: false });
     assert.throws(
-      () => getMeteorInfo({ mode: 'checkout', checkoutPath: dir }),
+      () => getMeteorInfo({ mode: 'checkout', meteorCmd: path.join(dir, 'meteor'), releaseArg: null, checkoutPath: dir, version: 'unknown', sha: 'unknown' }),
       (err) => {
         assert.ok(err instanceof Error);
         assert.ok(err.message.includes(dir), `error message should mention the checkout path; got: ${err.message}`);
@@ -231,7 +232,7 @@ describe('resolveMeteorSource — release mode', () => {
 });
 
 describe('resolveMeteorSource — mutual exclusion of version + checkout', () => {
-  function assertMutualExclusionError(fn, { version, checkout }) {
+  function assertMutualExclusionError(fn: () => MeteorSource, { version, checkout }: { readonly version: string; readonly checkout: string }): void {
     assert.throws(fn, (err) => {
       assert.ok(err instanceof Error);
       assert.match(err.message, /mutually exclusive/i, `message should mention "mutually exclusive"; got: ${err.message}`);

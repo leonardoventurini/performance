@@ -1,5 +1,5 @@
 // runPush / runBaseline in cli/push.js. DDP and ws live on the io facade
-// (runner/_io.js) — same mockable seam as fs/spawn/sleep. Tests stub:
+// (runner/_io.ts) — same mockable seam as fs/spawn/sleep. Tests stub:
 //   - io.SimpleDDP with a fake constructor returning a fake-ddp instance
 //   - io.readFileSync for the result file
 //   - process.exit so failure paths throw instead of terminating the runner
@@ -8,16 +8,21 @@ import { test, describe, beforeEach, afterEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { io } from '../../runner/_io.js';
 import { runPush, runBaseline } from '../../cli/push.js';
+import { createBenchmarkConfig } from '../../bench.config.js';
+import type { BenchmarkConfig } from '../../lib/benchmark-types.js';
 
 class ExitError extends Error {
-  constructor(code) { super(`process.exit(${code})`); this.code = code; }
+  readonly code: string | number | null | undefined;
+  constructor(code: string | number | null | undefined) { super(`process.exit(${code})`); this.code = code; }
 }
 
-let logs;
-let errors;
-let origLog;
-let origError;
-let origBenchKey;
+let logs: string[] = [];
+let errors: string[] = [];
+let origLog: typeof console.log;
+let origError: typeof console.error;
+let origBenchKey: string | undefined;
+const BASE_CONFIG = createBenchmarkConfig(import.meta.dirname, {});
+const config = (overrides: Partial<BenchmarkConfig> = {}): BenchmarkConfig => ({ ...BASE_CONFIG, ...overrides });
 
 beforeEach(() => {
   logs = [];
@@ -26,7 +31,7 @@ beforeEach(() => {
   origError = console.error;
   console.log = (msg) => logs.push(String(msg));
   console.error = (msg, ...rest) => errors.push([String(msg), ...rest.map(String)].join(' '));
-  mock.method(process, 'exit', (code) => { throw new ExitError(code); });
+  mock.method(process, 'exit', (code?: string | number | null) => { throw new ExitError(code); });
   origBenchKey = process.env.BENCH_API_KEY;
   delete process.env.BENCH_API_KEY;
 });
@@ -39,27 +44,50 @@ afterEach(() => {
   mock.restoreAll();
 });
 
-function fakeDdpFactory({ callImpl, connectImpl } = {}) {
-  const calls = [];
+interface DdpCall { readonly method: string; readonly args: readonly unknown[] }
+interface FakeDdpOptions { readonly endpoint: string; readonly SocketConstructor: unknown }
+interface FakeDdpFactoryOptions {
+  readonly callImpl?: (method: string, ...args: readonly unknown[]) => unknown | Promise<unknown>;
+  readonly connectImpl?: () => void | Promise<void>;
+}
+
+function fakeDdpFactory({ callImpl, connectImpl }: FakeDdpFactoryOptions = {}) {
+  const calls: DdpCall[] = [];
   let connected = false;
   let disconnected = false;
-  function FakeDDP(opts) {
-    this.opts = opts;
-    this.connect = async () => {
+  class FakeDDP {
+    static readonly calls = calls;
+    static lastInstance: FakeDDP | undefined;
+    readonly opts: FakeDdpOptions;
+    constructor(opts: FakeDdpOptions) {
+      this.opts = opts;
+      FakeDDP.lastInstance = this;
+    }
+    async connect(): Promise<void> {
       if (connectImpl) await connectImpl();
       connected = true;
-    };
-    this.call = async (method, ...args) => {
+    }
+    async call(method: string, ...args: readonly unknown[]): Promise<unknown> {
       calls.push({ method, args });
       return callImpl ? callImpl(method, ...args) : 'doc-id-123';
-    };
-    this.disconnect = () => { disconnected = true; };
-    FakeDDP.lastInstance = this;
+    }
+    disconnect(): void { disconnected = true; }
+    static wasConnected(): boolean { return connected; }
+    static wasDisconnected(): boolean { return disconnected; }
   }
-  FakeDDP.calls = calls;
-  FakeDDP.wasConnected = () => connected;
-  FakeDDP.wasDisconnected = () => disconnected;
   return FakeDDP;
+}
+
+interface FakeDdpInstance { readonly opts: FakeDdpOptions }
+function lastInstance(factory: { readonly lastInstance: FakeDdpInstance | undefined }): FakeDdpInstance {
+  assert.ok(factory.lastInstance);
+  return factory.lastInstance;
+}
+
+function lastCall(factory: { readonly calls: readonly DdpCall[] }): DdpCall {
+  const call = factory.calls.at(-1);
+  assert.ok(call);
+  return call;
 }
 
 describe('runPush', () => {
@@ -70,15 +98,15 @@ describe('runPush', () => {
 
     await runPush({
       values: { result: '/path/to/result.json', url: 'ws://dash.example/websocket', key: 'k1' },
-      config: {},
+      config: config(),
     });
 
-    assert.equal(FakeDDP.lastInstance.opts.endpoint, 'ws://dash.example/websocket');
-    assert.equal(FakeDDP.lastInstance.opts.SocketConstructor, io.ws);
+    assert.equal(lastInstance(FakeDDP).opts.endpoint, 'ws://dash.example/websocket');
+    assert.equal(lastInstance(FakeDDP).opts.SocketConstructor, io.ws);
     assert.equal(FakeDDP.calls.length, 1);
-    assert.equal(FakeDDP.calls[0].method, 'runs.insert');
-    assert.equal(FakeDDP.calls[0].args[0], 'k1');
-    assert.deepEqual(FakeDDP.calls[0].args[1], { tag: 'mytag', metrics: {} });
+    assert.equal(lastCall(FakeDDP).method, 'runs.insert');
+    assert.equal(lastCall(FakeDDP).args[0], 'k1');
+    assert.deepEqual(lastCall(FakeDDP).args[1], { tag: 'mytag', metrics: {} });
     assert.ok(FakeDDP.wasConnected());
     assert.ok(FakeDDP.wasDisconnected());
     assert.ok(logs.some((l) => l.includes('Document ID: doc-id-123')));
@@ -86,7 +114,7 @@ describe('runPush', () => {
 
   test('missing --result flag exits 1 with usage message', async () => {
     await assert.rejects(
-      () => runPush({ values: {}, config: {} }),
+      () => runPush({ values: {}, config: config() }),
       (err) => err instanceof ExitError && err.code === 1
     );
     assert.ok(errors.some((e) => e.includes('Usage: node bench.js push --result')));
@@ -100,20 +128,20 @@ describe('runPush', () => {
     // Config wins when no flag.
     await runPush({
       values: { result: '/x' },
-      config: { dashboardUrl: 'ws://from-config/websocket' },
+      config: config({ dashboardUrl: 'ws://from-config/websocket' }),
     });
-    assert.equal(FakeDDP.lastInstance.opts.endpoint, 'ws://from-config/websocket');
+    assert.equal(lastInstance(FakeDDP).opts.endpoint, 'ws://from-config/websocket');
 
     // Flag wins over config.
     await runPush({
       values: { result: '/x', url: 'ws://from-flag/websocket' },
-      config: { dashboardUrl: 'ws://from-config/websocket' },
+      config: config({ dashboardUrl: 'ws://from-config/websocket' }),
     });
-    assert.equal(FakeDDP.lastInstance.opts.endpoint, 'ws://from-flag/websocket');
+    assert.equal(lastInstance(FakeDDP).opts.endpoint, 'ws://from-flag/websocket');
 
     // Default when nothing set.
-    await runPush({ values: { result: '/x' }, config: {} });
-    assert.equal(FakeDDP.lastInstance.opts.endpoint, 'ws://localhost:4000/websocket');
+    await runPush({ values: { result: '/x' }, config: config({ dashboardUrl: '' }) });
+    assert.equal(lastInstance(FakeDDP).opts.endpoint, 'ws://localhost:4000/websocket');
   });
 
   test('API-key fallback chain: flag > env.BENCH_API_KEY > config.dashboardApiKey > default', async () => {
@@ -124,25 +152,25 @@ describe('runPush', () => {
     process.env.BENCH_API_KEY = 'k-from-env';
     await runPush({
       values: { result: '/x' },
-      config: { dashboardApiKey: 'k-from-config' },
+      config: config({ dashboardApiKey: 'k-from-config' }),
     });
-    assert.equal(FakeDDP.calls.at(-1).args[0], 'k-from-env');
+    assert.equal(lastCall(FakeDDP).args[0], 'k-from-env');
 
     await runPush({
       values: { result: '/x', key: 'k-from-flag' },
-      config: { dashboardApiKey: 'k-from-config' },
+      config: config({ dashboardApiKey: 'k-from-config' }),
     });
-    assert.equal(FakeDDP.calls.at(-1).args[0], 'k-from-flag');
+    assert.equal(lastCall(FakeDDP).args[0], 'k-from-flag');
 
     delete process.env.BENCH_API_KEY;
     await runPush({
       values: { result: '/x' },
-      config: { dashboardApiKey: 'k-from-config' },
+      config: config({ dashboardApiKey: 'k-from-config' }),
     });
-    assert.equal(FakeDDP.calls.at(-1).args[0], 'k-from-config');
+    assert.equal(lastCall(FakeDDP).args[0], 'k-from-config');
 
-    await runPush({ values: { result: '/x' }, config: {} });
-    assert.equal(FakeDDP.calls.at(-1).args[0], 'dev-bench-key-change-in-prod');
+    await runPush({ values: { result: '/x' }, config: config({ dashboardApiKey: '' }) });
+    assert.equal(lastCall(FakeDDP).args[0], 'dev-bench-key-change-in-prod');
   });
 
   test('DDP call throwing exits 1 with "Push failed" message', async () => {
@@ -153,7 +181,7 @@ describe('runPush', () => {
     mock.method(io, 'readFileSync', () => '{}');
 
     await assert.rejects(
-      () => runPush({ values: { result: '/x', url: 'ws://x' }, config: {} }),
+      () => runPush({ values: { result: '/x', url: 'ws://x' }, config: config() }),
       (err) => err instanceof ExitError && err.code === 1
     );
     assert.ok(errors.some((e) => e.includes('Push failed:') && e.includes('boom auth fail') && e.includes('ws://x')));
@@ -169,11 +197,11 @@ describe('runBaseline', () => {
 
     await runBaseline({
       values: { scenario: 'reactive-light', 'run-id': 'abc123', url: 'ws://x', key: 'k' },
-      config: {},
+      config: config(),
     });
 
-    assert.equal(FakeDDP.calls[0].method, 'baselines.set');
-    assert.deepEqual(FakeDDP.calls[0].args, ['k', 'reactive-light', 'abc123']);
+    assert.equal(lastCall(FakeDDP).method, 'baselines.set');
+    assert.deepEqual(lastCall(FakeDDP).args, ['k', 'reactive-light', 'abc123']);
     assert.ok(FakeDDP.wasDisconnected());
     assert.ok(logs.some((l) => l.includes('Baseline set successfully')));
   });
@@ -183,14 +211,14 @@ describe('runBaseline', () => {
     mock.method(io, 'SimpleDDP', FakeDDP);
     await runBaseline({
       values: { scenario: 's', runId: 'xyz', url: 'ws://x', key: 'k' },
-      config: {},
+      config: config(),
     });
-    assert.equal(FakeDDP.calls[0].args[2], 'xyz');
+    assert.equal(lastCall(FakeDDP).args[2], 'xyz');
   });
 
   test('missing --scenario exits 1 with usage', async () => {
     await assert.rejects(
-      () => runBaseline({ values: { 'run-id': 'x' }, config: {} }),
+      () => runBaseline({ values: { 'run-id': 'x' }, config: config() }),
       (err) => err instanceof ExitError && err.code === 1
     );
     assert.ok(errors.some((e) => e.includes('Usage: node bench.js baseline --scenario')));
@@ -198,7 +226,7 @@ describe('runBaseline', () => {
 
   test('missing --run-id exits 1 with usage', async () => {
     await assert.rejects(
-      () => runBaseline({ values: { scenario: 's' }, config: {} }),
+      () => runBaseline({ values: { scenario: 's' }, config: config() }),
       (err) => err instanceof ExitError && err.code === 1
     );
     assert.ok(errors.some((e) => e.includes('--scenario <name> --run-id <id>')));
@@ -213,7 +241,7 @@ describe('runBaseline', () => {
     await assert.rejects(
       () => runBaseline({
         values: { scenario: 's', 'run-id': 'r', url: 'ws://x', key: 'k' },
-        config: {},
+        config: config(),
       }),
       (err) => err instanceof ExitError && err.code === 1
     );

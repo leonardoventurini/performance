@@ -8,9 +8,36 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { buildResult } from '../../reporters/json-reporter.js';
+import type { BenchmarkResult, CollectorResult } from '../../reporters/json-reporter.js';
 
 const FIXTURES = path.join(import.meta.dirname, 'fixtures');
-const load = (name) => JSON.parse(fs.readFileSync(path.join(FIXTURES, name), 'utf8'));
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function assertBenchmarkResult(value: unknown): asserts value is BenchmarkResult {
+  assert.ok(isRecord(value));
+  assert.equal(typeof value.timestamp, 'string');
+  assert.equal(typeof value.tag, 'string');
+  assert.ok(isRecord(value.meteor));
+  assert.equal(typeof value.meteor.version, 'string');
+  assert.equal(typeof value.meteor.sha, 'string');
+  assert.ok(isRecord(value.runtime));
+  assert.equal(typeof value.scenario, 'string');
+  assert.equal(typeof value.app, 'string');
+  assert.equal(typeof value.wall_clock_ms, 'number');
+  assert.ok(isRecord(value.metrics));
+  for (const metric of Object.values(value.metrics)) {
+    assert.ok(isRecord(metric));
+    assert.equal(typeof metric.metric, 'string');
+  }
+}
+
+const load = (name: string): BenchmarkResult => {
+  const parsed: unknown = JSON.parse(fs.readFileSync(path.join(FIXTURES, name), 'utf8'));
+  assertBenchmarkResult(parsed);
+  return parsed;
+};
 
 const METEOR = { version: 'release/3.5', sha: 'abc1234' };
 
@@ -40,7 +67,7 @@ describe('buildResult — runtime field (commit 16 addition)', () => {
     });
     assert.equal(result.runtime.observer_driver, 'changeStreams');
     assert.equal(result.meteor.sha, METEOR.sha);
-    assert.equal(result.meteor.runtime, undefined, 'runtime is NOT nested under meteor');
+    assert.equal('runtime' in result.meteor, false, 'runtime is NOT nested under meteor');
   });
 });
 
@@ -94,10 +121,10 @@ describe('buildResult — top-level shape', () => {
 
   test('throws if meteor info is omitted (no silent "unknown" fallback)', () => {
     assert.throws(
-      () => buildResult({
+      () => Reflect.apply(buildResult, undefined, [{
         scenario: 's', app: 'a', tag: 't',
         collectorResults: [], wallClockMs: 0,
-      }),
+      }]),
       /meteor/,
     );
   });
@@ -106,7 +133,7 @@ describe('buildResult — top-level shape', () => {
 describe('buildResult — tag fallback', () => {
   test('falls back to meteor.version when tag is undefined', () => {
     const result = buildResult({
-      scenario: 's', app: 'a', tag: undefined,
+      scenario: 's', app: 'a',
       meteor: { version: 'release/3.5', sha: 'abc1234' },
       collectorResults: [], wallClockMs: 0,
     });
@@ -153,7 +180,7 @@ describe('buildResult — metrics keying', () => {
       app: baseline.app,
       tag: baseline.tag,
       meteor: baseline.meteor,
-      collectorResults: Object.values(baseline.metrics),
+      collectorResults: Object.values(baseline.metrics) satisfies readonly CollectorResult[],
       wallClockMs: baseline.wall_clock_ms,
     });
     assert.deepEqual(
@@ -176,6 +203,6 @@ describe('buildResult — metrics keying', () => {
       ],
       wallClockMs: 0,
     });
-    assert.equal(result.metrics.gc.count, 99);
+    assert.equal(result.metrics.gc?.count, 99);
   });
 });

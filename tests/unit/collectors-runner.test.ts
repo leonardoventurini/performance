@@ -1,6 +1,6 @@
 // startCollectors / stopCollectors lifecycle in runner/collectors.js.
 //
-// findPid (from meteor-process.js) is exercised transitively via io.execFileSync
+// findPid (from meteor-process.ts) is exercised transitively via io.execFileSync
 // — that's the underlying pgrep call. By stubbing io.execFileSync we control
 // which pids are "found", which controls which process-monitor children get
 // spawned. spawn itself is stubbed via io.spawn.
@@ -15,7 +15,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { EventEmitter } from 'node:events';
+import { ChildProcess } from 'node:child_process';
+import { PassThrough } from 'node:stream';
 import { io } from '../../runner/_io.js';
 import {
   drainPostStopDriverFallback,
@@ -23,7 +24,7 @@ import {
   stopCollectors,
 } from '../../runner/collectors.js';
 
-let tmpDir;
+let tmpDir = '';
 
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bench-collectors-'));
@@ -40,21 +41,20 @@ afterEach(() => {
 // .on('data', ...) — we use a real EventEmitter so we can emit synthetic
 // data lines that the collector code can accumulate.
 function makeFakeChild() {
-  const stdout = new EventEmitter();
-  const stderr = new EventEmitter();
-  return {
-    stdout, stderr,
-    kill: () => {},
-    _emitStdout: (chunk) => stdout.emit('data', chunk),
-  };
+  const proc = new ChildProcess();
+  const stdout = new PassThrough();
+  const stderr = new PassThrough();
+  proc.stdout = stdout;
+  proc.stderr = stderr;
+  return { proc, stdout, stderr, emitStdout: (chunk: string): void => { stdout.emit('data', chunk); } };
 }
 
 // Stub findPid by stubbing execFileSync. Map of pattern → pid output.
 // pgrep('-f', pattern) → throws (no match) OR returns 'pidN\n'.
-function stubPgrep(pidByPattern) {
-  mock.method(io, 'execFileSync', (cmd, args) => {
+function stubPgrep(pidByPattern: Readonly<Record<string, string>>): void {
+  mock.method(io, 'execFileSync', (cmd: string, args: readonly string[]) => {
     if (cmd !== 'pgrep') throw new Error(`unexpected execFileSync: ${cmd}`);
-    const [, pattern] = args;
+    const pattern = args[1] ?? '';
     if (pidByPattern[pattern] === undefined) throw new Error('no match');
     return pidByPattern[pattern] + '\n';
   });
@@ -66,50 +66,50 @@ describe('startCollectors', () => {
       'tasks-3.x/.meteor/local/build/main.js': '11111',
       'tasks-3.x/.meteor/local/db': '22222',
     });
-    const spawnCalls = [];
-    mock.method(io, 'spawn', (cmd, args) => {
+    const spawnCalls: Array<{ readonly cmd: string; readonly args: readonly string[] }> = [];
+    mock.method(io, 'spawn', (cmd: string, args: readonly string[]) => {
       spawnCalls.push({ cmd, args });
-      return makeFakeChild();
+      return makeFakeChild().proc;
     });
     const { procs } = startCollectors({ appName: 'tasks-3.x', gcOutputPath: '/x' });
     assert.equal(procs.length, 2);
     assert.equal(spawnCalls.length, 2);
-    assert.equal(spawnCalls[0].cmd, 'node');
+    assert.equal(spawnCalls[0]?.cmd, 'node');
     // process-monitor.js path + pid + name
-    assert.match(spawnCalls[0].args[0], /process-monitor\.js$/);
-    assert.equal(spawnCalls[0].args[1], '11111');
-    assert.equal(spawnCalls[0].args[2], 'APP');
-    assert.equal(spawnCalls[1].args[1], '22222');
-    assert.equal(spawnCalls[1].args[2], 'DB');
+    assert.match(spawnCalls[0]?.args[0] ?? '', /process-monitor\.js$/);
+    assert.equal(spawnCalls[0]?.args[1], '11111');
+    assert.equal(spawnCalls[0]?.args[2], 'APP');
+    assert.equal(spawnCalls[1]?.args[1], '22222');
+    assert.equal(spawnCalls[1]?.args[2], 'DB');
   });
 
   test('skips APP collector cleanly when APP pid is missing (logs, does not crash)', () => {
     stubPgrep({ 'tasks-3.x/.meteor/local/db': '22222' });
-    mock.method(io, 'spawn', () => makeFakeChild());
-    const { procs } = startCollectors({ appName: 'tasks-3.x', gcOutputPath: null });
+    mock.method(io, 'spawn', () => makeFakeChild().proc);
+    const { procs } = startCollectors({ appName: 'tasks-3.x' });
     assert.equal(procs.length, 1);
-    assert.equal(procs[0].name, 'DB');
+    assert.equal(procs[0]?.name, 'DB');
   });
 
   test('skips DB collector cleanly when DB pid is missing', () => {
     stubPgrep({ 'tasks-3.x/.meteor/local/build/main.js': '11111' });
-    mock.method(io, 'spawn', () => makeFakeChild());
-    const { procs } = startCollectors({ appName: 'tasks-3.x', gcOutputPath: null });
+    mock.method(io, 'spawn', () => makeFakeChild().proc);
+    const { procs } = startCollectors({ appName: 'tasks-3.x' });
     assert.equal(procs.length, 1);
-    assert.equal(procs[0].name, 'APP');
+    assert.equal(procs[0]?.name, 'APP');
   });
 
   test('returns empty procs when neither pid is found (no crash)', () => {
     stubPgrep({});
-    const spawnSpy = mock.method(io, 'spawn', () => makeFakeChild());
-    const { procs } = startCollectors({ appName: 'tasks-3.x', gcOutputPath: null });
+    const spawnSpy = mock.method(io, 'spawn', () => makeFakeChild().proc);
+    const { procs } = startCollectors({ appName: 'tasks-3.x' });
     assert.equal(procs.length, 0);
     assert.equal(spawnSpy.mock.callCount(), 0);
   });
 
   test('passes gcOutputPath through unchanged for stopCollectors to consume later', () => {
     stubPgrep({});
-    mock.method(io, 'spawn', () => makeFakeChild());
+    mock.method(io, 'spawn', () => makeFakeChild().proc);
     const handle = startCollectors({ appName: 'x', gcOutputPath: '/tmp/gc-output.json' });
     assert.equal(handle.gcOutputPath, '/tmp/gc-output.json');
   });
@@ -119,40 +119,42 @@ describe('stopCollectors', () => {
   test('SIGTERMs each proc, parses stdout JSON, returns dashboard-keyed results', async () => {
     const appChild = makeFakeChild();
     const dbChild = makeFakeChild();
-    let killedSignals = [];
-    appChild.kill = (sig) => killedSignals.push(['APP', sig]);
-    dbChild.kill = (sig) => killedSignals.push(['DB', sig]);
+    const killedSignals: Array<[string, NodeJS.Signals | number | undefined]> = [];
+    appChild.proc.kill = (sig?: NodeJS.Signals | number): boolean => { killedSignals.push(['APP', sig]); return true; };
+    dbChild.proc.kill = (sig?: NodeJS.Signals | number): boolean => { killedSignals.push(['DB', sig]); return true; };
 
     // Simulate each child writing JSON to stdout. Emit BEFORE stopCollectors so
     // the data accumulates in the closure before SIGTERM + drain.
-    appChild._emitStdout(JSON.stringify({
+    appChild.emitStdout(JSON.stringify({
       metric: 'app_resources', name: 'APP', cpu: { avg: 20 }, memory: { avg_mb: 140 },
     }));
-    dbChild._emitStdout(JSON.stringify({
+    dbChild.emitStdout(JSON.stringify({
       metric: 'db_resources', name: 'DB', cpu: { avg: 4 }, memory: { avg_mb: 90 },
     }));
 
     const handle = {
       procs: [
-        { proc: appChild, name: 'APP', getResult: () => appChild.stdout.listeners('data').length > 0 ? '' : '' },
-        { proc: dbChild, name: 'DB', getResult: () => '' },
+        { proc: appChild.proc, name: 'APP', getResult: () => appChild.stdout.listeners('data').length > 0 ? '' : '' },
+        { proc: dbChild.proc, name: 'DB', getResult: () => '' },
       ],
-      gcOutputPath: null,
     };
     // Override getResult to return the accumulated stdout. The collector wires
     // its own getResult inside spawnProcessMonitor; here we mimic that.
     let appBuf = '';
     let dbBuf = '';
-    appChild.stdout.on('data', (d) => { appBuf += d; });
-    dbChild.stdout.on('data', (d) => { dbBuf += d; });
-    appChild._emitStdout(JSON.stringify({
+    appChild.stdout.on('data', (d: Buffer) => { appBuf += d.toString(); });
+    dbChild.stdout.on('data', (d: Buffer) => { dbBuf += d.toString(); });
+    appChild.emitStdout(JSON.stringify({
       metric: 'app_resources', name: 'APP', cpu: { avg: 20 }, memory: { avg_mb: 140 },
     }));
-    dbChild._emitStdout(JSON.stringify({
+    dbChild.emitStdout(JSON.stringify({
       metric: 'db_resources', name: 'DB', cpu: { avg: 4 }, memory: { avg_mb: 90 },
     }));
-    handle.procs[0].getResult = () => appBuf;
-    handle.procs[1].getResult = () => dbBuf;
+    const appHandle = handle.procs[0];
+    const dbHandle = handle.procs[1];
+    assert.ok(appHandle && dbHandle);
+    appHandle.getResult = () => appBuf;
+    dbHandle.getResult = () => dbBuf;
 
     const results = await stopCollectors(handle);
     assert.deepEqual(killedSignals, [['APP', 'SIGTERM'], ['DB', 'SIGTERM']]);
@@ -165,28 +167,26 @@ describe('stopCollectors', () => {
     const dbChild = makeFakeChild();
     let appBuf = '';
     let dbBuf = '';
-    appChild.stdout.on('data', (d) => { appBuf += d; });
-    dbChild.stdout.on('data', (d) => { dbBuf += d; });
-    appChild._emitStdout('{this is not json{{{');
-    dbChild._emitStdout(JSON.stringify({ metric: 'db_resources', name: 'DB' }));
+    appChild.stdout.on('data', (d: Buffer) => { appBuf += d.toString(); });
+    dbChild.stdout.on('data', (d: Buffer) => { dbBuf += d.toString(); });
+    appChild.emitStdout('{this is not json{{{');
+    dbChild.emitStdout(JSON.stringify({ metric: 'db_resources', name: 'DB' }));
 
     const handle = {
       procs: [
-        { proc: appChild, name: 'APP', getResult: () => appBuf },
-        { proc: dbChild, name: 'DB', getResult: () => dbBuf },
+        { proc: appChild.proc, name: 'APP', getResult: () => appBuf },
+        { proc: dbChild.proc, name: 'DB', getResult: () => dbBuf },
       ],
-      gcOutputPath: null,
     };
     const results = await stopCollectors(handle);
     assert.equal(results.length, 1);
-    assert.equal(results[0].metric, 'db_resources');
+    assert.equal(results[0]?.metric, 'db_resources');
   });
 
   test('skips collectors whose stdout buffer is empty (no JSON to parse)', async () => {
     const appChild = makeFakeChild();
     const handle = {
-      procs: [{ proc: appChild, name: 'APP', getResult: () => '' }],
-      gcOutputPath: null,
+      procs: [{ proc: appChild.proc, name: 'APP', getResult: () => '' }],
     };
     const results = await stopCollectors(handle);
     assert.equal(results.length, 0);
@@ -215,7 +215,7 @@ describe('stopCollectors', () => {
   });
 
   test('no-crash when gcOutputPath is null (cold-start scenarios pass null)', async () => {
-    const results = await stopCollectors({ procs: [], gcOutputPath: null });
+    const results = await stopCollectors({ procs: [] });
     assert.deepEqual(results, []);
   });
 
@@ -224,15 +224,15 @@ describe('stopCollectors', () => {
     fs.writeFileSync(gcPath, '{not-json');
     const appChild = makeFakeChild();
     let appBuf = '';
-    appChild.stdout.on('data', (d) => { appBuf += d; });
-    appChild._emitStdout(JSON.stringify({ metric: 'app_resources', name: 'APP' }));
+    appChild.stdout.on('data', (d: Buffer) => { appBuf += d.toString(); });
+    appChild.emitStdout(JSON.stringify({ metric: 'app_resources', name: 'APP' }));
     const handle = {
-      procs: [{ proc: appChild, name: 'APP', getResult: () => appBuf }],
+      procs: [{ proc: appChild.proc, name: 'APP', getResult: () => appBuf }],
       gcOutputPath: gcPath,
     };
     const results = await stopCollectors(handle);
     assert.equal(results.length, 1);
-    assert.equal(results[0].metric, 'app_resources');
+    assert.equal(results[0]?.metric, 'app_resources');
   });
 
   test('result metrics preserve dashboard-contract keys (app_resources / db_resources / gc)', async () => {
@@ -243,10 +243,10 @@ describe('stopCollectors', () => {
     }));
     const appChild = makeFakeChild();
     let appBuf = '';
-    appChild.stdout.on('data', (d) => { appBuf += d; });
-    appChild._emitStdout(JSON.stringify({ metric: 'app_resources' }));
+    appChild.stdout.on('data', (d: Buffer) => { appBuf += d.toString(); });
+    appChild.emitStdout(JSON.stringify({ metric: 'app_resources' }));
     const handle = {
-      procs: [{ proc: appChild, name: 'APP', getResult: () => appBuf }],
+      procs: [{ proc: appChild.proc, name: 'APP', getResult: () => appBuf }],
       gcOutputPath: gcPath,
     };
     const results = await stopCollectors(handle);

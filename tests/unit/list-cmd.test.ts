@@ -5,9 +5,11 @@
 import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { runList } from '../../cli/list.js';
+import { createBenchmarkConfig } from '../../bench.config.js';
+import type { BenchmarkConfig, MeteorSource } from '../../lib/benchmark-types.js';
 
-let logs;
-let origLog;
+let logs: string[] = [];
+let origLog: typeof console.log;
 
 beforeEach(() => {
   logs = [];
@@ -19,28 +21,29 @@ afterEach(() => {
   console.log = origLog;
 });
 
-const SAMPLE_CONFIG = {
+const SAMPLE_CONFIG: BenchmarkConfig = {
+  ...createBenchmarkConfig(import.meta.dirname, {}),
   scenarios: {
-    'reactive-light': { driver: 'artillery-playwright', description: 'Light reactive CRUD with 30 browser VUs' },
-    'fanout-heavy': { driver: 'script', description: 'Reactive fanout: 200 subscribers' },
+    'reactive-light': { driver: 'artillery-playwright', config: 'artillery/test.yml', description: 'Light reactive CRUD with 30 browser VUs' },
+    'fanout-heavy': { driver: 'script', script: 'tests/fanout-bench.js', description: 'Reactive fanout: 200 subscribers' },
     'cold-start': { driver: 'cli', description: 'App startup time from clean state' },
   },
   apps: {
-    'tasks-3.x': { description: 'Meteor 3 React task app' },
+    'tasks-3.x': { path: 'apps/tasks-3.x', description: 'Meteor 3 React task app' },
   },
 };
 
-const SYSTEM_SOURCE = {
+const SYSTEM_SOURCE: MeteorSource = {
   mode: 'system', meteorCmd: 'meteor', releaseArg: null,
   version: 'system', sha: 'unknown', checkoutPath: null,
 };
 
-const CHECKOUT_SOURCE = {
+const CHECKOUT_SOURCE: MeteorSource = {
   mode: 'checkout', meteorCmd: '/Users/me/meteor/meteor', releaseArg: null,
   version: 'release/3.5', sha: 'abc1234', checkoutPath: '/Users/me/meteor',
 };
 
-const RELEASE_SOURCE = {
+const RELEASE_SOURCE: MeteorSource = {
   mode: 'release', meteorCmd: 'meteor', releaseArg: '--release=3.1.2',
   version: '3.1.2', sha: 'release:3.1.2', checkoutPath: null,
 };
@@ -103,7 +106,7 @@ describe('runList — Meteor source line', () => {
 
 describe('runList — empty configs', () => {
   test('empty scenarios + apps still prints headers and source line', () => {
-    runList({ config: { scenarios: {}, apps: {} }, source: SYSTEM_SOURCE });
+    runList({ config: { ...SAMPLE_CONFIG, scenarios: {}, apps: {} }, source: SYSTEM_SOURCE });
     const out = logs.join('\n');
     assert.ok(out.includes('Available scenarios:'));
     assert.ok(out.includes('Available apps:'));

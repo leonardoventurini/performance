@@ -2,10 +2,13 @@
 // go through the `io` object exported from runner/_io.js, so tests stub them
 // with mock.method at that single seam.
 
-import { test, describe, beforeEach, afterEach, mock } from 'node:test';
+import { test, describe, afterEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
+import { ChildProcess } from 'node:child_process';
+import { PassThrough } from 'node:stream';
 import { io } from '../../runner/_io.js';
+import type { MeteorSource } from '../../lib/benchmark-types.js';
 import {
   ensureAppDeps,
   resetMeteorApp,
@@ -16,8 +19,15 @@ import {
 
 afterEach(() => mock.restoreAll());
 
+const SYSTEM_SOURCE: MeteorSource = { mode: 'system', meteorCmd: 'meteor', releaseArg: null, checkoutPath: null, version: 'system', sha: 'unknown' };
+const CHECKOUT_SOURCE: MeteorSource = { mode: 'checkout', meteorCmd: '/checkout/meteor', releaseArg: null, checkoutPath: '/checkout', version: 'test', sha: 'test' };
+const RELEASE_SOURCE: MeteorSource = { mode: 'release', meteorCmd: 'meteor', releaseArg: '--release=3.1.2', checkoutPath: null, version: '3.1.2', sha: 'release:3.1.2' };
+interface ExecCall { readonly cmd: string; readonly args: readonly string[]; readonly opts: Record<string, unknown> | undefined }
+interface SpawnOptions { readonly cwd?: string; readonly env?: NodeJS.ProcessEnv }
+interface SpawnCall { readonly cmd: string; readonly args: readonly string[]; readonly opts: SpawnOptions }
+
 describe('ensureAppDeps', () => {
-  const source = { meteorCmd: '/checkout/meteor', releaseArg: null };
+  const source = CHECKOUT_SOURCE;
 
   test('skips Meteor npm when node_modules already exists', () => {
     mock.method(io, 'existsSync', () => true);
@@ -28,39 +38,37 @@ describe('ensureAppDeps', () => {
 
   test('runs meteor npm ci via execFileSync when node_modules is missing', () => {
     mock.method(io, 'existsSync', () => false);
-    const calls = [];
-    mock.method(io, 'execFileSync', (cmd, args, opts) => {
+    const calls: ExecCall[] = [];
+    mock.method(io, 'execFileSync', (cmd: string, args: readonly string[], opts?: Record<string, unknown>) => {
       calls.push({ cmd, args, opts });
       return '';
     });
     ensureAppDeps(source, '/path/to/app');
     assert.equal(calls.length, 1);
-    assert.equal(calls[0].cmd, '/checkout/meteor');
-    assert.deepEqual(calls[0].args, ['npm', 'ci']);
-    assert.equal(calls[0].opts.cwd, '/path/to/app');
-    assert.equal(calls[0].opts.stdio, 'inherit');
+    assert.equal(calls[0]?.cmd, '/checkout/meteor');
+    assert.deepEqual(calls[0]?.args, ['npm', 'ci']);
+    assert.equal(calls[0]?.opts?.cwd, '/path/to/app');
+    assert.equal(calls[0]?.opts?.stdio, 'inherit');
   });
 
   test('pins Meteor npm to the requested published release', () => {
     mock.method(io, 'existsSync', () => false);
-    const calls = [];
-    mock.method(io, 'execFileSync', (cmd, args) => {
-      calls.push({ cmd, args });
+    const calls: ExecCall[] = [];
+    mock.method(io, 'execFileSync', (cmd: string, args: readonly string[]) => {
+      calls.push({ cmd, args, opts: undefined });
       return '';
     });
-    ensureAppDeps({
-      meteorCmd: 'meteor',
-      releaseArg: '--release=3.5.1-beta.0',
-    }, '/path/to/app');
+    ensureAppDeps({ ...RELEASE_SOURCE, releaseArg: '--release=3.5.1-beta.0', version: '3.5.1-beta.0', sha: 'release:3.5.1-beta.0' }, '/path/to/app');
     assert.deepEqual(calls[0], {
       cmd: 'meteor',
       args: ['--release=3.5.1-beta.0', 'npm', 'ci'],
+      opts: undefined,
     });
   });
 
   test('checks for the node_modules path inside appPath', () => {
-    const checked = [];
-    mock.method(io, 'existsSync', (p) => { checked.push(p); return true; });
+    const checked: string[] = [];
+    mock.method(io, 'existsSync', (p: string) => { checked.push(p); return true; });
     ensureAppDeps(source, '/my/app');
     assert.equal(checked[0], path.join('/my/app', 'node_modules'));
   });
@@ -68,68 +76,62 @@ describe('ensureAppDeps', () => {
 
 describe('resetMeteorApp', () => {
   test('spawns meteorCmd with ["reset"] and appPath as cwd (checkout/system source)', () => {
-    const calls = [];
-    mock.method(io, 'execFileSync', (cmd, args, opts) => {
+    const calls: ExecCall[] = [];
+    mock.method(io, 'execFileSync', (cmd: string, args: readonly string[], opts?: Record<string, unknown>) => {
       calls.push({ cmd, args, opts });
       return '';
     });
     resetMeteorApp(
-      { mode: 'checkout', meteorCmd: '/path/to/meteor', releaseArg: null },
+      { ...CHECKOUT_SOURCE, meteorCmd: '/path/to/meteor' },
       '/path/to/app'
     );
     assert.equal(calls.length, 1);
-    assert.equal(calls[0].cmd, '/path/to/meteor');
-    assert.deepEqual(calls[0].args, ['reset']);
-    assert.equal(calls[0].opts.cwd, '/path/to/app');
-    assert.equal(calls[0].opts.stdio, 'inherit');
+    assert.equal(calls[0]?.cmd, '/path/to/meteor');
+    assert.deepEqual(calls[0]?.args, ['reset']);
+    assert.equal(calls[0]?.opts?.cwd, '/path/to/app');
+    assert.equal(calls[0]?.opts?.stdio, 'inherit');
   });
 
   test('prepends --release=<version> when source is release-mode', () => {
-    const calls = [];
-    mock.method(io, 'execFileSync', (cmd, args) => { calls.push({ cmd, args }); return ''; });
+    const calls: ExecCall[] = [];
+    mock.method(io, 'execFileSync', (cmd: string, args: readonly string[]) => { calls.push({ cmd, args, opts: undefined }); return ''; });
     resetMeteorApp(
-      { mode: 'release', meteorCmd: 'meteor', releaseArg: '--release=3.1.2' },
+      RELEASE_SOURCE,
       '/some/app'
     );
-    assert.equal(calls[0].cmd, 'meteor');
-    assert.deepEqual(calls[0].args, ['--release=3.1.2', 'reset']);
+    assert.equal(calls[0]?.cmd, 'meteor');
+    assert.deepEqual(calls[0]?.args, ['--release=3.1.2', 'reset']);
   });
 });
 
 describe('startMeteorApp', () => {
   // Tiny event-emitter that records the `data` handler so tests can simulate
   // the spawned process emitting stderr/stdout chunks.
-  function fakeStream() {
-    const handlers = [];
-    return {
-      on: (evt, fn) => { if (evt === 'data') handlers.push(fn); },
-      emit: (chunk) => handlers.forEach((fn) => fn(chunk)),
-    };
-  }
-  function fakeProc({ stdout, stderr } = {}) {
-    return {
-      pid: 12345,
-      stdout: stdout || { on: () => {} },
-      stderr: stderr || { on: () => {} },
-      kill: () => {},
-    };
+  function fakeStream(): PassThrough { return new PassThrough(); }
+  function fakeProc({ stdout = fakeStream(), stderr = fakeStream() }: { readonly stdout?: PassThrough; readonly stderr?: PassThrough } = {}): ChildProcess {
+    const proc = new ChildProcess();
+    Object.defineProperty(proc, 'pid', { value: 12345 });
+    proc.stdout = stdout;
+    proc.stderr = stderr;
+    return proc;
   }
 
   test('spawns meteorCmd with run+port argv and returns the proc handle', () => {
-    let captured;
-    mock.method(io, 'spawn', (cmd, args, opts) => {
+    let captured: SpawnCall | undefined;
+    mock.method(io, 'spawn', (cmd: string, args: readonly string[], opts: SpawnOptions) => {
       captured = { cmd, args, opts };
       return fakeProc();
     });
     const { proc, getRuntimeInfo } = startMeteorApp({
-      source: { mode: 'checkout', meteorCmd: '/path/to/meteor', releaseArg: null },
+      source: { ...CHECKOUT_SOURCE, meteorCmd: '/path/to/meteor' },
       appPath: '/my/app',
       port: 3000,
     });
+    assert.ok(captured);
     assert.equal(captured.cmd, '/path/to/meteor');
     assert.deepEqual(captured.args, ['run', '--port', '3000']);
     assert.equal(captured.opts.cwd, '/my/app');
-    assert.equal(captured.opts.env.METEOR_NO_DEPRECATION, 'true');
+    assert.equal(captured.opts.env?.METEOR_NO_DEPRECATION, 'true');
     assert.equal(proc.pid, 12345);
     assert.equal(typeof getRuntimeInfo, 'function');
     assert.deepEqual(getRuntimeInfo(), {});
@@ -139,7 +141,7 @@ describe('startMeteorApp', () => {
     const stderr = fakeStream();
     mock.method(io, 'spawn', () => fakeProc({ stderr }));
     const { getRuntimeInfo } = startMeteorApp({
-      source: { mode: 'system', meteorCmd: 'meteor', releaseArg: null },
+      source: SYSTEM_SOURCE,
       appPath: '/app', port: 3000,
     });
     stderr.emit('=> Meteor server running\n');
@@ -152,7 +154,7 @@ describe('startMeteorApp', () => {
     const stdout = fakeStream();
     mock.method(io, 'spawn', () => fakeProc({ stdout }));
     const { getRuntimeInfo } = startMeteorApp({
-      source: { mode: 'system', meteorCmd: 'meteor', releaseArg: null },
+      source: SYSTEM_SOURCE,
       appPath: '/app', port: 3000,
     });
     stdout.emit('[runtime-info] observer_driver=changeStreams\n');
@@ -160,65 +162,68 @@ describe('startMeteorApp', () => {
   });
 
   test('prepends --release arg when source is release-mode', () => {
-    let captured;
-    mock.method(io, 'spawn', (cmd, args, opts) => { captured = { cmd, args }; return fakeProc(); });
+    let capturedArgs: readonly string[] = [];
+    mock.method(io, 'spawn', (_cmd: string, args: readonly string[]) => { capturedArgs = args; return fakeProc(); });
     startMeteorApp({
-      source: { mode: 'release', meteorCmd: 'meteor', releaseArg: '--release=3.1.2' },
+      source: RELEASE_SOURCE,
       appPath: '/app', port: 3000,
     });
-    assert.deepEqual(captured.args, ['--release=3.1.2', 'run', '--port', '3000']);
+    assert.deepEqual(capturedArgs, ['--release=3.1.2', 'run', '--port', '3000']);
   });
 
   test('sets SERVER_NODE_OPTIONS + GC_MONITOR_OUTPUT when gcMonitorPath + gcOutputPath provided', () => {
-    let captured;
-    mock.method(io, 'spawn', (cmd, args, opts) => { captured = opts; return fakeProc(); });
+    let captured: SpawnOptions | undefined;
+    mock.method(io, 'spawn', (_cmd: string, _args: readonly string[], opts: SpawnOptions) => { captured = opts; return fakeProc(); });
     startMeteorApp({
-      source: { mode: 'system', meteorCmd: 'meteor', releaseArg: null },
+      source: SYSTEM_SOURCE,
       appPath: '/app',
       port: 3000,
       gcMonitorPath: '/path/to/gc-monitor.cjs',
       gcOutputPath: '/tmp/gc-out.json',
     });
-    assert.equal(captured.env.SERVER_NODE_OPTIONS, '--require /path/to/gc-monitor.cjs');
-    assert.equal(captured.env.GC_MONITOR_OUTPUT, '/tmp/gc-out.json');
+    assert.ok(captured);
+    assert.equal(captured.env?.SERVER_NODE_OPTIONS, '--require /path/to/gc-monitor.cjs');
+    assert.equal(captured.env?.GC_MONITOR_OUTPUT, '/tmp/gc-out.json');
   });
 
   test('omits GC env vars when gcMonitorPath is not provided (cold-start scenarios)', () => {
-    let captured;
-    mock.method(io, 'spawn', (cmd, args, opts) => { captured = opts; return fakeProc(); });
+    let captured: SpawnOptions | undefined;
+    mock.method(io, 'spawn', (_cmd: string, _args: readonly string[], opts: SpawnOptions) => { captured = opts; return fakeProc(); });
     startMeteorApp({
-      source: { mode: 'system', meteorCmd: 'meteor', releaseArg: null },
+      source: SYSTEM_SOURCE,
       appPath: '/app',
       port: 3000,
     });
-    assert.equal(captured.env.SERVER_NODE_OPTIONS, undefined);
-    assert.equal(captured.env.GC_MONITOR_OUTPUT, undefined);
+    assert.ok(captured);
+    assert.equal(captured.env?.SERVER_NODE_OPTIONS, undefined);
+    assert.equal(captured.env?.GC_MONITOR_OUTPUT, undefined);
   });
 
   test('merges caller env into spawn env (custom MONGO_URL etc.)', () => {
-    let captured;
-    mock.method(io, 'spawn', (cmd, args, opts) => { captured = opts; return fakeProc(); });
+    let captured: SpawnOptions | undefined;
+    mock.method(io, 'spawn', (_cmd: string, _args: readonly string[], opts: SpawnOptions) => { captured = opts; return fakeProc(); });
     startMeteorApp({
-      source: { mode: 'system', meteorCmd: 'meteor', releaseArg: null },
+      source: SYSTEM_SOURCE,
       appPath: '/app',
       port: 3000,
       env: { MONGO_URL_TASKS_3_X: 'mongodb://x:27017/y' },
     });
-    assert.equal(captured.env.MONGO_URL_TASKS_3_X, 'mongodb://x:27017/y');
+    assert.ok(captured);
+    assert.equal(captured.env?.MONGO_URL_TASKS_3_X, 'mongodb://x:27017/y');
   });
 });
 
 describe('findPid', () => {
   test('returns the first pid from pgrep -f <pattern>', () => {
-    const calls = [];
-    mock.method(io, 'execFileSync', (cmd, args, opts) => {
-      calls.push({ cmd, args });
+    const calls: ExecCall[] = [];
+    mock.method(io, 'execFileSync', (cmd: string, args: readonly string[]) => {
+      calls.push({ cmd, args, opts: undefined });
       return 'pid1\npid2\npid3\n';
     });
     const pid = findPid('app/.meteor/local/build/main.js');
     assert.equal(pid, 'pid1');
-    assert.equal(calls[0].cmd, 'pgrep');
-    assert.deepEqual(calls[0].args, ['-f', 'app/.meteor/local/build/main.js']);
+    assert.equal(calls[0]?.cmd, 'pgrep');
+    assert.deepEqual(calls[0]?.args, ['-f', 'app/.meteor/local/build/main.js']);
   });
 
   test('returns null when pgrep exits non-zero (no match)', () => {
@@ -237,26 +242,27 @@ describe('findPid', () => {
 
 describe('stopMeteorApp', () => {
   test('SIGTERMs the proc and awaits sleep(graceMs=3000) by default', async () => {
-    const sleeps = [];
-    mock.method(io, 'sleep', (ms) => { sleeps.push(ms); return Promise.resolve(); });
-    let killed;
-    const proc = { kill: (sig) => { killed = sig; } };
+    const sleeps: number[] = [];
+    mock.method(io, 'sleep', (ms: number) => { sleeps.push(ms); return Promise.resolve(); });
+    let killed: NodeJS.Signals | number | undefined;
+    const proc = new ChildProcess();
+    proc.kill = (sig?: NodeJS.Signals | number): boolean => { killed = sig; return true; };
     await stopMeteorApp(proc);
     assert.equal(killed, 'SIGTERM');
     assert.deepEqual(sleeps, [3000]);
   });
 
   test('honors a custom graceMs', async () => {
-    const sleeps = [];
-    mock.method(io, 'sleep', (ms) => { sleeps.push(ms); return Promise.resolve(); });
-    const proc = { kill: () => {} };
+    const sleeps: number[] = [];
+    mock.method(io, 'sleep', (ms: number) => { sleeps.push(ms); return Promise.resolve(); });
+    const proc = new ChildProcess();
     await stopMeteorApp(proc, { graceMs: 500 });
     assert.deepEqual(sleeps, [500]);
   });
 
   test('no-op when proc is null/undefined (defensive)', async () => {
-    const sleeps = [];
-    mock.method(io, 'sleep', (ms) => { sleeps.push(ms); return Promise.resolve(); });
+    const sleeps: number[] = [];
+    mock.method(io, 'sleep', (ms: number) => { sleeps.push(ms); return Promise.resolve(); });
     await stopMeteorApp(null);
     await stopMeteorApp(undefined);
     assert.deepEqual(sleeps, []);

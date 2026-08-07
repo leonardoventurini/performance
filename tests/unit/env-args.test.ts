@@ -35,7 +35,7 @@ test('empty array yields empty object', () => {
 });
 
 test('null input yields empty object', () => {
-  assert.deepEqual(splitEnvArgs(null), {});
+  assert.deepEqual(Reflect.apply(splitEnvArgs, undefined, [null]), {});
 });
 
 test('undefined input yields empty object', () => {

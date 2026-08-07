@@ -59,13 +59,13 @@ describe('waitForApp — happy path', () => {
   });
 
   test('fetch is called with http://localhost:<port>', async () => {
-    const urls = [];
-    mock.method(io, 'fetch', async (url) => {
+    const urls: Array<string | URL | Request> = [];
+    mock.method(io, 'fetch', async (url: string | URL | Request) => {
       urls.push(url);
-      return { ok: true, status: 200 };
+      return new Response(undefined, { status: 200 });
     });
     await waitForApp(4242, { timeoutMs: 5000 });
-    assert.equal(urls[0], 'http://localhost:4242');
+    assert.equal(String(urls[0]), 'http://localhost:4242');
   });
 });
 

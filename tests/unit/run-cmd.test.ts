@@ -17,17 +17,21 @@ import os from 'node:os';
 import path from 'node:path';
 import { drivers } from '../../drivers/index.js';
 import { runBenchmark } from '../../cli/run.js';
+import { createBenchmarkConfig } from '../../bench.config.js';
+import type { BenchmarkConfig, DriverInputs } from '../../lib/benchmark-types.js';
+import type { BenchmarkResult } from '../../reporters/json-reporter.js';
 
 class ExitError extends Error {
-  constructor(code) { super(`process.exit(${code})`); this.code = code; }
+  readonly code: string | number | null | undefined;
+  constructor(code: string | number | null | undefined) { super(`process.exit(${code})`); this.code = code; }
 }
 
-let tmpDir;
-let logs;
-let errors;
-let origLog;
-let origError;
-let origCheckout;
+let tmpDir = '';
+let logs: string[] = [];
+let errors: string[] = [];
+let origLog: typeof console.log;
+let origError: typeof console.error;
+let origCheckout: string | undefined;
 
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'run-cmd-'));
@@ -37,7 +41,7 @@ beforeEach(() => {
   origError = console.error;
   console.log = (msg) => logs.push(String(msg));
   console.error = (msg) => errors.push(String(msg));
-  mock.method(process, 'exit', (code) => { throw new ExitError(code); });
+  mock.method(process, 'exit', (code?: string | number | null) => { throw new ExitError(code); });
   // Don't let env.METEOR_CHECKOUT_PATH from the host leak into resolveMeteorSource
   // (would tip resolution toward checkout mode and force a real git shell-out).
   origCheckout = process.env.METEOR_CHECKOUT_PATH;
@@ -53,8 +57,9 @@ afterEach(() => {
   mock.restoreAll();
 });
 
-function makeConfig(overrides = {}) {
+function makeConfig(overrides: Partial<BenchmarkConfig> = {}): BenchmarkConfig {
   return {
+    ...createBenchmarkConfig(import.meta.dirname, {}),
     defaultApp: 'tasks-3.x',
     apps: {
       'tasks-3.x': { path: '/fake/apps/tasks-3.x', description: 'test app' },
@@ -69,18 +74,19 @@ function makeConfig(overrides = {}) {
     },
     results: {
       dir: path.join(tmpDir, 'results'),
+      baseline: path.join(tmpDir, 'results/baseline.json'),
       history: path.join(tmpDir, 'results/history'),
     },
     ...overrides,
   };
 }
 
-function fakeDriverResult() {
+function fakeDriverResult(): BenchmarkResult {
   return {
     timestamp: new Date().toISOString(),
     tag: 'fake', meteor: { version: 'system', sha: 'unknown' },
     scenario: 'reactive-light', app: 'tasks-3.x',
-    wall_clock_ms: 1234, metrics: {},
+    runtime: {}, wall_clock_ms: 1234, metrics: {},
   };
 }
 
@@ -111,12 +117,13 @@ describe('runBenchmark — argv validation', () => {
     // by default) to reactive-light (always present, matches README). We assert
     // the default name flows through to the dispatched driver rather than
     // bouncing off an "unknown scenario" check.
-    let dispatched = null;
-    mock.method(drivers, 'runArtilleryDriver', async (args) => {
+    let dispatched: DriverInputs | undefined;
+    mock.method(drivers, 'runArtilleryDriver', async (args: DriverInputs) => {
       dispatched = args;
       return fakeDriverResult();
     });
     await runBenchmark({ values: {}, config: makeConfig() });
+    assert.ok(dispatched);
     assert.equal(dispatched.scenarioName, 'reactive-light');
   });
 });
@@ -124,7 +131,7 @@ describe('runBenchmark — argv validation', () => {
 describe('runBenchmark — driver dispatch', () => {
   test('scenario.driver === "artillery-playwright" → drivers.runArtilleryDriver', async () => {
     let dispatched = null;
-    mock.method(drivers, 'runArtilleryDriver', async (args) => {
+    mock.method(drivers, 'runArtilleryDriver', async (args: DriverInputs) => {
       dispatched = 'artillery'; return { ...fakeDriverResult(), _args: args };
     });
     mock.method(drivers, 'runScriptDriver', () => { throw new Error('wrong driver'); });
@@ -165,7 +172,7 @@ describe('runBenchmark — driver dispatch', () => {
   test('scenario "cold-start" → drivers.runColdStartDriver', async () => {
     let dispatched = null;
     let receivedRuns = null;
-    mock.method(drivers, 'runColdStartDriver', async (args) => {
+    mock.method(drivers, 'runColdStartDriver', async (args: DriverInputs) => {
       dispatched = 'cold-start';
       receivedRuns = args.runs;
       return fakeDriverResult();
@@ -201,14 +208,15 @@ describe('runBenchmark — driver dispatch', () => {
 
 describe('runBenchmark — driver inputs and result persistence', () => {
   test('passes scenario, scenarioName, app, appName, source, env, tag, config to the driver', async () => {
-    let captured;
-    mock.method(drivers, 'runArtilleryDriver', async (args) => {
+    let captured: DriverInputs | undefined;
+    mock.method(drivers, 'runArtilleryDriver', async (args: DriverInputs) => {
       captured = args; return fakeDriverResult();
     });
     await runBenchmark({
       values: { scenario: 'reactive-light', app: 'tasks-3.x', tag: 'mytag', env: ['A=1', 'B=2'] },
       config: makeConfig(),
     });
+    assert.ok(captured);
     assert.equal(captured.scenarioName, 'reactive-light');
     assert.equal(captured.appName, 'tasks-3.x');
     assert.equal(captured.tag, 'mytag');
@@ -220,8 +228,7 @@ describe('runBenchmark — driver inputs and result persistence', () => {
   });
 
   test('writes driver result to outputPath and appends to history dir', async () => {
-    const result = fakeDriverResult();
-    result.tag = 'persist-tag';
+    const result = { ...fakeDriverResult(), tag: 'persist-tag' };
     mock.method(drivers, 'runArtilleryDriver', async () => result);
 
     const outputPath = path.join(tmpDir, 'my-output.json');
@@ -236,18 +243,19 @@ describe('runBenchmark — driver inputs and result persistence', () => {
 
     const historyFiles = fs.readdirSync(path.join(tmpDir, 'results', 'history'));
     assert.equal(historyFiles.length, 1);
-    assert.match(historyFiles[0], /^reactive-light-persist-tag-\d+\.json$/);
+    assert.match(historyFiles[0] ?? '', /^reactive-light-persist-tag-\d+\.json$/);
   });
 
   test('falls back to source.version for tag when --tag is absent (system source → "system")', async () => {
-    let captured;
-    mock.method(drivers, 'runArtilleryDriver', async (args) => {
+    let captured: DriverInputs | undefined;
+    mock.method(drivers, 'runArtilleryDriver', async (args: DriverInputs) => {
       captured = args; return fakeDriverResult();
     });
     await runBenchmark({
       values: { scenario: 'reactive-light', app: 'tasks-3.x' },
       config: makeConfig(),
     });
+    assert.ok(captured);
     assert.equal(captured.tag, 'system');
   });
 });

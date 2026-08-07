@@ -10,17 +10,18 @@ import path from 'node:path';
 import { runCompare } from '../../cli/compare.js';
 
 class ExitError extends Error {
-  constructor(code) { super(`process.exit(${code})`); this.code = code; }
+  readonly code: string | number | null | undefined;
+  constructor(code: string | number | null | undefined) { super(`process.exit(${code})`); this.code = code; }
 }
 
 const FIXTURES = path.join(import.meta.dirname, 'fixtures');
-const fix = (name) => path.join(FIXTURES, name);
+const fix = (name: string): string => path.join(FIXTURES, name);
 
-let tmpDir;
-let logs;
-let errors;
-let origLog;
-let origError;
+let tmpDir = '';
+let logs: string[] = [];
+let errors: string[] = [];
+let origLog: typeof console.log;
+let origError: typeof console.error;
 
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compare-cmd-'));
@@ -30,7 +31,7 @@ beforeEach(() => {
   origError = console.error;
   console.log = (msg) => logs.push(String(msg));
   console.error = (msg) => errors.push(String(msg));
-  mock.method(process, 'exit', (code) => { throw new ExitError(code); });
+  mock.method(process, 'exit', (code?: string | number | null) => { throw new ExitError(code); });
 });
 
 afterEach(() => {
