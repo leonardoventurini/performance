@@ -171,7 +171,9 @@ describe('stopCollectors', () => {
     appChild.stdout.on('data', (d: Buffer) => { appBuf += d.toString(); });
     dbChild.stdout.on('data', (d: Buffer) => { dbBuf += d.toString(); });
     appChild.emitStdout('{this is not json{{{');
-    dbChild.emitStdout(JSON.stringify({ metric: 'db_resources', name: 'DB' }));
+    dbChild.emitStdout(JSON.stringify({
+      metric: 'db_resources', name: 'DB', cpu: { avg: 4 }, memory: { avg_mb: 90 },
+    }));
 
     const handle = {
       procs: [
@@ -235,7 +237,9 @@ describe('stopCollectors', () => {
     const appChild = makeFakeChild();
     let appBuf = '';
     appChild.stdout.on('data', (d: Buffer) => { appBuf += d.toString(); });
-    appChild.emitStdout(JSON.stringify({ metric: 'app_resources', name: 'APP' }));
+    appChild.emitStdout(JSON.stringify({
+      metric: 'app_resources', name: 'APP', cpu: { avg: 20 }, memory: { avg_mb: 140 },
+    }));
     const handle = {
       procs: [{ proc: appChild.proc, name: 'APP', getResult: () => appBuf }],
       gcOutputPath: gcPath,
@@ -254,7 +258,9 @@ describe('stopCollectors', () => {
     const appChild = makeFakeChild();
     let appBuf = '';
     appChild.stdout.on('data', (d: Buffer) => { appBuf += d.toString(); });
-    appChild.emitStdout(JSON.stringify({ metric: 'app_resources' }));
+    appChild.emitStdout(JSON.stringify({
+      metric: 'app_resources', cpu: { avg: 20 }, memory: { avg_mb: 140 },
+    }));
     const handle = {
       procs: [{ proc: appChild.proc, name: 'APP', getResult: () => appBuf }],
       gcOutputPath: gcPath,
