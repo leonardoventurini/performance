@@ -7,14 +7,98 @@ import { AuditProxy } from './audit-proxy.js';
 import { OwnedMeteorCluster } from './owned-meteor-cluster.js';
 import { OwnedReplicaSet } from './owned-replica-set.js';
 
-function ownedOplogUrl(mongoUrl) {
+interface MeteorSource {
+  readonly meteorCmd: string;
+  readonly releaseArg?: string | null;
+}
+
+interface StopResult {
+  readonly restored?: boolean;
+  readonly topologyRestored?: boolean;
+  readonly networkRestored?: boolean;
+  readonly processGroupsTerminated?: boolean;
+  readonly workspaceRemoved?: boolean;
+  readonly forcedShutdownCount?: number;
+}
+
+/** Replica-set capabilities consumed by the aggregate environment owner. */
+export interface ReplicaSetResource {
+  readonly uri: string;
+  readonly replicaSetName: string;
+  readonly forcedShutdowns: number;
+  attestRecovery(): Promise<Readonly<{ runDocumentsRemoved: boolean; profilerRestored: boolean }>>;
+  stop(): Promise<StopResult>;
+}
+
+/** Meteor cluster capabilities consumed by the aggregate environment owner. */
+export interface ClusterResource {
+  readonly backends: readonly { readonly id: string; readonly httpUrl: string; readonly webSocketUrl: string }[];
+  readonly forcedShutdowns: number;
+  stop(): Promise<StopResult>;
+}
+
+/** Proxy capabilities consumed by the aggregate environment owner. */
+export interface ProxyResource {
+  readonly port: number | null;
+  readonly forcedShutdowns?: number;
+  snapshotLedger(): readonly Readonly<Record<string, unknown>>[];
+  stop(): Promise<StopResult>;
+}
+
+/** Injectable owned-resource factories used for deterministic lifecycle tests. */
+export interface EnvironmentFactories {
+  resolveMongod?: (source: MeteorSource, appPath: string) => string;
+  createReplicaSet?: (options: Readonly<{ auditId: string; mongodPath: string }>) => Promise<ReplicaSetResource>;
+  createCluster?: (options: Readonly<{
+    auditId: string; appPath: string; meteorCommand: string; meteorArgsPrefix: readonly string[];
+    mongoUrl: string; environment: Readonly<NodeJS.ProcessEnv>;
+  }>) => Promise<ClusterResource>;
+  createProxy?: (options: Readonly<{
+    auditId: string; backends: readonly { readonly id: string; readonly httpUrl: string; readonly webSocketUrl: string }[];
+  }>) => Promise<ProxyResource>;
+}
+
+interface OwnedAuditEnvironmentOptions {
+  readonly auditId: string;
+  readonly source: MeteorSource;
+  readonly appPath: string;
+  readonly environment?: Readonly<NodeJS.ProcessEnv>;
+  readonly factories?: EnvironmentFactories;
+}
+
+interface ResourceRestoration {
+  readonly resource: 'proxy' | 'cluster' | 'replicaSet';
+  readonly restored: boolean;
+  readonly topologyRestored: boolean;
+  readonly networkRestored: boolean;
+  readonly forcedShutdownCount: number;
+}
+
+/** Sealed cleanup evidence produced after every environment lifecycle. */
+export interface AuditEnvironmentRestoration {
+  readonly schemaVersion: 2;
+  readonly restored: boolean;
+  readonly failureCount: number;
+  readonly forcedShutdownCount: number;
+  readonly recovery: Readonly<{
+    runDocumentsRemoved: boolean; topologyRestored: boolean; profilerRestored: boolean; networkRestored: boolean;
+  }>;
+  readonly resources: readonly Readonly<ResourceRestoration>[];
+  readonly digest: string;
+}
+
+function ownedOplogUrl(mongoUrl: string): string {
   const result = mongoUrl.replace(/\/meteor(?=\?|$)/u, '/local');
   if (result === mongoUrl) throw new Error('Owned audit MongoDB URL does not name the meteor database');
   return result;
 }
 
 /** Resolves mongod from the fixture's active Meteor dev bundle. */
-export function resolveMeteorMongod(source, appPath, execute = execFileSync) {
+export function resolveMeteorMongod(
+  source: MeteorSource,
+  appPath: string,
+  execute: typeof execFileSync = execFileSync,
+): string {
   const nodePath = execute(source.meteorCmd, ['node', '-p', 'process.execPath'], {
     cwd: appPath,
     encoding: 'utf8',
@@ -31,7 +115,17 @@ export function resolveMeteorMongod(source, appPath, execute = execFileSync) {
  * Partial startup always unwinds in reverse ownership order.
  */
 export class OwnedAuditEnvironment {
-  constructor({ auditId, source, appPath, environment = {}, factories = {} }) {
+  readonly auditId: string;
+  readonly source: MeteorSource;
+  readonly appPath: string;
+  readonly environment: Readonly<NodeJS.ProcessEnv>;
+  readonly factories: Required<EnvironmentFactories>;
+  replicaSet: ReplicaSetResource | null;
+  cluster: ClusterResource | null;
+  proxy: ProxyResource | null;
+  lastRestoration: Readonly<AuditEnvironmentRestoration> | null;
+
+  constructor({ auditId, source, appPath, environment = {}, factories = {} }: OwnedAuditEnvironmentOptions) {
     if (!auditId) throw new TypeError('auditId is required');
     if (!source?.meteorCmd) throw new TypeError('resolved Meteor source is required');
     if (!path.isAbsolute(appPath)) throw new TypeError('appPath must be absolute');
@@ -51,7 +145,7 @@ export class OwnedAuditEnvironment {
     this.lastRestoration = null;
   }
 
-  async start() {
+  async start(): Promise<this> {
     if (this.replicaSet || this.cluster || this.proxy) throw new Error('Owned audit environment is already started');
     try {
       const mongodPath = this.factories.resolveMongod(this.source, this.appPath);
@@ -81,12 +175,15 @@ export class OwnedAuditEnvironment {
     }
   }
 
-  get ddpUrl() {
+  get ddpUrl(): string {
     if (!this.proxy?.port) throw new Error('Owned audit proxy is not running');
     return `ws://127.0.0.1:${this.proxy.port}/websocket`;
   }
 
-  evidence() {
+  evidence(): Readonly<{
+    auditId: string; topology: 'replica_set'; replicaSetName: string; forcedMongoShutdowns: number;
+    meteorInstances: readonly string[]; proxyLedger: readonly Readonly<Record<string, unknown>>[];
+  }> {
     if (!this.replicaSet || !this.cluster || !this.proxy) {
       throw new Error('Owned audit environment is not fully running');
     }
@@ -100,14 +197,14 @@ export class OwnedAuditEnvironment {
     });
   }
 
-  async stop() {
+  async stop(): Promise<Readonly<AuditEnvironmentRestoration>> {
     if (this.lastRestoration) return this.lastRestoration;
     const ownedResources = Object.freeze({
       proxy: this.proxy !== null,
       cluster: this.cluster !== null,
       replicaSet: this.replicaSet !== null,
     });
-    const resourceRestorations = [];
+    const resourceRestorations: ResourceRestoration[] = [];
     let failureCount = 0;
     let databaseAttestation = null;
     if (this.replicaSet) {
@@ -117,9 +214,12 @@ export class OwnedAuditEnvironment {
         failureCount += 1;
       }
     }
-    for (const key of ['proxy', 'cluster', 'replicaSet']) {
-      const resource = this[key];
-      this[key] = null;
+    const resources: readonly ['proxy', 'cluster', 'replicaSet'] = ['proxy', 'cluster', 'replicaSet'];
+    for (const key of resources) {
+      const resource = key === 'proxy' ? this.proxy : key === 'cluster' ? this.cluster : this.replicaSet;
+      if (key === 'proxy') this.proxy = null;
+      else if (key === 'cluster') this.cluster = null;
+      else this.replicaSet = null;
       if (!resource) continue;
       try {
         const result = await resource.stop();
@@ -129,20 +229,18 @@ export class OwnedAuditEnvironment {
           topologyRestored: result?.topologyRestored === true
             || (key === 'cluster' && result?.processGroupsTerminated === true && result?.workspaceRemoved === true),
           networkRestored: result?.networkRestored === true,
-          forcedShutdownCount: Number.isSafeInteger(result?.forcedShutdownCount)
-            ? result.forcedShutdownCount
-            : Number.isSafeInteger(resource.forcedShutdowns) ? resource.forcedShutdowns : 0,
+          forcedShutdownCount: safeInteger(result.forcedShutdownCount)
+            ?? safeInteger(resource.forcedShutdowns) ?? 0,
         });
-      } catch (error) {
+      } catch (error: unknown) {
         failureCount += 1;
         resourceRestorations.push({
           resource: key,
           restored: false,
           topologyRestored: false,
           networkRestored: false,
-          forcedShutdownCount: Number.isSafeInteger(error?.restoration?.forcedShutdownCount)
-            ? error.restoration.forcedShutdownCount
-            : Number.isSafeInteger(resource.forcedShutdowns) ? resource.forcedShutdowns : 0,
+          forcedShutdownCount: restorationForcedShutdownCount(error)
+            ?? safeInteger(resource.forcedShutdowns) ?? 0,
         });
       }
     }
@@ -159,7 +257,7 @@ export class OwnedAuditEnvironment {
         ({ resource, networkRestored }) => resource === 'proxy' && networkRestored,
       ),
     };
-    const payload = {
+    const payload: Omit<AuditEnvironmentRestoration, 'digest'> = {
       schemaVersion: 2,
       restored: failureCount === 0 && Object.values(recovery).every(Boolean),
       failureCount,
@@ -168,11 +266,24 @@ export class OwnedAuditEnvironment {
       resources: resourceRestorations,
     };
     const digest = crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex');
-    this.lastRestoration = Object.freeze({
+    const restoration: Readonly<AuditEnvironmentRestoration> = Object.freeze({
       ...payload,
       resources: Object.freeze(resourceRestorations.map((entry) => Object.freeze(entry))),
       digest,
     });
-    return this.lastRestoration;
+    this.lastRestoration = restoration;
+    return restoration;
   }
+}
+
+function restorationForcedShutdownCount(error: unknown): number | null {
+  if (typeof error !== 'object' || error === null) return null;
+  const restoration = Reflect.get(error, 'restoration');
+  if (typeof restoration !== 'object' || restoration === null) return null;
+  const count = Reflect.get(restoration, 'forcedShutdownCount');
+  return typeof count === 'number' && Number.isSafeInteger(count) ? count : null;
+}
+
+function safeInteger(value: unknown): number | null {
+  return typeof value === 'number' && Number.isSafeInteger(value) ? value : null;
 }

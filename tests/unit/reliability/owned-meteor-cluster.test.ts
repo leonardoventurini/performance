@@ -3,12 +3,23 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
-import test from 'node:test';
+import test, { type TestContext } from 'node:test';
 
 import {
   materializeMeteorApp,
+  type ManagedMeteorProcess,
   OwnedMeteorCluster,
+  type ReadinessContext,
 } from '../../../reliability/environment/owned-meteor-cluster.js';
+
+class FakeMeteorProcess extends EventEmitter implements ManagedMeteorProcess {
+  pid: number;
+  exitCode: number | null = null;
+  signalCode: NodeJS.Signals | null = null;
+  stdout = new EventEmitter();
+  stderr = new EventEmitter();
+  constructor(pid: number) { super(); this.pid = pid; }
+}
 
 test('materialization excludes mutable Meteor state and shares dependencies', (context) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'meteor-cluster-materialize-'));
@@ -53,11 +64,18 @@ test('fault targeting refuses unknown or exited instances', () => {
     rootPath: path.join(os.tmpdir(), 'meteor-audit-cluster-test'),
   });
   assert.throws(() => cluster.assertOwnedInstance('meteor-3'), /not a live owned target/);
-  cluster.instances = [{ id: 'meteor-0', child: { exitCode: 1, signalCode: null } }];
+  const exited = new FakeMeteorProcess(1);
+  exited.exitCode = 1;
+  cluster.instances = [{
+    id: 'meteor-0', port: 3001, workspace: '/tmp/unused', generation: 1,
+    child: exited, pid: exited.pid, markerPath: '/tmp/unused-marker', stdout: '', stderr: '',
+  }];
   assert.throws(() => cluster.assertOwnedInstance('meteor-0'), /not a live owned target/);
 });
 
-function createClusterHarness(context) {
+function createClusterHarness(context: TestContext): {
+  readonly cluster: OwnedMeteorCluster; readonly readiness: ReadinessContext[]; readonly rootPath: string;
+} {
   const appPath = fs.mkdtempSync(path.join(os.tmpdir(), 'meteor-cluster-app-'));
   const rootPath = fs.mkdtempSync(path.join(os.tmpdir(), 'meteor-audit-cluster-test-'));
   context.after(() => {
@@ -65,25 +83,21 @@ function createClusterHarness(context) {
     fs.rmSync(rootPath, { recursive: true, force: true });
   });
   let nextPid = 30_000;
-  const liveGroups = new Set();
-  const processes = new Map();
-  const readiness = [];
-  const spawnProcess = (command, args) => {
-    const child = new EventEmitter();
-    child.pid = nextPid++;
-    child.exitCode = null;
-    child.signalCode = null;
-    child.stdout = new EventEmitter();
-    child.stderr = new EventEmitter();
+  const liveGroups = new Set<number>();
+  const processes = new Map<number, { readonly pid: number; readonly argv: string }>();
+  const readiness: ReadinessContext[] = [];
+  const spawnProcess = (command: string, args: readonly string[]): ManagedMeteorProcess => {
+    const child = new FakeMeteorProcess(nextPid++);
     processes.set(child.pid, { pid: child.pid, argv: [command, ...args].join(' ') });
     liveGroups.add(child.pid);
     return child;
   };
-  const signalProcess = (target, signal) => {
+  const signalProcess = (target: number, signal: NodeJS.Signals): void => {
     const pid = Math.abs(target);
     const instance = [...processes.values()].find((entry) => entry.pid === pid);
     if (!instance) throw Object.assign(new Error('missing'), { code: 'ESRCH' });
-    const child = [...cluster.instances].map((entry) => entry.child).find((entry) => entry.pid === pid);
+    const child = cluster.instances.map((entry) => entry.child).find((entry) => entry?.pid === pid);
+    if (!child) throw new Error('owned test process disappeared');
     liveGroups.delete(pid);
     child.signalCode = signal;
     child.emit('exit', null, signal);
@@ -92,8 +106,8 @@ function createClusterHarness(context) {
     auditId: 'audit-1', appPath, meteorCommand: '/owned/meteor',
     mongoUrl: 'mongodb://127.0.0.1:27017/meteor', rootPath,
     spawnProcess,
-    readinessProbe: async (identity) => { readiness.push(identity); },
-    inspectProcess: (pid) => processes.get(pid) || null,
+    readinessProbe: async (identity: ReadinessContext) => { readiness.push(identity); },
+    inspectProcess: (pid: number) => processes.get(pid) ?? null,
     signalProcess,
     groupExists: (pid) => liveGroups.has(pid),
   });
@@ -108,6 +122,7 @@ test('cluster writes exact process markers, authenticates readiness, and restart
   assert.equal(readiness.every(({ auditId, ownershipToken }) => auditId === 'audit-1' && ownershipToken === cluster.token), true);
 
   const first = cluster.assertOwnedInstance('meteor-0');
+  if (!first.child) throw new Error('first test process is missing');
   const marker = JSON.parse(fs.readFileSync(first.markerPath, 'utf8'));
   assert.equal(marker.instanceId, first.id);
   assert.equal(marker.pid, first.child.pid);
@@ -134,6 +149,7 @@ test('stop refuses a live process whose ownership marker was altered', async (co
   const { cluster } = createClusterHarness(context);
   await cluster.start();
   const instance = cluster.instances[0];
+  if (!instance) throw new Error('test cluster did not create an instance');
   const marker = JSON.parse(fs.readFileSync(instance.markerPath, 'utf8'));
   fs.writeFileSync(instance.markerPath, JSON.stringify({ ...marker, ownershipToken: 'foreign' }));
   await assert.rejects(() => cluster.stopInstance(instance.id), /ownership attestation failed/u);

@@ -4,6 +4,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawn } from 'node:child_process';
+import type { EventEmitter } from 'node:events';
 
 import WebSocket from 'ws';
 
@@ -17,23 +18,139 @@ const SHUTDOWN_TIMEOUT_MS = 15_000;
 const STDERR_LIMIT = 32_768;
 const MAXIMUM_PROBE_LEDGER_ENTRIES = 32;
 
-function delay(milliseconds) {
+/** Attested operating-system identity for one owned Meteor process. */
+export interface ProcessIdentity { readonly pid: number; readonly argv: string }
+/** Authenticated inputs used to prove a Meteor instance is application-ready. */
+export interface ReadinessContext {
+  readonly auditId: string; readonly instanceId: string; readonly port: number; readonly ownershipToken: string;
+}
+/** Loopback endpoint pair exposed to the owned audit proxy. */
+export interface MeteorBackend {
+  readonly id: string; readonly httpUrl: string; readonly webSocketUrl: string;
+}
+/** Minimal child-process contract required by the cluster lifecycle. */
+export interface ManagedMeteorProcess {
+  pid?: number | undefined;
+  exitCode: number | null;
+  signalCode: NodeJS.Signals | null;
+  stdout: EventEmitter | null;
+  stderr: EventEmitter | null;
+  once(event: 'exit', listener: (code: number | null, signal: NodeJS.Signals | null) => void): this;
+  emit(event: 'exit', code: number | null, signal: NodeJS.Signals | null): boolean;
+}
+/** Mutable lifecycle record for one cluster-owned Meteor instance. */
+export interface MeteorInstance {
+  readonly id: string;
+  readonly port: number;
+  readonly workspace: string;
+  generation: number;
+  child: ManagedMeteorProcess | null;
+  pid: number | null;
+  readonly markerPath: string;
+  stdout: string;
+  stderr: string;
+}
+interface OwnershipMarker {
+  readonly auditId: string; readonly ownerId: string; readonly ownershipToken: string;
+  readonly instanceId: string; readonly generation: number; readonly pid: number;
+  readonly argv: string; readonly launchArgv: readonly string[]; readonly workspace: string;
+}
+type SpawnProcess = (
+  command: string,
+  args: readonly string[],
+  options: Readonly<{
+    cwd: string; detached: true; env: NodeJS.ProcessEnv; stdio: ['ignore', 'pipe', 'pipe'];
+  }>,
+) => ManagedMeteorProcess;
+type InspectProcess = (pid: number) => ProcessIdentity | null;
+type SignalProcess = (pid: number, signal: NodeJS.Signals) => boolean | void;
+type GroupExists = (pid: number) => boolean;
+type ReadinessProbe = (context: ReadinessContext) => Promise<void>;
+
+interface OwnedMeteorClusterOptions {
+  readonly auditId: string;
+  readonly appPath: string;
+  readonly meteorCommand: string;
+  readonly meteorArgsPrefix?: readonly string[];
+  readonly mongoUrl: string;
+  readonly environment?: Readonly<NodeJS.ProcessEnv>;
+  readonly rootPath: string;
+  readonly spawnProcess?: SpawnProcess;
+  readonly readinessProbe?: ReadinessProbe;
+  readonly inspectProcess?: InspectProcess;
+  readonly signalProcess?: SignalProcess;
+  readonly groupExists?: GroupExists;
+}
+/** Inputs accepted by the safe temporary-root cluster factory. */
+export type OwnedMeteorClusterCreateOptions = Omit<OwnedMeteorClusterOptions, 'rootPath'>;
+
+interface ClusterRestoration {
+  readonly resource: 'meteor_cluster';
+  readonly restored: boolean;
+  readonly instanceCount: number;
+  readonly terminatedInstanceCount: number;
+  readonly forcedShutdownCount: number;
+  readonly processGroupsTerminated: boolean;
+  readonly workspaceRemoved: boolean;
+}
+
+class RestorationAggregateError extends AggregateError {
+  readonly restoration: Readonly<ClusterRestoration>;
+  constructor(errors: readonly unknown[], message: string, restoration: Readonly<ClusterRestoration>) {
+    super(errors, message);
+    this.restoration = restoration;
+  }
+}
+
+const defaultSpawnProcess: SpawnProcess = (command, args, options) => spawn(command, [...args], options);
+
+function isOwnershipMarker(value: unknown): value is OwnershipMarker {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  return typeof Reflect.get(value, 'auditId') === 'string'
+    && typeof Reflect.get(value, 'ownerId') === 'string'
+    && typeof Reflect.get(value, 'ownershipToken') === 'string'
+    && typeof Reflect.get(value, 'instanceId') === 'string'
+    && typeof Reflect.get(value, 'generation') === 'number'
+    && typeof Reflect.get(value, 'pid') === 'number'
+    && typeof Reflect.get(value, 'argv') === 'string'
+    && Array.isArray(Reflect.get(value, 'launchArgv'))
+    && typeof Reflect.get(value, 'workspace') === 'string';
+}
+
+function createReadinessSocket(endpoint: string) {
+  const socket = new WebSocket(endpoint);
+  return {
+    on(event: string, listener: (event?: unknown) => void): void {
+      if (event === 'message') socket.on(event, (data) => listener(data));
+      else socket.on(event, listener);
+    },
+    send(data: string): void { socket.send(data); },
+    close(code?: number, reason?: string): void { socket.close(code, reason); },
+    terminate(): void { socket.terminate(); },
+  };
+}
+
+function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-async function reservePort() {
+async function reservePort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const server = net.createServer();
     server.unref();
     server.once('error', reject);
     server.listen({ host: '127.0.0.1', port: 0 }, () => {
       const address = server.address();
-      server.close((error) => error ? reject(error) : resolve(address.port));
+      server.close((error) => {
+        if (error) reject(error);
+        else if (address && typeof address !== 'string') resolve(address.port);
+        else reject(new Error('Managed Meteor port reservation did not bind TCP'));
+      });
     });
   });
 }
 
-function assertOwnedRoot(rootPath) {
+function assertOwnedRoot(rootPath: string): string {
   const resolved = path.resolve(rootPath);
   if (!resolved.startsWith(`${path.resolve(os.tmpdir())}${path.sep}`)
     || !path.basename(resolved).startsWith(CLUSTER_PREFIX)) {
@@ -42,23 +159,23 @@ function assertOwnedRoot(rootPath) {
   return resolved;
 }
 
-function appendBounded(current, chunk) {
+function appendBounded(current: string, chunk: unknown): string {
   return `${current}${chunk}`.slice(-STDERR_LIMIT);
 }
 
-function immutable(value) {
+function immutable<T>(value: T): Readonly<T> {
   const clone = structuredClone(value);
-  const freeze = (entry) => {
-    if (entry && typeof entry === 'object' && !Object.isFrozen(entry)) {
-      for (const child of Object.values(entry)) freeze(child);
-      Object.freeze(entry);
-    }
-    return entry;
-  };
-  return freeze(clone);
+  deepFreeze(clone);
+  return clone;
 }
 
-function defaultInspectProcess(pid) {
+function deepFreeze(value: unknown): void {
+  if (typeof value !== 'object' || value === null || Object.isFrozen(value)) return;
+  for (const child of Object.values(value)) deepFreeze(child);
+  Object.freeze(value);
+}
+
+function defaultInspectProcess(pid: number): ProcessIdentity | null {
   try {
     const argv = execFileSync('ps', ['-ww', '-p', String(pid), '-o', 'command='], { encoding: 'utf8' }).trim();
     return argv.length > 0 ? { pid, argv } : null;
@@ -67,20 +184,20 @@ function defaultInspectProcess(pid) {
   }
 }
 
-function defaultGroupExists(pid) {
+function defaultGroupExists(pid: number): boolean {
   try {
     process.kill(-pid, 0);
     return true;
   } catch (error) {
-    if (error?.code === 'ESRCH') return false;
+    if (error instanceof Error && 'code' in error && error.code === 'ESRCH') return false;
     throw error;
   }
 }
 
-async function authenticatedReadinessProbe({ auditId, instanceId, port, ownershipToken }) {
+async function authenticatedReadinessProbe({ auditId, instanceId, port, ownershipToken }: ReadinessContext): Promise<void> {
   const client = new RawDdpClient({
     endpoint: `ws://127.0.0.1:${port}/websocket`,
-    webSocketFactory: (endpoint) => new WebSocket(endpoint),
+    webSocketFactory: createReadinessSocket,
     clientId: `readiness-${instanceId}`,
     maximumLedgerEntries: MAXIMUM_PROBE_LEDGER_ENTRIES,
   });
@@ -92,10 +209,12 @@ async function authenticatedReadinessProbe({ auditId, instanceId, port, ownershi
   }
 }
 
-async function waitForReadiness(instance, cluster, timeoutMs = STARTUP_TIMEOUT_MS) {
+async function waitForReadiness(instance: MeteorInstance, cluster: OwnedMeteorCluster, timeoutMs = STARTUP_TIMEOUT_MS): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (instance.child.exitCode !== null || instance.child.signalCode !== null) {
+    const child = instance.child;
+    if (!child) throw new Error('Managed Meteor instance has no process');
+    if (child.exitCode !== null || child.signalCode !== null) {
       throw new Error(`Managed Meteor instance exited during startup: ${instance.stdout}\n${instance.stderr}`);
     }
     try {
@@ -114,10 +233,10 @@ async function waitForReadiness(instance, cluster, timeoutMs = STARTUP_TIMEOUT_M
   throw new Error(`Managed Meteor instance ${instance.id} did not pass its authenticated readiness probe`);
 }
 
-async function waitForExit(child, timeoutMs = SHUTDOWN_TIMEOUT_MS) {
+async function waitForExit(child: ManagedMeteorProcess, timeoutMs = SHUTDOWN_TIMEOUT_MS): Promise<void> {
   if (child.exitCode !== null || child.signalCode !== null) return;
-  const exited = new Promise((resolve) => {
-    child.once('exit', resolve);
+  const exited = new Promise<void>((resolve) => {
+    child.once('exit', () => resolve());
     if (child.exitCode !== null || child.signalCode !== null) resolve();
   });
   await Promise.race([
@@ -126,7 +245,7 @@ async function waitForExit(child, timeoutMs = SHUTDOWN_TIMEOUT_MS) {
   ]);
 }
 
-async function waitForGroupExit(pid, groupExists, timeoutMs = SHUTDOWN_TIMEOUT_MS) {
+async function waitForGroupExit(pid: number, groupExists: GroupExists, timeoutMs = SHUTDOWN_TIMEOUT_MS): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (!groupExists(pid)) return;
@@ -136,7 +255,9 @@ async function waitForGroupExit(pid, groupExists, timeoutMs = SHUTDOWN_TIMEOUT_M
 }
 
 /** Copies source inputs while keeping dependency storage read-only and shared. */
-export function materializeMeteorApp({ sourcePath, destinationPath }) {
+export function materializeMeteorApp({ sourcePath, destinationPath }: Readonly<{
+  sourcePath: string; destinationPath: string;
+}>): void {
   if (!path.isAbsolute(sourcePath) || !path.isAbsolute(destinationPath)) {
     throw new TypeError('Meteor app materialization paths must be absolute');
   }
@@ -157,11 +278,28 @@ export function materializeMeteorApp({ sourcePath, destinationPath }) {
 
 /** Owns two isolated Meteor tool workspaces that share only the audit database. */
 export class OwnedMeteorCluster {
+  readonly auditId: string;
+  readonly appPath: string;
+  readonly meteorCommand: string;
+  readonly meteorArgsPrefix: readonly string[];
+  readonly mongoUrl: string;
+  readonly environment: Readonly<NodeJS.ProcessEnv>;
+  readonly rootPath: string;
+  readonly spawnProcess: SpawnProcess;
+  readonly readinessProbe: ReadinessProbe;
+  readonly inspectProcess: InspectProcess;
+  readonly signalProcess: SignalProcess;
+  readonly groupExists: GroupExists;
+  readonly ownerId: string;
+  readonly token: string;
+  instances: MeteorInstance[];
+  forcedShutdowns: number;
+
   constructor({
     auditId, appPath, meteorCommand, meteorArgsPrefix = [], mongoUrl, environment = {}, rootPath,
-    spawnProcess = spawn, readinessProbe = authenticatedReadinessProbe,
+    spawnProcess = defaultSpawnProcess, readinessProbe = authenticatedReadinessProbe,
     inspectProcess = defaultInspectProcess, signalProcess = process.kill, groupExists = defaultGroupExists,
-  }) {
+  }: OwnedMeteorClusterOptions) {
     if (!auditId) throw new TypeError('auditId is required');
     if (!path.isAbsolute(appPath)) throw new TypeError('appPath must be absolute');
     if (typeof meteorCommand !== 'string' || meteorCommand.length === 0) throw new TypeError('meteorCommand is required');
@@ -190,7 +328,7 @@ export class OwnedMeteorCluster {
     this.forcedShutdowns = 0;
   }
 
-  static async create(options) {
+  static async create(options: OwnedMeteorClusterCreateOptions): Promise<OwnedMeteorCluster> {
     const rootPath = fs.mkdtempSync(path.join(os.tmpdir(), CLUSTER_PREFIX));
     const cluster = new OwnedMeteorCluster({ ...options, rootPath });
     try {
@@ -202,7 +340,7 @@ export class OwnedMeteorCluster {
     }
   }
 
-  get backends() {
+  get backends(): readonly MeteorBackend[] {
     return this.instances.map(({ id, port }) => Object.freeze({
       id,
       httpUrl: `http://127.0.0.1:${port}`,
@@ -210,14 +348,14 @@ export class OwnedMeteorCluster {
     }));
   }
 
-  async start() {
+  async start(): Promise<void> {
     if (this.instances.length > 0) throw new Error('Managed Meteor cluster is already started');
     const ports = await Promise.all(Array.from({ length: INSTANCE_COUNT }, reservePort));
     for (const [index, port] of ports.entries()) {
       const id = `meteor-${index}`;
       const workspace = path.join(this.rootPath, id);
       materializeMeteorApp({ sourcePath: this.appPath, destinationPath: workspace });
-      const instance = { id, port, workspace, generation: 0, child: null, markerPath: path.join(workspace, MARKER_NAME), stdout: '', stderr: '' };
+      const instance: MeteorInstance = { id, port, workspace, generation: 0, child: null, pid: null, markerPath: path.join(workspace, MARKER_NAME), stdout: '', stderr: '' };
       this.instances.push(instance);
       await this.#spawnInstance(instance);
     }
@@ -225,7 +363,7 @@ export class OwnedMeteorCluster {
     for (const instance of this.instances) this.#writeOwnershipMarker(instance);
   }
 
-  async #spawnInstance(instance) {
+  async #spawnInstance(instance: MeteorInstance): Promise<void> {
     const args = [...this.meteorArgsPrefix, 'run', '--port', `127.0.0.1:${instance.port}`];
     const child = this.spawnProcess(this.meteorCommand, args, {
       cwd: instance.workspace,
@@ -241,8 +379,10 @@ export class OwnedMeteorCluster {
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
-    if (!Number.isSafeInteger(child.pid) || child.pid < 1) throw new Error('Managed Meteor process did not expose a valid pid');
+    const pid = child.pid;
+    if (typeof pid !== 'number' || !Number.isSafeInteger(pid) || pid < 1) throw new Error('Managed Meteor process did not expose a valid pid');
     instance.child = child;
+    instance.pid = pid;
     instance.generation += 1;
     instance.stdout = '';
     instance.stderr = '';
@@ -251,9 +391,11 @@ export class OwnedMeteorCluster {
     this.#writeOwnershipMarker(instance);
   }
 
-  #writeOwnershipMarker(instance) {
-    const liveIdentity = this.inspectProcess(instance.child.pid);
-    if (!liveIdentity || liveIdentity.pid !== instance.child.pid || typeof liveIdentity.argv !== 'string' || liveIdentity.argv.length === 0) {
+  #writeOwnershipMarker(instance: MeteorInstance): void {
+    const pid = instance.pid;
+    if (!instance.child || pid === null) throw new Error('Managed Meteor process is unavailable');
+    const liveIdentity = this.inspectProcess(pid);
+    if (!liveIdentity || liveIdentity.pid !== pid || typeof liveIdentity.argv !== 'string' || liveIdentity.argv.length === 0) {
       throw new Error('Managed Meteor process identity was unavailable after spawn');
     }
     const launchArgv = [
@@ -269,7 +411,7 @@ export class OwnedMeteorCluster {
       ownershipToken: this.token,
       instanceId: instance.id,
       generation: instance.generation,
-      pid: instance.child.pid,
+      pid,
       argv: liveIdentity.argv,
       launchArgv,
       workspace: instance.workspace,
@@ -277,59 +419,64 @@ export class OwnedMeteorCluster {
     fs.writeFileSync(instance.markerPath, `${JSON.stringify(marker)}\n`, { mode: 0o600, flag: 'w' });
   }
 
-  assertOwnedInstance(instanceId) {
+  assertOwnedInstance(instanceId: string): MeteorInstance {
     const instance = this.instances.find(({ id }) => id === instanceId);
     if (!instance?.child || instance.child.exitCode !== null || instance.child.signalCode !== null) {
       throw new Error(`Managed Meteor instance ${instanceId} is not a live owned target`);
     }
-    let marker;
+    let marker: unknown;
     try {
       marker = JSON.parse(fs.readFileSync(instance.markerPath, 'utf8'));
     } catch {
       throw new Error(`Managed Meteor instance ${instanceId} has no valid ownership marker`);
     }
     const expectedArgs = [this.meteorCommand, ...this.meteorArgsPrefix, 'run', '--port', `127.0.0.1:${instance.port}`];
-    if (marker.auditId !== this.auditId || marker.ownerId !== this.ownerId
+    if (!isOwnershipMarker(marker) || marker.auditId !== this.auditId || marker.ownerId !== this.ownerId
       || marker.ownershipToken !== this.token || marker.instanceId !== instance.id
-      || marker.generation !== instance.generation || marker.pid !== instance.child.pid
+      || marker.generation !== instance.generation || marker.pid !== instance.pid
       || marker.workspace !== instance.workspace
       || JSON.stringify(marker.launchArgv) !== JSON.stringify(expectedArgs)
       || typeof marker.argv !== 'string' || marker.argv.length === 0) {
       throw new Error(`Managed Meteor instance ${instanceId} ownership attestation failed`);
     }
-    const live = this.inspectProcess(instance.child.pid);
-    if (!live || live.pid !== instance.child.pid
+    const pid = instance.pid;
+    if (pid === null) throw new Error(`Managed Meteor instance ${instanceId} has no process identity`);
+    const live = this.inspectProcess(pid);
+    if (!live || live.pid !== pid
       || live.argv !== marker.argv) {
       throw new Error(`Managed Meteor instance ${instanceId} live process identity does not match its marker`);
     }
     return instance;
   }
 
-  async #terminate(instance) {
+  async #terminate(instance: MeteorInstance): Promise<Readonly<{ terminated: boolean; processGroupTerminated: boolean; forced: boolean }>> {
     this.assertOwnedInstance(instance.id);
+    const child = instance.child;
+    const pid = instance.pid;
+    if (!child || pid === null) throw new Error('Managed Meteor process is unavailable');
     let forced = false;
     try {
-      this.signalProcess(-instance.child.pid, 'SIGTERM');
-      await waitForExit(instance.child);
-      await waitForGroupExit(instance.child.pid, this.groupExists);
+      this.signalProcess(-pid, 'SIGTERM');
+      await waitForExit(child);
+      await waitForGroupExit(pid, this.groupExists);
     } catch {
       forced = true;
       this.forcedShutdowns += 1;
-      if (instance.child.exitCode === null && instance.child.signalCode === null) {
-        this.signalProcess(-instance.child.pid, 'SIGKILL');
-        await waitForExit(instance.child).catch(() => {});
+      if (child.exitCode === null && child.signalCode === null) {
+        this.signalProcess(-pid, 'SIGKILL');
+        await waitForExit(child).catch(() => {});
       }
-      await waitForGroupExit(instance.child.pid, this.groupExists);
+      await waitForGroupExit(pid, this.groupExists);
     }
     fs.rmSync(instance.markerPath, { force: true });
     return immutable({ terminated: true, processGroupTerminated: true, forced });
   }
 
-  async stopInstance(instanceId) {
+  async stopInstance(instanceId: string): Promise<Readonly<{ terminated: boolean; processGroupTerminated: boolean; forced: boolean }>> {
     return this.#terminate(this.assertOwnedInstance(instanceId));
   }
 
-  async restartInstance(instanceId) {
+  async restartInstance(instanceId: string): Promise<Readonly<{ id: string; generation: number }>> {
     const instance = this.instances.find(({ id }) => id === instanceId);
     if (!instance) throw new Error(`Managed Meteor instance ${instanceId} is not owned by this cluster`);
     if (instance.child?.exitCode === null && instance.child?.signalCode === null) {
@@ -341,8 +488,8 @@ export class OwnedMeteorCluster {
     return Object.freeze({ id: instance.id, generation: instance.generation });
   }
 
-  async stop() {
-    const failures = [];
+  async stop(): Promise<Readonly<ClusterRestoration>> {
+    const failures: unknown[] = [];
     let terminated = 0;
     for (const instance of this.instances) {
       if (instance.child?.exitCode === null && instance.child?.signalCode === null) {
@@ -361,7 +508,7 @@ export class OwnedMeteorCluster {
     if (failures.length === 0 && fs.existsSync(this.rootPath)) {
       fs.rmSync(assertOwnedRoot(this.rootPath), { recursive: true });
     }
-    const restoration = immutable({
+    const restoration = immutable<ClusterRestoration>({
       resource: 'meteor_cluster',
       restored: failures.length === 0 && !fs.existsSync(this.rootPath),
       instanceCount,
@@ -371,9 +518,7 @@ export class OwnedMeteorCluster {
       workspaceRemoved: !fs.existsSync(this.rootPath),
     });
     if (failures.length > 0) {
-      const error = new AggregateError(failures, 'Managed Meteor cluster cleanup failed');
-      error.restoration = restoration;
-      throw error;
+      throw new RestorationAggregateError(failures, 'Managed Meteor cluster cleanup failed', restoration);
     }
     return restoration;
   }

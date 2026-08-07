@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import http from 'node:http';
+import type { IncomingHttpHeaders } from 'node:http';
 import test from 'node:test';
 
 import WebSocket, { WebSocketServer } from 'ws';
@@ -9,7 +10,16 @@ import {
   validateRoutePolicy,
 } from '../../../reliability/environment/audit-proxy.js';
 
-async function backend(id, { cookies = [] } = {}) {
+interface TestBackend {
+  readonly id: string;
+  readonly httpUrl: string;
+  readonly webSocketUrl: string;
+  stop(): Promise<void>;
+}
+
+interface HttpResult { readonly response: http.IncomingMessage; readonly body: string }
+
+async function backend(id: string, { cookies = [] }: Readonly<{ cookies?: readonly string[] }> = {}): Promise<TestBackend> {
   const server = http.createServer((_request, response) => {
     if (cookies.length > 0) response.setHeader('set-cookie', cookies);
     response.end(id);
@@ -18,29 +28,32 @@ async function backend(id, { cookies = [] } = {}) {
   server.on('upgrade', (request, socket, head) => sockets.handleUpgrade(request, socket, head, (ws) => {
     ws.on('message', (data, binary) => ws.send(data, { binary }));
   }));
-  await new Promise((resolve) => server.listen({ host: '127.0.0.1', port: 0 }, resolve));
-  const port = server.address().port;
+  await new Promise<void>((resolve) => server.listen({ host: '127.0.0.1', port: 0 }, resolve));
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('test backend did not bind TCP');
+  const port = address.port;
   return {
     id,
     httpUrl: `http://127.0.0.1:${port}`,
     webSocketUrl: `ws://127.0.0.1:${port}`,
     stop: async () => {
       for (const client of sockets.clients) client.terminate();
-      await new Promise((resolve) => sockets.close(resolve));
+      await new Promise<void>((resolve) => sockets.close(() => resolve()));
       server.closeAllConnections?.();
       await new Promise((resolve) => server.close(resolve));
     },
   };
 }
 
-function proxyBackend(value) {
+function proxyBackend(value: TestBackend) {
   return { id: value.id, httpUrl: value.httpUrl, webSocketUrl: value.webSocketUrl };
 }
 
-function request(port, headers = {}) {
+function request(port: number | null, headers: IncomingHttpHeaders = {}): Promise<HttpResult> {
+  if (port === null) throw new Error('proxy is not listening');
   return new Promise((resolve, reject) => {
     http.get({ host: '127.0.0.1', port, headers }, (response) => {
-      const chunks = [];
+      const chunks: Buffer[] = [];
       response.on('data', (chunk) => chunks.push(chunk));
       response.on('end', () => resolve({ response, body: Buffer.concat(chunks).toString() }));
     }).once('error', reject);
@@ -97,7 +110,7 @@ test('proxy attributes websocket routing and refuses foreign fault targets', asy
     const echoed = new Promise((resolve) => socket.once('message', (data) => resolve(data.toString())));
     socket.send('hello');
     assert.equal(await echoed, 'hello');
-    assert.equal(proxy.connections.get(connectionId).backendId, 'two');
+    assert.equal(proxy.connections.get(connectionId)?.backendId, 'two');
     const duplicate = new WebSocket(`ws://127.0.0.1:${proxy.port}/websocket`, {
       headers: { 'x-audit-connection': connectionId },
     });
