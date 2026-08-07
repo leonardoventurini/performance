@@ -23,6 +23,16 @@ let origError: typeof console.error;
 let origBenchKey: string | undefined;
 const BASE_CONFIG = createBenchmarkConfig(import.meta.dirname, {});
 const config = (overrides: Partial<BenchmarkConfig> = {}): BenchmarkConfig => ({ ...BASE_CONFIG, ...overrides });
+const PUSH_RESULT = Object.freeze({
+  timestamp: '2026-08-07T00:00:00.000Z',
+  tag: 'mytag',
+  meteor: { version: '3.5.1-beta.0', sha: 'release:3.5.1-beta.0' },
+  runtime: {},
+  scenario: 'reactive-light',
+  app: 'tasks-3.x',
+  wall_clock_ms: 1,
+  metrics: {},
+});
 
 beforeEach(() => {
   logs = [];
@@ -95,10 +105,18 @@ function lastCall(factory: { readonly calls: readonly DdpCall[] }): DdpCall {
 }
 
 describe('runPush', () => {
+  test('rejects a parsed file that is not a canonical benchmark result', async () => {
+    mock.method(io, 'readFileSync', () => JSON.stringify({ tag: 'untrusted', metrics: {} }));
+    await assert.rejects(
+      () => runPush({ values: { result: '/x' }, config: config() }),
+      /canonical identity, runtime, or metric envelope/,
+    );
+  });
+
   test('connects to URL, calls runs.insert with API key + parsed result, disconnects', async () => {
     const FakeDDP = fakeDdpFactory();
     installFakeDdp(FakeDDP);
-    mock.method(io, 'readFileSync', () => JSON.stringify({ tag: 'mytag', metrics: {} }));
+    mock.method(io, 'readFileSync', () => JSON.stringify(PUSH_RESULT));
 
     await runPush({
       values: { result: '/path/to/result.json', url: 'ws://dash.example/websocket', key: 'k1' },
@@ -110,7 +128,7 @@ describe('runPush', () => {
     assert.equal(FakeDDP.calls.length, 1);
     assert.equal(lastCall(FakeDDP).method, 'runs.insert');
     assert.equal(lastCall(FakeDDP).args[0], 'k1');
-    assert.deepEqual(lastCall(FakeDDP).args[1], { tag: 'mytag', metrics: {} });
+    assert.deepEqual(lastCall(FakeDDP).args[1], PUSH_RESULT);
     assert.ok(FakeDDP.wasConnected());
     assert.ok(FakeDDP.wasDisconnected());
     assert.ok(logs.some((l) => l.includes('Document ID: doc-id-123')));
@@ -127,7 +145,7 @@ describe('runPush', () => {
   test('URL fallback chain: flag > config.dashboardUrl > default', async () => {
     const FakeDDP = fakeDdpFactory();
     installFakeDdp(FakeDDP);
-    mock.method(io, 'readFileSync', () => '{}');
+    mock.method(io, 'readFileSync', () => JSON.stringify(PUSH_RESULT));
 
     // Config wins when no flag.
     await runPush({
@@ -151,7 +169,7 @@ describe('runPush', () => {
   test('API-key fallback chain: flag > env.BENCH_API_KEY > config.dashboardApiKey > default', async () => {
     const FakeDDP = fakeDdpFactory();
     installFakeDdp(FakeDDP);
-    mock.method(io, 'readFileSync', () => '{}');
+    mock.method(io, 'readFileSync', () => JSON.stringify(PUSH_RESULT));
 
     process.env.BENCH_API_KEY = 'k-from-env';
     await runPush({
@@ -182,7 +200,7 @@ describe('runPush', () => {
       callImpl: () => { throw new Error('boom auth fail'); },
     });
     installFakeDdp(FakeDDP);
-    mock.method(io, 'readFileSync', () => '{}');
+    mock.method(io, 'readFileSync', () => JSON.stringify(PUSH_RESULT));
 
     await assert.rejects(
       () => runPush({ values: { result: '/x', url: 'ws://x' }, config: config() }),

@@ -13,6 +13,8 @@
 import { io } from '../runner/_io.js';
 import type { BenchmarkConfig, CliValues } from '../lib/benchmark-types.js';
 import { errorMessage } from '../lib/benchmark-types.js';
+import { parseJson } from '../lib/data-values.js';
+import { benchmarkResult } from '../reporters/json-reporter.js';
 
 interface DashboardCommandInputs { readonly values: CliValues; readonly config: BenchmarkConfig; }
 
@@ -53,7 +55,7 @@ export async function runPush({ values, config }: DashboardCommandInputs): Promi
     process.exit(1);
   }
 
-  const result = JSON.parse(io.readFileSync(resultPath, 'utf8'));
+  const result = benchmarkResult(parseJson(io.readFileSync(resultPath, 'utf8')));
   console.log(`Pushing ${resultPath} to ${url}...`);
 
   const ddp = connect(url);

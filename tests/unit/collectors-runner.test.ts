@@ -184,6 +184,15 @@ describe('stopCollectors', () => {
     assert.equal(results[0]?.metric, 'db_resources');
   });
 
+  test('drops valid JSON that does not satisfy the collector envelope', async () => {
+    const child = makeFakeChild();
+    const handle = {
+      procs: [{ proc: child.proc, name: 'APP', getResult: () => JSON.stringify({ name: 'APP' }) }],
+    };
+    const results = await stopCollectors(handle);
+    assert.deepEqual(results, []);
+  });
+
   test('skips collectors whose stdout buffer is empty (no JSON to parse)', async () => {
     const appChild = makeFakeChild();
     const handle = {

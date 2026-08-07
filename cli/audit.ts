@@ -4,7 +4,7 @@ import { resolveMeteorSource } from '../meteor-source.js';
 import { contractDigest } from '../reliability/contracts/digest.js';
 import { loadDeclarativeAuditCatalog } from '../reliability/declarative/catalog.js';
 import { attestReleaseIdentity } from '../reliability/release-audit/identity.js';
-import { buildResult, writeResult, appendToHistory } from '../reporters/json-reporter.js';
+import { appendToHistory, buildResult, collectorResult, writeResult } from '../reporters/json-reporter.js';
 import { createReleaseCaseExecutor } from './release-audit.js';
 import type { BenchmarkResult, CollectorResult } from '../reporters/json-reporter.js';
 import type { CliValues, MeteorSource } from '../lib/benchmark-types.js';
@@ -144,7 +144,7 @@ function metricFromExecution({ catalog, profile, observerDriver, releaseIdentity
     ...(releaseIdentity.requested !== releaseIdentity.actual ? ['release_identity_mismatch'] : []),
     ...(results.length !== requiredCaseIds.length ? ['required_coordinate_missing'] : []),
   ];
-  return Object.freeze({
+  return collectorResult(Object.freeze({
     metric: 'change_stream_audit',
     status: failureReasons.length === 0 ? 'passed' : failed.length > 0 ? 'failed' : 'incomplete',
     profile,
@@ -162,7 +162,7 @@ function metricFromExecution({ catalog, profile, observerDriver, releaseIdentity
     negative_controls: controls,
     recovery,
     failure_reasons: [...new Set(failureReasons)].slice(0, 256),
-  });
+  }));
 }
 
 /**

@@ -19,6 +19,8 @@ import { aggregateCompression } from '../runner/compression-aggregator.js';
 import { aggregateDriverFallback } from '../runner/driver-fallback-aggregator.js';
 import type { ChildProcess } from 'node:child_process';
 import { errorMessage } from '../lib/benchmark-types.js';
+import { isJsonObject, parseJson } from '../lib/data-values.js';
+import { collectorResult } from '../reporters/json-reporter.js';
 import type { CollectorResult } from '../reporters/json-reporter.js';
 
 interface SpawnedCollector { proc: Pick<ChildProcess, 'kill'>; name: string; getResult(): string }
@@ -125,7 +127,21 @@ export function prepareDriverFallbackOutput(tag: string): string {
 //
 // Returns null when no samples were captured at all (per absence
 // convention CC-5: collector ran but emitted nothing → omit the key).
-export function aggregateMethodTiming(samplesByMethod: Readonly<Record<string, readonly number[]>> | null | undefined) {
+function numericSamples(value: unknown): Readonly<Record<string, readonly number[]>> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new TypeError('Timing samples must be an object.');
+  const samples: Record<string, readonly number[]> = {};
+  for (const [name, candidate] of Object.entries(value)) {
+    if (!Array.isArray(candidate) || !candidate.every((entry) => typeof entry === 'number' && Number.isFinite(entry))) {
+      throw new TypeError(`Timing samples for ${name} must contain only finite numbers.`);
+    }
+    samples[name] = candidate;
+  }
+  return samples;
+}
+
+/** Aggregates untrusted method-timing samples into the public metric contract. */
+export function aggregateMethodTiming(value: unknown) {
+  const samplesByMethod = value == null ? {} : numericSamples(value);
   const methods: Record<string, { count: number; avg_ms: number; p50: number; p95: number; p99: number; max_ms: number }> = {};
   let totalCalls = 0;
   for (const [name, samples] of Object.entries(samplesByMethod || {})) {
@@ -148,7 +164,9 @@ export function aggregateMethodTiming(samplesByMethod: Readonly<Record<string, r
 // Same shape as aggregateMethodTiming but grouped by publication name.
 // `publications` mirrors `methods`; `total_subs` mirrors `total_calls`.
 // Conventions identical (BARE percentile, absence → null, etc.).
-export function aggregateSubTiming(samplesByPub: Readonly<Record<string, readonly number[]>> | null | undefined) {
+/** Aggregates untrusted publication-timing samples into the public metric contract. */
+export function aggregateSubTiming(value: unknown) {
+  const samplesByPub = value == null ? {} : numericSamples(value);
   const publications: Record<string, { count: number; avg_ms: number; p50: number; p95: number; p99: number; max_ms: number }> = {};
   let totalSubs = 0;
   for (const [name, samples] of Object.entries(samplesByPub || {})) {
@@ -171,8 +189,12 @@ export function aggregateSubTiming(samplesByPub: Readonly<Record<string, readonl
 // Flat-aggregate variant (no grouping by name) — propagation samples are
 // per-emit (every sub × every doc), aggregated into one set. Returns null
 // when no samples (absence convention).
-export function aggregatePropagationTiming(samplesArr: readonly number[] | null | undefined) {
-  const stats = summarize(samplesArr || []);
+/** Aggregates untrusted propagation samples after validating every latency. */
+export function aggregatePropagationTiming(value: unknown) {
+  if (value != null && (!Array.isArray(value) || !value.every((entry) => typeof entry === 'number' && Number.isFinite(entry)))) {
+    throw new TypeError('Propagation samples must contain only finite numbers.');
+  }
+  const stats = summarize(Array.isArray(value) ? value : []);
   if (!stats) return null;
   return {
     metric: 'live_update_propagation',
@@ -324,7 +346,7 @@ export async function stopCollectors({ procs, gcOutputPath, methodTimingPath, su
     const raw = getResult().trim();
     if (!raw) continue;
     try {
-      results.push(JSON.parse(raw));
+      results.push(collectorResult(parseJson(raw)));
     } catch (err) {
       console.error(`Dropping malformed JSON from ${name} collector: ${errorMessage(err)}`);
     }
@@ -332,11 +354,13 @@ export async function stopCollectors({ procs, gcOutputPath, methodTimingPath, su
 
   if (gcOutputPath && io.existsSync(gcOutputPath)) {
     try {
-      const gcData = JSON.parse(io.readFileSync(gcOutputPath, 'utf8'));
+      const parsedGc = parseJson(io.readFileSync(gcOutputPath, 'utf8'));
+      if (!isJsonObject(parsedGc)) throw new TypeError('GC output must be a JSON object.');
+      const gcData = collectorResult(parsedGc);
       results.push(gcData);
-      console.log(`GC: ${gcData.count} collections, ${gcData.total_pause_ms}ms total pause, ${gcData.max_pause_ms}ms max`);
-      if (gcData.minor && gcData.major) {
-        console.log(`  Minor: ${gcData.minor.count} (${gcData.minor.total_ms}ms) | Major: ${gcData.major.count} (${gcData.major.total_ms}ms)`);
+      console.log(`GC: ${String(parsedGc.count)} collections, ${String(parsedGc.total_pause_ms)}ms total pause, ${String(parsedGc.max_pause_ms)}ms max`);
+      if (isJsonObject(parsedGc.minor) && isJsonObject(parsedGc.major)) {
+        console.log(`  Minor: ${String(parsedGc.minor.count)} (${String(parsedGc.minor.total_ms)}ms) | Major: ${String(parsedGc.major.count)} (${String(parsedGc.major.total_ms)}ms)`);
       }
       io.unlinkSync(gcOutputPath);
     } catch (err) {
@@ -350,10 +374,10 @@ export async function stopCollectors({ procs, gcOutputPath, methodTimingPath, su
   // per the absence convention.
   if (methodTimingPath && io.existsSync(methodTimingPath)) {
     try {
-      const dump = JSON.parse(io.readFileSync(methodTimingPath, 'utf8'));
+      const dump = parseJson(io.readFileSync(methodTimingPath, 'utf8'));
       const aggregated = aggregateMethodTiming(dump);
       if (aggregated) {
-        results.push(aggregated);
+        results.push(collectorResult(aggregated));
         console.log(`DDP methods: ${aggregated.total_calls} calls across ${Object.keys(aggregated.methods).length} methods`);
       }
       io.unlinkSync(methodTimingPath);
@@ -365,10 +389,10 @@ export async function stopCollectors({ procs, gcOutputPath, methodTimingPath, su
   // Sub timing: same pattern, different env var + aggregator + key shape.
   if (subTimingPath && io.existsSync(subTimingPath)) {
     try {
-      const dump = JSON.parse(io.readFileSync(subTimingPath, 'utf8'));
+      const dump = parseJson(io.readFileSync(subTimingPath, 'utf8'));
       const aggregated = aggregateSubTiming(dump);
       if (aggregated) {
-        results.push(aggregated);
+        results.push(collectorResult(aggregated));
         console.log(`DDP subscriptions: ${aggregated.total_subs} subs across ${Object.keys(aggregated.publications).length} publications`);
       }
       io.unlinkSync(subTimingPath);
@@ -380,10 +404,10 @@ export async function stopCollectors({ procs, gcOutputPath, methodTimingPath, su
   // Propagation timing: flat array of write-to-emit latencies.
   if (propagationTimingPath && io.existsSync(propagationTimingPath)) {
     try {
-      const dump = JSON.parse(io.readFileSync(propagationTimingPath, 'utf8'));
+      const dump = parseJson(io.readFileSync(propagationTimingPath, 'utf8'));
       const aggregated = aggregatePropagationTiming(dump);
       if (aggregated) {
-        results.push(aggregated);
+        results.push(collectorResult(aggregated));
         console.log(`Live-update propagation: ${aggregated.observed_updates} observed updates, p50=${aggregated.p50}ms p95=${aggregated.p95}ms`);
       }
       io.unlinkSync(propagationTimingPath);
@@ -396,10 +420,10 @@ export async function stopCollectors({ procs, gcOutputPath, methodTimingPath, su
   // per-tick mux/handle counts); we aggregate to min/max/avg/end here.
   if (observerPoolPath && io.existsSync(observerPoolPath)) {
     try {
-      const dump = JSON.parse(io.readFileSync(observerPoolPath, 'utf8'));
+      const dump = parseJson(io.readFileSync(observerPoolPath, 'utf8'));
       const aggregated = aggregateObserverPool(dump);
       if (aggregated) {
-        results.push(aggregated);
+        results.push(collectorResult(aggregated));
         console.log(`Observer pool: ${aggregated.samples} samples, multiplexers max=${aggregated.multiplexer_count.max} end=${aggregated.multiplexer_count.end}, handles max=${aggregated.handle_count.max} end=${aggregated.handle_count.end}`);
       }
       io.unlinkSync(observerPoolPath);
@@ -414,10 +438,10 @@ export async function stopCollectors({ procs, gcOutputPath, methodTimingPath, su
   // returns null).
   if (ddpMessagePath && io.existsSync(ddpMessagePath)) {
     try {
-      const dump = JSON.parse(io.readFileSync(ddpMessagePath, 'utf8'));
+      const dump = parseJson(io.readFileSync(ddpMessagePath, 'utf8'));
       const aggregated = aggregateDdpMessages(dump);
       if (aggregated) {
-        results.push(aggregated);
+        results.push(collectorResult(aggregated));
         console.log(`DDP messages: ${aggregated.total_in} in (${aggregated.in_per_sec}/s), ${aggregated.total_out} out (${aggregated.out_per_sec}/s)`);
       }
       io.unlinkSync(ddpMessagePath);
@@ -431,13 +455,13 @@ export async function stopCollectors({ procs, gcOutputPath, methodTimingPath, su
   // when no messages were observed (absence convention → aggregator returns
   // null). NOTE: we keep the parsed dump in scope so the compression
   // aggregator below can pair it with the post-compression socket totals.
-  let frameSizeDump = null;
+  let frameSizeDump: unknown = null;
   if (frameSizePath && io.existsSync(frameSizePath)) {
     try {
-      frameSizeDump = JSON.parse(io.readFileSync(frameSizePath, 'utf8'));
+      frameSizeDump = parseJson(io.readFileSync(frameSizePath, 'utf8'));
       const aggregated = aggregateFrameSize(frameSizeDump);
       if (aggregated) {
-        results.push(aggregated);
+        results.push(collectorResult(aggregated));
         console.log(`DDP frame size: in avg=${aggregated.in.avg_bytes}B p95=${aggregated.in.p95_bytes}B, out avg=${aggregated.out.avg_bytes}B p95=${aggregated.out.p95_bytes}B`);
       }
       io.unlinkSync(frameSizePath);
@@ -451,10 +475,10 @@ export async function stopCollectors({ procs, gcOutputPath, methodTimingPath, su
   // missing the aggregator returns null and we omit the key.
   if (compressionPath && io.existsSync(compressionPath)) {
     try {
-      const compressionDump = JSON.parse(io.readFileSync(compressionPath, 'utf8'));
+      const compressionDump = parseJson(io.readFileSync(compressionPath, 'utf8'));
       const aggregated = aggregateCompression({ frameSize: frameSizeDump, compression: compressionDump });
       if (aggregated) {
-        results.push(aggregated);
+        results.push(collectorResult(aggregated));
         const outRatio = aggregated.out.ratio == null ? 'n/a' : `${aggregated.out.savings_pct}%`;
         const inRatio = aggregated.in.ratio == null ? 'n/a' : `${aggregated.in.savings_pct}%`;
         console.log(`DDP compression: out savings=${outRatio} (${aggregated.out.compressed_bytes}/${aggregated.out.uncompressed_bytes}), in savings=${inRatio} (${aggregated.in.compressed_bytes}/${aggregated.in.uncompressed_bytes})`);
@@ -469,10 +493,10 @@ export async function stopCollectors({ procs, gcOutputPath, methodTimingPath, su
   // pass through (with absence-convention guard) and emit a console line.
   if (driverFallbackPath && io.existsSync(driverFallbackPath)) {
     try {
-      const dump = JSON.parse(io.readFileSync(driverFallbackPath, 'utf8'));
+      const dump = parseJson(io.readFileSync(driverFallbackPath, 'utf8'));
       const aggregated = aggregateDriverFallback(dump);
       if (aggregated) {
-        results.push(aggregated);
+        results.push(collectorResult(aggregated));
         const fallbackCount = aggregated.total_cursors - aggregated.no_fallback;
         console.log(`Driver fallbacks: ${aggregated.total_cursors} observe(s), ${fallbackCount} fell back from ${aggregated.configured_first}`);
       }
@@ -493,8 +517,10 @@ export async function stopCollectors({ procs, gcOutputPath, methodTimingPath, su
 export function drainPostStopGc(gcOutputPath?: string): CollectorResult[] {
   if (!gcOutputPath || !io.existsSync(gcOutputPath)) return [];
   try {
-    const gcData = JSON.parse(io.readFileSync(gcOutputPath, 'utf8'));
-    console.log(`GC (late): ${gcData.count} collections, ${gcData.total_pause_ms}ms total pause`);
+    const parsedGc = parseJson(io.readFileSync(gcOutputPath, 'utf8'));
+    if (!isJsonObject(parsedGc)) throw new TypeError('GC output must be a JSON object.');
+    const gcData = collectorResult(parsedGc);
+    console.log(`GC (late): ${String(parsedGc.count)} collections, ${String(parsedGc.total_pause_ms)}ms total pause`);
     io.unlinkSync(gcOutputPath);
     return [gcData];
   } catch (err) {
@@ -506,7 +532,7 @@ export function drainPostStopGc(gcOutputPath?: string): CollectorResult[] {
 export function drainPostStopDriverFallback(driverFallbackPath?: string): CollectorResult[] {
   if (!driverFallbackPath || !io.existsSync(driverFallbackPath)) return [];
   try {
-    const dump = JSON.parse(io.readFileSync(driverFallbackPath, 'utf8'));
+    const dump = parseJson(io.readFileSync(driverFallbackPath, 'utf8'));
     io.unlinkSync(driverFallbackPath);
     const aggregated = aggregateDriverFallback(dump);
     return aggregated ? [aggregated] : [];

@@ -30,18 +30,76 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { isJsonObject, isJsonValue } from '../lib/data-values.js';
+import type { JsonValue } from '../lib/data-values.js';
 
-export interface CollectorResult { readonly metric: string; readonly [key: string]: unknown }
+/** JSON-safe output from one self-identifying collector. */
+export interface CollectorResult {
+  readonly metric: string;
+  readonly [key: string]: JsonValue | undefined;
+}
+/** Runtime identity fields captured from the benchmarked Meteor process. */
+export interface RuntimeMetadata {
+  readonly observer_driver?: string;
+  readonly observer_driver_actual?: string;
+  readonly transport?: string;
+  readonly channel?: string;
+  readonly version?: string;
+  readonly [key: string]: JsonValue | undefined;
+}
+/** Canonical persisted benchmark result consumed by comparisons and the dashboard. */
 export interface BenchmarkResult {
   readonly timestamp: string; readonly tag: string; readonly meteor: { readonly version: string; readonly sha: string };
-  readonly runtime: Readonly<Record<string, unknown>>; readonly scenario: string; readonly app: string;
+  readonly runtime: RuntimeMetadata; readonly scenario: string; readonly app: string;
   readonly wall_clock_ms: number; readonly metrics: Readonly<Record<string, CollectorResult>>;
 }
+/** Inputs required to construct one canonical benchmark result. */
 export interface BuildResultInput {
   scenario: string; app: string; tag?: string; meteor: { version: string; sha: string };
-  runtime?: Readonly<Record<string, unknown>>; collectorResults: readonly CollectorResult[]; wallClockMs: number;
+  runtime?: RuntimeMetadata; collectorResults: readonly CollectorResult[]; wallClockMs: number;
 }
 
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** Validates an untrusted self-identifying collector payload. */
+export function collectorResult<T extends Readonly<{ readonly metric: string }>>(value: T): T & CollectorResult;
+export function collectorResult(value: unknown): CollectorResult;
+export function collectorResult(value: unknown): CollectorResult {
+  if (!isJsonObject(value) || typeof value.metric !== 'string' || value.metric.length === 0) {
+    throw new TypeError('Collector result must be a JSON object with a non-empty metric identifier.');
+  }
+  return { ...value, metric: value.metric };
+}
+
+/** Validates an untrusted persisted result before it enters dashboard or comparison flows. */
+export function benchmarkResult(value: unknown): BenchmarkResult {
+  if (!isRecord(value)
+    || typeof value.timestamp !== 'string'
+    || typeof value.tag !== 'string'
+    || typeof value.scenario !== 'string'
+    || typeof value.app !== 'string'
+    || typeof value.wall_clock_ms !== 'number'
+    || !Number.isFinite(value.wall_clock_ms)
+    || !isRecord(value.meteor)
+    || typeof value.meteor.version !== 'string'
+    || typeof value.meteor.sha !== 'string'
+    || !isRecord(value.runtime)
+    || !isJsonValue(value.runtime)
+    || !isRecord(value.metrics)) {
+    throw new TypeError('Benchmark result is missing its canonical identity, runtime, or metric envelope.');
+  }
+  const metrics: Record<string, CollectorResult> = {};
+  for (const [name, candidate] of Object.entries(value.metrics)) {
+    const metric = collectorResult(candidate);
+    if (metric.metric !== name) throw new TypeError(`Benchmark metric key ${name} does not match ${metric.metric}.`);
+    metrics[name] = metric;
+  }
+  return { timestamp: value.timestamp, tag: value.tag, meteor: { version: value.meteor.version, sha: value.meteor.sha }, runtime: value.runtime, scenario: value.scenario, app: value.app, wall_clock_ms: value.wall_clock_ms, metrics };
+}
+
+/** Builds the canonical result envelope from trusted runtime components. */
 function buildResult({ scenario, app, tag, meteor, runtime = {}, collectorResults, wallClockMs }: BuildResultInput): BenchmarkResult {
   // The throw is deliberate — there used to be a silent
   // `meteor ?? { version: 'unknown', sha: 'unknown' }` fallback here, but
@@ -65,19 +123,19 @@ function buildResult({ scenario, app, tag, meteor, runtime = {}, collectorResult
     // Each collector tags its output with a `metric` field; we use that as
     // the key here so the dashboard reads `metrics.app_resources.cpu.avg`
     // etc. without any per-collector branching.
-    metrics: Object.fromEntries(
-      collectorResults.map((r) => [r.metric, r])
-    ),
+    metrics: Object.fromEntries(collectorResults.map((result) => [result.metric, collectorResult(result)])),
   };
 }
 
-function writeResult(result: BenchmarkResult | Readonly<Record<string, unknown>>, outputPath: string): void {
+/** Persists a canonical result using stable, human-readable JSON. */
+function writeResult(result: BenchmarkResult, outputPath: string): void {
   const dir = path.dirname(outputPath);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   // Trailing newline keeps `git diff` happy when results land in commits.
   fs.writeFileSync(outputPath, JSON.stringify(result, null, 2) + '\n');
 }
 
+/** Appends a uniquely named canonical result to local history. */
 function appendToHistory(result: BenchmarkResult, historyDir: string): void {
   if (!fs.existsSync(historyDir)) fs.mkdirSync(historyDir, { recursive: true });
   // Date.now() in the filename guarantees uniqueness across rapid re-runs
