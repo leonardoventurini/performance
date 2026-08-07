@@ -173,7 +173,8 @@ test('merges DDP fields, applies cleared fields, and removes documents', async (
   socket.receive({ msg: 'added', collection: 'items', id: 'one', fields: { keep: 1, clear: 2 } });
   socket.receive({ msg: 'changed', collection: 'items', id: 'one', fields: { keep: 3 }, cleared: ['clear'] });
   assert.deepEqual(client.snapshot('items'), [{ _id: 'one', keep: 3 }]);
-  assert.throws(() => { Reflect.set(client.snapshot('items')[0] ?? {}, 'keep', 4); }, TypeError);
+  assert.equal(Reflect.set(client.snapshot('items')[0] ?? {}, 'keep', 4), false);
+  assert.deepEqual(client.snapshot('items'), [{ _id: 'one', keep: 3 }]);
   socket.receive({ msg: 'removed', collection: 'items', id: 'one' });
   assert.deepEqual(client.snapshot('items'), []);
 });

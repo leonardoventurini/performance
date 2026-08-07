@@ -1,11 +1,11 @@
 // Compares two benchmark result files and flags regressions against the
-// thresholds configured in bench.config.js. Two exports:
+// thresholds configured in bench.config.ts. Two exports:
 //
 //   compare(baseline, target) → { summary, details }
 //     - Flattens the nested collector results (cpu, memory, gc, event-loop)
 //       into a flat list of metric pairs keyed by a threshold name.
 //     - For each pair: computes delta%, looks up the threshold in
-//       bench.config.js (warn / fail bands), tags ok/WARN/FAIL.
+//       bench.config.ts (warn / fail bands), tags ok/WARN/FAIL.
 //     - Emits explicit skip rows for unsafe pairs (missing on either side,
 //       zero baseline, non-finite target) rather than silently dropping
 //       them — the old silent-drop hid real collector-config drift.
@@ -20,11 +20,11 @@
 
 import config from '../bench.config.js';
 
-interface MetricData {
+export interface MetricData {
   metric?: string; name?: string; p99?: number; total_pause_ms?: number; max_pause_ms?: number; count?: number;
   cpu?: { avg?: number }; memory?: { avg_mb?: number }; major?: { total_ms?: number }; status?: string;
 }
-interface ComparableResult { tag: string; scenario: string; wall_clock_ms?: number; metrics?: Readonly<Record<string, MetricData>> }
+export interface ComparableResult { tag: string; scenario: string; wall_clock_ms?: number; metrics?: Readonly<Record<string, MetricData>> }
 interface MetricPair { key: string; label?: string; baseVal: number | null | undefined; targetVal: number | null | undefined }
 type SkipReason = 'zero_baseline' | 'missing_target' | 'non_finite';
 interface ComparisonDetail { metric: string; baseline: unknown; target: unknown; delta?: number | null; status: 'ok' | 'WARN' | 'FAIL' | 'skip'; reason?: SkipReason }

@@ -9,7 +9,7 @@
     "build": "npm run build:tools && node .typescript-tools/build.js",
     "verify:build": "npm run build:tools && node .typescript-tools/manifest.js",
     "test:source-inventory": "npm run build:tools && node .typescript-tools/inventory.js",
-    "test": "npm run build && node --test 'dist/tests/unit/**/*.test.js'",
+    "test": "npm run build && node --test --test-concurrency=1 'dist/tests/unit/**/*.test.js'",
     "typecheck:node": "tsc -b tsconfig.node.json tsconfig.playwright.json tsconfig.hosts.json --pretty false",
     "typecheck:all": "tsc -b --pretty false",
     "typecheck": "npm run typecheck:all"

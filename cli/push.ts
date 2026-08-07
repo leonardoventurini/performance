@@ -35,11 +35,11 @@ function resolveKey(values: CliValues, config: BenchmarkConfig): string {
 // reconnectInterval kept low (5s) since these are short-lived CLI sessions —
 // a long retry doesn't help if the user is staring at the terminal waiting.
 function connect(url: string): InstanceType<typeof io.SimpleDDP> {
-  return new io.SimpleDDP({
+  return io.createSimpleDdp({
     endpoint: url,
     SocketConstructor: io.ws,
     reconnectInterval: 5000,
-  }, undefined);
+  });
 }
 
 /** Pushes one canonical benchmark result to the dashboard. */

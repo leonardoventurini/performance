@@ -31,7 +31,7 @@ interface OracleEvidence extends UnknownRecord { readonly assertions: number; re
 interface ObserverEvidence extends UnknownRecord { readonly requestedOrder: readonly string[]; readonly actualDriver: string; readonly fallbackFrom?: string; readonly fallbackReason?: string }
 interface FaultWitness extends UnknownRecord { readonly faultId: string; readonly restored: boolean; readonly activationEvidenceDigest: string; readonly restorationEvidenceDigest: string }
 interface MongoIdentity extends UnknownRecord { readonly topology: string; readonly serverVersion: string; readonly featureCompatibilityVersion: string }
-interface AuditCaseResult extends UnknownRecord { readonly status: string; readonly reasons: readonly string[]; readonly release: ReleaseIdentity; readonly contractId: string; readonly contractDigest: string; readonly caseDefinitionDigest: string; readonly interpreterVersion: string; readonly oracles: readonly OracleEvidence[]; readonly observerEvidence: readonly ObserverEvidence[]; readonly coordinate: CaseCoordinate; readonly faultWitness?: FaultWitness; readonly attemptId: string; readonly mongo: MongoIdentity }
+interface AuditCaseResult extends UnknownRecord { readonly status: string; readonly reasons: readonly string[]; readonly release: ReleaseIdentity; readonly contractId?: string; readonly contractDigest?: string; readonly caseDefinitionDigest?: string; readonly interpreterVersion?: string; readonly oracles: readonly OracleEvidence[]; readonly observerEvidence: readonly ObserverEvidence[]; readonly coordinate: CaseCoordinate; readonly faultWitness?: FaultWitness; readonly attemptId: string; readonly mongo: MongoIdentity }
 interface CaseContract extends UnknownRecord { readonly definitionDigest: string; readonly requiredOracleProducers: readonly string[]; readonly requiresObserverEvidence: boolean; readonly requiresTransportIdentity: boolean; readonly expectation: string; readonly expectedDriverByTopology?: Readonly<Record<string, string>>; readonly expectedDriver?: string; readonly fallbackFrom?: string }
 interface NegativeControl extends UnknownRecord { readonly controlId: string; readonly expectedReason: string; readonly actualReason: string; readonly detected: boolean }
 interface RecoveryEvidence extends UnknownRecord { readonly digest: string; readonly runDocumentsRemoved: boolean; readonly topologyRestored: boolean; readonly profilerRestored: boolean; readonly networkRestored: boolean }
@@ -49,8 +49,7 @@ function caseResult(value: unknown, path: string): AuditCaseResult {
   const result = validateAuditCaseResult(value, path);
   if (typeof result.status !== 'string' || !Array.isArray(result.reasons) || !result.reasons.every((entry) => typeof entry === 'string')
     || !isRecord(result.release) || !isRecord(result.coordinate) || !isRecord(result.mongo)
-    || typeof result.attemptId !== 'string' || !Array.isArray(result.oracles) || !Array.isArray(result.observerEvidence)
-    || typeof result.contractId !== 'string' || typeof result.contractDigest !== 'string' || typeof result.caseDefinitionDigest !== 'string' || typeof result.interpreterVersion !== 'string') throw new TypeError(`${path} has invalid validated shape`);
+    || typeof result.attemptId !== 'string' || !Array.isArray(result.oracles) || !Array.isArray(result.observerEvidence)) throw new TypeError(`${path} has invalid validated shape`);
   const release = releaseIdentity(result.release);
   const coordinate = validateCaseCoordinate(result.coordinate);
   const mongo = result.mongo;
@@ -69,7 +68,7 @@ function caseResult(value: unknown, path: string): AuditCaseResult {
     if (!isRecord(witness) || typeof witness.faultId !== 'string' || typeof witness.restored !== 'boolean' || typeof witness.activationEvidenceDigest !== 'string' || typeof witness.restorationEvidenceDigest !== 'string') throw new TypeError(`${path}.faultWitness has invalid shape`);
     faultWitness = { ...witness, faultId: witness.faultId, restored: witness.restored, activationEvidenceDigest: witness.activationEvidenceDigest, restorationEvidenceDigest: witness.restorationEvidenceDigest };
   }
-  return { ...result, status: result.status, reasons: result.reasons, release, contractId: result.contractId, contractDigest: result.contractDigest, caseDefinitionDigest: result.caseDefinitionDigest, interpreterVersion: result.interpreterVersion, oracles, observerEvidence, coordinate, ...(faultWitness === undefined ? {} : { faultWitness }), attemptId: result.attemptId, mongo: { ...mongo, topology: mongo.topology, serverVersion: mongo.serverVersion, featureCompatibilityVersion: mongo.featureCompatibilityVersion } };
+  return { ...result, status: result.status, reasons: result.reasons, release, ...(typeof result.contractId === 'string' ? { contractId: result.contractId } : {}), ...(typeof result.contractDigest === 'string' ? { contractDigest: result.contractDigest } : {}), ...(typeof result.caseDefinitionDigest === 'string' ? { caseDefinitionDigest: result.caseDefinitionDigest } : {}), ...(typeof result.interpreterVersion === 'string' ? { interpreterVersion: result.interpreterVersion } : {}), oracles, observerEvidence, coordinate, ...(faultWitness === undefined ? {} : { faultWitness }), attemptId: result.attemptId, mongo: { ...mongo, topology: mongo.topology, serverVersion: mongo.serverVersion, featureCompatibilityVersion: mongo.featureCompatibilityVersion } };
 }
 function negativeControl(value: unknown, path: string): NegativeControl {
   const result = validateNegativeControlResult(value, path);

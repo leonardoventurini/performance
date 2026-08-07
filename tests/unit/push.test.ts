@@ -1,6 +1,6 @@
 // runPush / runBaseline in cli/push.js. DDP and ws live on the io facade
 // (runner/_io.ts) — same mockable seam as fs/spawn/sleep. Tests stub:
-//   - io.SimpleDDP with a fake constructor returning a fake-ddp instance
+//   - io.createSimpleDdp with a fake factory returning a fake-ddp instance
 //   - io.readFileSync for the result file
 //   - process.exit so failure paths throw instead of terminating the runner
 
@@ -78,6 +78,10 @@ function fakeDdpFactory({ callImpl, connectImpl }: FakeDdpFactoryOptions = {}) {
   return FakeDDP;
 }
 
+function installFakeDdp(factory: new (options: FakeDdpOptions) => FakeDdpInstance): void {
+  mock.method(io, 'createSimpleDdp', (options: FakeDdpOptions) => new factory(options));
+}
+
 interface FakeDdpInstance { readonly opts: FakeDdpOptions }
 function lastInstance(factory: { readonly lastInstance: FakeDdpInstance | undefined }): FakeDdpInstance {
   assert.ok(factory.lastInstance);
@@ -93,7 +97,7 @@ function lastCall(factory: { readonly calls: readonly DdpCall[] }): DdpCall {
 describe('runPush', () => {
   test('connects to URL, calls runs.insert with API key + parsed result, disconnects', async () => {
     const FakeDDP = fakeDdpFactory();
-    mock.method(io, 'SimpleDDP', FakeDDP);
+    installFakeDdp(FakeDDP);
     mock.method(io, 'readFileSync', () => JSON.stringify({ tag: 'mytag', metrics: {} }));
 
     await runPush({
@@ -122,7 +126,7 @@ describe('runPush', () => {
 
   test('URL fallback chain: flag > config.dashboardUrl > default', async () => {
     const FakeDDP = fakeDdpFactory();
-    mock.method(io, 'SimpleDDP', FakeDDP);
+    installFakeDdp(FakeDDP);
     mock.method(io, 'readFileSync', () => '{}');
 
     // Config wins when no flag.
@@ -146,7 +150,7 @@ describe('runPush', () => {
 
   test('API-key fallback chain: flag > env.BENCH_API_KEY > config.dashboardApiKey > default', async () => {
     const FakeDDP = fakeDdpFactory();
-    mock.method(io, 'SimpleDDP', FakeDDP);
+    installFakeDdp(FakeDDP);
     mock.method(io, 'readFileSync', () => '{}');
 
     process.env.BENCH_API_KEY = 'k-from-env';
@@ -177,7 +181,7 @@ describe('runPush', () => {
     const FakeDDP = fakeDdpFactory({
       callImpl: () => { throw new Error('boom auth fail'); },
     });
-    mock.method(io, 'SimpleDDP', FakeDDP);
+    installFakeDdp(FakeDDP);
     mock.method(io, 'readFileSync', () => '{}');
 
     await assert.rejects(
@@ -193,7 +197,7 @@ describe('runPush', () => {
 describe('runBaseline', () => {
   test('connects, calls baselines.set with key + scenario + runId, disconnects', async () => {
     const FakeDDP = fakeDdpFactory();
-    mock.method(io, 'SimpleDDP', FakeDDP);
+    installFakeDdp(FakeDDP);
 
     await runBaseline({
       values: { scenario: 'reactive-light', 'run-id': 'abc123', url: 'ws://x', key: 'k' },
@@ -208,7 +212,7 @@ describe('runBaseline', () => {
 
   test('accepts runId (camelCase) as an alias for run-id', async () => {
     const FakeDDP = fakeDdpFactory();
-    mock.method(io, 'SimpleDDP', FakeDDP);
+    installFakeDdp(FakeDDP);
     await runBaseline({
       values: { scenario: 's', runId: 'xyz', url: 'ws://x', key: 'k' },
       config: config(),
@@ -236,7 +240,7 @@ describe('runBaseline', () => {
     const FakeDDP = fakeDdpFactory({
       callImpl: () => { throw new Error('network down'); },
     });
-    mock.method(io, 'SimpleDDP', FakeDDP);
+    installFakeDdp(FakeDDP);
 
     await assert.rejects(
       () => runBaseline({

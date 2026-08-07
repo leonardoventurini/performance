@@ -42,6 +42,7 @@ afterEach(() => {
 // data lines that the collector code can accumulate.
 function makeFakeChild() {
   const proc = new ChildProcess();
+  proc.kill = (): boolean => true;
   const stdout = new PassThrough();
   const stderr = new PassThrough();
   proc.stdout = stdout;

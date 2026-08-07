@@ -111,6 +111,7 @@ describe('startMeteorApp', () => {
   function fakeProc({ stdout = fakeStream(), stderr = fakeStream() }: { readonly stdout?: PassThrough; readonly stderr?: PassThrough } = {}): ChildProcess {
     const proc = new ChildProcess();
     Object.defineProperty(proc, 'pid', { value: 12345 });
+    proc.kill = (): boolean => true;
     proc.stdout = stdout;
     proc.stderr = stderr;
     return proc;
@@ -144,9 +145,9 @@ describe('startMeteorApp', () => {
       source: SYSTEM_SOURCE,
       appPath: '/app', port: 3000,
     });
-    stderr.emit('=> Meteor server running\n');
-    stderr.emit('[runtime-info] observer_driver=oplog\n');
-    stderr.emit('[runtime-info] transport=uws\n');
+    stderr.emit('data', '=> Meteor server running\n');
+    stderr.emit('data', '[runtime-info] observer_driver=oplog\n');
+    stderr.emit('data', '[runtime-info] transport=uws\n');
     assert.deepEqual(getRuntimeInfo(), { observer_driver: 'oplog', transport: 'uws' });
   });
 
@@ -157,7 +158,7 @@ describe('startMeteorApp', () => {
       source: SYSTEM_SOURCE,
       appPath: '/app', port: 3000,
     });
-    stdout.emit('[runtime-info] observer_driver=changeStreams\n');
+    stdout.emit('data', '[runtime-info] observer_driver=changeStreams\n');
     assert.deepEqual(getRuntimeInfo(), { observer_driver: 'changeStreams' });
   });
 
@@ -256,6 +257,7 @@ describe('stopMeteorApp', () => {
     const sleeps: number[] = [];
     mock.method(io, 'sleep', (ms: number) => { sleeps.push(ms); return Promise.resolve(); });
     const proc = new ChildProcess();
+    proc.kill = (): boolean => true;
     await stopMeteorApp(proc, { graceMs: 500 });
     assert.deepEqual(sleeps, [500]);
   });

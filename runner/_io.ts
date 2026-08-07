@@ -32,6 +32,10 @@ export const io = {
   // without re-loading this module. mock.method(io, 'fetch', ...) also works.
   fetch: (...args: Parameters<typeof globalThis.fetch>): ReturnType<typeof globalThis.fetch> => globalThis.fetch(...args),
   SimpleDDP: _SimpleDDP,
+  /** Constructs the dashboard DDP client through a function-shaped test seam. */
+  createSimpleDdp: (options: ConstructorParameters<typeof _SimpleDDP>[0]): InstanceType<typeof _SimpleDDP> => (
+    new _SimpleDDP(options, undefined)
+  ),
   ws: _ws,
   MongoClient: _MongoClient,
 };
