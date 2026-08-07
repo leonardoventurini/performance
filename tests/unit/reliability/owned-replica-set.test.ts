@@ -179,6 +179,11 @@ test('recovery restores only the exact audit run before independently attesting 
     return { index, port, dbPath: `/tmp/member-${index}`, child, pid: child.pid, args: [], stderr: '' };
   });
   replicaSet.assertLiveOwnership = testMarker;
+  replicaSet.suspended = true;
+  replicaSet.resumeAll = async () => {
+    observations.push('resume');
+    replicaSet.suspended = false;
+  };
 
   await replicaSet.restoreAuditState();
   assert.deepEqual(await replicaSet.attestRecovery(), {
@@ -186,7 +191,7 @@ test('recovery restores only the exact audit run before independently attesting 
     profilerRestored: true,
   });
   assert.deepEqual(observations, [
-    'connect', 'delete', 'restore:profiler', 'close',
+    'resume', 'connect', 'delete', 'restore:profiler', 'close',
     'connect', 'count', 'attest:profiler', 'close',
   ]);
 });
