@@ -12,7 +12,7 @@ interface DdpError {
   readonly reason?: string;
 }
 
-interface DdpMessage {
+export interface DdpMessage {
   msg: string;
   id?: string;
   session?: string;
@@ -64,6 +64,17 @@ interface RawDdpClientOptions {
   readonly webSocketFactory: (endpoint: string) => WebSocketLike;
   readonly clientId: string;
   readonly maximumLedgerEntries: number;
+}
+
+/** One immutable raw DDP wire-ledger entry. */
+export interface RawDdpLedgerEntry {
+  readonly sequence: number;
+  readonly timestampNs: string;
+  readonly clientId: string;
+  readonly connectionAttempt: number;
+  readonly direction: MessageDirection;
+  readonly byteLength: number;
+  readonly message: DdpMessage;
 }
 
 interface ConnectOptions {
@@ -232,7 +243,7 @@ export class RawDdpClient {
   connectionAttempt: number;
   sequence: number;
   nextOperationId: number;
-  readonly ledgerEntries: unknown[];
+  readonly ledgerEntries: RawDdpLedgerEntry[];
   readonly collections: Map<string, Map<string, Record<string, unknown>>>;
   readonly pendingMessages: Set<PendingMessage>;
   readonly subscriptions: Map<string, Subscription>;
@@ -263,7 +274,7 @@ export class RawDdpClient {
   }
 
   /** Returns an immutable copy of the bounded wire ledger. */
-  ledger(): readonly unknown[] {
+  ledger(): readonly RawDdpLedgerEntry[] {
     return immutable(this.ledgerEntries);
   }
 
@@ -384,7 +395,7 @@ export class RawDdpClient {
   }
 
   #record(direction: MessageDirection, raw: string, message: DdpMessage): void {
-    const entry = immutable({
+    const entry: RawDdpLedgerEntry = immutable({
       sequence: ++this.sequence,
       timestampNs: process.hrtime.bigint().toString(),
       clientId: this.clientId,
