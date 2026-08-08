@@ -363,9 +363,9 @@ export class RawDdpClient {
   }
 
   /** Reconnects using the last accepted session and exact DDP receive count. */
-  resume(): Promise<ConnectResult> {
+  resume(options: DdpOperationOptions = {}): Promise<ConnectResult> {
     if (this.sessionId === null) throw new Error('cannot resume before a session has been established');
-    return this.connect({ sessionId: this.sessionId, receivedCount: this.receivedCount });
+    return this.connect({ sessionId: this.sessionId, receivedCount: this.receivedCount, ...options });
   }
 
   /** Sends a subscription and resolves on its matching ready message. */

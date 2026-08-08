@@ -110,3 +110,43 @@ test('auth-context resume fails closed until an authenticated DDP fixture exists
     /requires an authenticated DDP fixture/u,
   );
 });
+
+test('subscription cancellation reaches the active raw DDP wait', async () => {
+  const controller = new AbortController();
+  let receivedSignal: AbortSignal | undefined;
+  let signalReceived: () => void = () => undefined;
+  const activeWait = new Promise<void>((resolve) => { signalReceived = resolve; });
+  const adapter = createClientAdapter({
+    endpoint: 'ws://127.0.0.1:3000/websocket',
+    proxy: { backendIdForConnection: () => 'meteor-0', setRoutePolicy() {} },
+    cluster: { backends: [{ id: 'meteor-0' }], async stopInstance() {}, async restartInstance() {} },
+    runId: 'run-1', caseExecutionId: 'case-1', ownershipToken: 'owned-token',
+    maximumLedgerEntries: 100, transport: 'sockjs',
+    clientFactory({ clientId }) {
+      return {
+        clientId,
+        state: RAW_DDP_STATES.CONNECTED,
+        async connect() {},
+        async resume() { return { classification: 'resumed' }; },
+        subscribe(_name, _params, options) {
+          receivedSignal = options?.signal;
+          signalReceived();
+          return new Promise((_resolve, reject) => {
+            options?.signal?.addEventListener('abort', () => reject(options.signal?.reason), { once: true });
+          });
+        },
+      };
+    },
+  });
+  const pending = adapter.subscribe({
+    step: { clients: { kind: 'literal', value: 1 }, query: { kind: 'unordered' } },
+    resolve: () => 1,
+    signal: controller.signal,
+  });
+
+  await activeWait;
+  controller.abort(new Error('interpreter deadline'));
+
+  await assert.rejects(pending, /interpreter deadline/u);
+  assert.equal(receivedSignal, controller.signal);
+});
