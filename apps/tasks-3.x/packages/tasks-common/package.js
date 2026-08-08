@@ -13,13 +13,19 @@ Package.describe({
 Package.onUse(function(api) {
   api.versionsFrom('2.16');
   api.use('ecmascript');
-  api.mainModule('tasks-common.client.js', ['client']);
-  api.mainModule('tasks-common.server.js', ['server']);
+  api.use('typescript@5.11.0-beta351.0');
+  api.use('meteor@2.3.1');
+  api.use('mongo@2.5.0-beta351.0');
+  api.use('random@1.2.2');
+  api.use('react-meteor-data@3.0.0', 'client');
+  api.mainModule('tasks-common.client.tsx', ['client']);
+  api.mainModule('tasks-common.server.ts', ['server']);
 });
 
 Package.onTest(function(api) {
   api.use('ecmascript');
-  api.use('tinytest');
+  api.use('typescript@5.11.0-beta351.0');
+  api.use('meteortesting:mocha', undefined, { weak: true });
   api.use('tasks-common');
-  api.mainModule('tasks-common-tests.js');
+  api.mainModule('tasks-common-tests.ts');
 });

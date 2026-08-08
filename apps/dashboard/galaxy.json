@@ -1,8 +1,8 @@
 {
   "commands": {
-    "install": "npm install",
-    "build": "npm run build",
-    "start": "npm start"
+    "install": "meteor npm ci",
+    "build": "meteor npm run build",
+    "start": "meteor npm start"
   },
   "health": {
     "path": "/health"

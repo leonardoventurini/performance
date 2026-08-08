@@ -264,15 +264,11 @@ function removeMeteorAppBundleVisualizer() {
 
 function runScriptHelper() {
   local script="${1}"
-  local scriptContext="$(dirname $0)"
-  if [[ "${scriptContext}" =~ "./" ]]; then
-    scriptContext="${baseDir}/${scriptContext}"
-  fi
-  $(getMeteorNodeCmd) "${scriptContext}/helpers/${script}" ${@:2}
+  $(getMeteorNodeCmd) "${baseDir}/dist/scripts/helpers/${script}" ${@:2}
 }
 
 function calculateMeteorAppBundleSize() {
-  MONITOR_SIZE_URL="http://localhost:${appPort}/__meteor__/bundle-visualizer/stats" runScriptHelper "print-bundle-size.js"
+  MONITOR_SIZE_URL="http://localhost:${appPort}/__meteor__/bundle-visualizer/stats" runScriptHelper "print-bundle-size.cjs"
 }
 
 function logMeteorVersion() {
@@ -295,7 +291,7 @@ function logNpmPackages() {
   logBanner "==============================="
   logBanner " Npm packages"
   logBanner "==============================="
-  runScriptHelper "print-meteor-packages.js" "${appPath}" "npm"
+  runScriptHelper "print-meteor-packages.cjs" "${appPath}" "npm"
   logBanner "==============================="
 }
 
@@ -303,7 +299,7 @@ function logMeteorPackages() {
   logBanner "==============================="
   logBanner " Meteor packages"
   logBanner "==============================="
-  runScriptHelper "print-meteor-packages.js" "${appPath}" "atmosphere"
+  runScriptHelper "print-meteor-packages.cjs" "${appPath}" "atmosphere"
   logBanner "==============================="
 }
 
@@ -311,7 +307,7 @@ function logMeteorConfig() {
   logBanner "==============================="
   logBanner " Meteor config"
   logBanner "==============================="
-  runScriptHelper "print-meteor-config.js" "${appPath}"
+  runScriptHelper "print-meteor-config.cjs" "${appPath}"
   logBanner "==============================="
 }
 
@@ -611,8 +607,8 @@ function cleanup() {
 }
 trap cleanup SIGINT SIGTERM
 
-meteorClientEntrypoint="${METEOR_CLIENT_ENTRYPOINT:-$(runScriptHelper "get-meteor-entrypoint.js" "${appPath}" "client")}"
-meteorServerEntrypoint="${METEOR_SERVER_ENTRYPOINT:-$(runScriptHelper "get-meteor-entrypoint.js" "${appPath}" "server")}"
+meteorClientEntrypoint="${METEOR_CLIENT_ENTRYPOINT:-$(runScriptHelper "get-meteor-entrypoint.cjs" "${appPath}" "client")}"
+meteorServerEntrypoint="${METEOR_SERVER_ENTRYPOINT:-$(runScriptHelper "get-meteor-entrypoint.cjs" "${appPath}" "server")}"
 
 if [[ -z "${monitorSizeOnly}" ]]  && [[ -z "${monitorBuild}" ]] && ([[ -z "${meteorClientEntrypoint}" ]] || [[ -z "${meteorServerEntrypoint}" ]]); then
   # Restore original stdout and stderr

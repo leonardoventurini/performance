@@ -5,7 +5,7 @@ harness needs to read Meteor's internals. Each monitor patches a Meteor
 API (`Meteor.methods`, `Meteor.publish`, `Session.prototype.*`, observe
 multiplexers, etc.) to record samples in memory, then dumps to a file
 when the process shuts down. The harness reads the file in
-[runner/collectors.js](../../../../runner/collectors.js) and surfaces
+[runner/collectors.ts](../../../../runner/collectors.ts) and surfaces
 the aggregated numbers under `metrics.<key>` in the result JSON.
 
 **Activation is env-gated**: each monitor only writes its dump file when
@@ -25,18 +25,18 @@ backlog, driver fallback) without polluting domain files.
 
 | File | Init fn | Env var | Metric key |
 |---|---|---|---|
-| [method-timing.server.js](method-timing.server.js) | `initMethodTiming` | `METHOD_TIMING_OUTPUT` | `ddp_methods` |
-| [sub-timing.server.js](sub-timing.server.js) | `initSubTiming` | `SUB_TIMING_OUTPUT` | `ddp_subscriptions` |
-| [propagation-timing.server.js](propagation-timing.server.js) | `initPropagationTiming` | `PROPAGATION_TIMING_OUTPUT` | `live_update_propagation` |
-| [observer-pool-sampler.server.js](observer-pool-sampler.server.js) | `initObserverPoolSampler` | `OBSERVER_POOL_OUTPUT` | `observer_pool` |
-| [ddp-message-counter.server.js](ddp-message-counter.server.js) | `initDdpMessageCounter` | `DDP_MESSAGE_OUTPUT` | `ddp_messages` |
-| [frame-size-counter.server.js](frame-size-counter.server.js) | `initFrameSizeCounter` | `DDP_FRAME_SIZE_OUTPUT` | `ddp_frame_size` |
-| [compression-tracker.server.js](compression-tracker.server.js) | `initCompressionTracker` | `DDP_COMPRESSION_OUTPUT` | `ddp_compression` (combines with frame-size dump) |
-| [driver-fallback-tracker.server.js](driver-fallback-tracker.server.js) | `initDriverFallbackTracker` | `DRIVER_FALLBACK_OUTPUT` | `driver_fallbacks` |
+| [method-timing.server.ts](method-timing.server.ts) | `initMethodTiming` | `METHOD_TIMING_OUTPUT` | `ddp_methods` |
+| [sub-timing.server.ts](sub-timing.server.ts) | `initSubTiming` | `SUB_TIMING_OUTPUT` | `ddp_subscriptions` |
+| [propagation-timing.server.ts](propagation-timing.server.ts) | `initPropagationTiming` | `PROPAGATION_TIMING_OUTPUT` | `live_update_propagation` |
+| [observer-pool-sampler.server.ts](observer-pool-sampler.server.ts) | `initObserverPoolSampler` | `OBSERVER_POOL_OUTPUT` | `observer_pool` |
+| [ddp-message-counter.server.ts](ddp-message-counter.server.ts) | `initDdpMessageCounter` | `DDP_MESSAGE_OUTPUT` | `ddp_messages` |
+| [frame-size-counter.server.ts](frame-size-counter.server.ts) | `initFrameSizeCounter` | `DDP_FRAME_SIZE_OUTPUT` | `ddp_frame_size` |
+| [compression-tracker.server.ts](compression-tracker.server.ts) | `initCompressionTracker` | `DDP_COMPRESSION_OUTPUT` | `ddp_compression` (combines with frame-size dump) |
+| [driver-fallback-tracker.server.ts](driver-fallback-tracker.server.ts) | `initDriverFallbackTracker` | `DRIVER_FALLBACK_OUTPUT` | `driver_fallbacks` |
 
 Each init is re-exported from
-[bench-monitors.server.js](bench-monitors.server.js) and called from
-[apps/tasks-3.x/server/main.js](../../server/main.js) inside
+[bench-monitors.server.ts](bench-monitors.server.ts) and called from
+[apps/tasks-3.x/server/main.ts](../../server/main.ts) inside
 `Meteor.startup` **before** any user code that registers Meteor APIs
 or writes to collections. The wrap only applies to subsequent
 registrations / instances, so order matters:
@@ -78,7 +78,7 @@ Meteor.startup(async () => {
    relevant DDP lifecycle event.
 4. Cap samples (currently 100k) so a pathological workload can't OOM
    the app.
-5. Call [installDumpOnShutdown](_dump-on-shutdown.js) with the output
+5. Call [installDumpOnShutdown](_dump-on-shutdown.ts) with the output
    path + a closure returning the dump shape + a label. The helper
    writes the file two ways:
    - **Periodic snapshot every 5 s** (load-bearing — the meteor parent
@@ -88,9 +88,9 @@ Meteor.startup(async () => {
      samples between the last snapshot and the kill if the signal does
      land).
 
-[method-timing.server.js](method-timing.server.js) is the canonical
+[method-timing.server.ts](method-timing.server.ts) is the canonical
 reference for the grouped-by-name shape.
-[propagation-timing.server.js](propagation-timing.server.js) is the
+[propagation-timing.server.ts](propagation-timing.server.ts) is the
 canonical reference for the flat-aggregate shape (and prototype-level
 patching across Meteor classes that aren't exported).
 
@@ -98,20 +98,20 @@ patching across Meteor classes that aren't exported).
 
 Mechanical steps — each task in `.claude/metrics-tasks/` follows this:
 
-1. **New file in this package**: `apps/tasks-3.x/packages/bench-monitors/<thing>.server.js`
+1. **New file in this package**: `apps/tasks-3.x/packages/bench-monitors/<thing>.server.ts`
    - Export `init<Thing>()`.
    - Patch the relevant Meteor API.
    - Use the SIGTERM dump pattern above, gated on `<THING>_OUTPUT`.
 
 2. **Re-export from
-   [bench-monitors.server.js](bench-monitors.server.js)**:
+   [bench-monitors.server.ts](bench-monitors.server.ts)**:
    ```js
    import { initThing } from './thing.server';
    export { initMethodTiming, initSubTiming, initThing };
    ```
 
 3. **Call from
-   [apps/tasks-3.x/server/main.js](../../server/main.js)**:
+   [apps/tasks-3.x/server/main.ts](../../server/main.ts)**:
    ```js
    import { ..., initThing } from 'meteor/bench-monitors';
    Meteor.startup(async () => {
@@ -122,8 +122,8 @@ Mechanical steps — each task in `.claude/metrics-tasks/` follows this:
    ```
 
 4. **Wire harness side**
-   ([runner/collectors.js](../../../../runner/collectors.js) +
-   [runner/meteor-process.js](../../../../runner/meteor-process.js)):
+   ([runner/collectors.ts](../../../../runner/collectors.ts) +
+   [runner/meteor-process.ts](../../../../runner/meteor-process.ts)):
    - `prepareThingOutput(tag)` — returns a `results/thing-<tag>-<ts>.json` path.
    - Pass `thingPath` through `startMeteorApp` (sets `THING_OUTPUT` env var)
      and through `startCollectors`/`stopCollectors`.
@@ -133,16 +133,16 @@ Mechanical steps — each task in `.claude/metrics-tasks/` follows this:
    - In `stopCollectors`, read the dump file, call the aggregator, push
      the result, `unlinkSync` the file.
 
-5. **Wire drivers** ([drivers/artillery.js](../../../../drivers/artillery.js) +
-   [drivers/script.js](../../../../drivers/script.js)): call
+5. **Wire drivers** ([drivers/artillery.ts](../../../../drivers/artillery.ts) +
+   [drivers/script.ts](../../../../drivers/script.ts)): call
    `prepareThingOutput` and pass `thingPath` through `startMeteorApp` +
    `startCollectors`.
 
 6. **Tests**:
-   - `tests/unit/<thing>-percentiles.test.js` for the aggregator
-     (mirror [tests/unit/method-timing-percentiles.test.js](../../../../tests/unit/method-timing-percentiles.test.js)).
+   - `tests/unit/<thing>-percentiles.test.ts` for the aggregator
+     (mirror [tests/unit/method-timing-percentiles.test.ts](../../../../tests/unit/method-timing-percentiles.test.ts)).
    - One-line extension to
-     [tests/unit/metric-keys-contract.test.js](../../../../tests/unit/metric-keys-contract.test.js) `ALLOWED_METRIC_KEYS`.
+     [tests/unit/metric-keys-contract.test.ts](../../../../tests/unit/metric-keys-contract.test.ts) `ALLOWED_METRIC_KEYS`.
 
 ## Conventions
 

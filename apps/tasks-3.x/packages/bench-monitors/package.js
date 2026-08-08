@@ -20,5 +20,14 @@ Package.describe({
 Package.onUse(function (api) {
   api.versionsFrom('2.16');
   api.use('ecmascript');
-  api.mainModule('bench-monitors.server.js', ['server']);
+  api.use('typescript@5.11.0-beta351.0');
+  api.mainModule('bench-monitors.server.ts', ['server']);
+});
+
+Package.onTest(function (api) {
+  api.use('ecmascript');
+  api.use('typescript@5.11.0-beta351.0');
+  api.use('meteortesting:mocha', undefined, { weak: true });
+  api.use('bench-monitors');
+  api.mainModule('audit-observer-contract-tests.ts');
 });

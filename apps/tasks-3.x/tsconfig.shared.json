@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": { "types": ["node", "meteor"] },
+  "include": ["packages/tasks-common/reliability-query-descriptors.ts", "packages/tasks-common/tasks-api.ts", "packages/tasks-common/tasks-collection.ts", "packages/tasks-common/tasks-common.ts", "types/**/*.d.ts"]
+}

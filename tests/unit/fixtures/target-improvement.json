@@ -5,6 +5,7 @@
     "version": "devel",
     "sha": "111aaaa"
   },
+  "runtime": {},
   "scenario": "reactive-light",
   "app": "tasks-3.x",
   "wall_clock_ms": 34000,

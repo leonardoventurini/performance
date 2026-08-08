@@ -1,0 +1,326 @@
+{
+  "schemaVersion": 1,
+  "id": "session.resume.auth_context_preserved",
+  "title": "session — resume — auth context preserved",
+  "source": "https://docs.meteor.com/api/meteor.html#reconnection",
+  "rationale": "Required DDP session-resumption or fresh-session recovery behavior.",
+  "applicability": [
+    {
+      "topologies": [
+        "replica_set"
+      ],
+      "transports": [
+        "sockjs",
+        "uws"
+      ],
+      "observerOrders": [
+        [
+          "changeStreams",
+          "oplog",
+          "polling"
+        ]
+      ]
+    }
+  ],
+  "parameters": {
+    "subscribers": {
+      "type": "integer",
+      "default": 3,
+      "minimum": 1,
+      "maximum": 12
+    },
+    "documents": {
+      "type": "integer",
+      "default": 1,
+      "minimum": 1,
+      "maximum": 120
+    },
+    "payloadBytes": {
+      "type": "integer",
+      "default": 65536,
+      "minimum": 1,
+      "maximum": 15728640
+    }
+  },
+  "fixture": {
+    "collection": "reliabilityDocuments",
+    "publication": "reliability.documents",
+    "generator": "synthetic-document-v1",
+    "subscribers": {
+      "kind": "parameter",
+      "name": "subscribers"
+    },
+    "documents": {
+      "kind": "literal",
+      "value": 1
+    },
+    "payloadBytes": {
+      "kind": "parameter",
+      "name": "payloadBytes"
+    }
+  },
+  "preconditions": [
+    {
+      "kind": "topology_matches_coordinate"
+    },
+    {
+      "kind": "transport_available",
+      "transport": {
+        "kind": "coordinate",
+        "field": "transport"
+      }
+    }
+  ],
+  "steps": [
+    {
+      "id": "subscribe",
+      "kind": "subscribe",
+      "query": {
+        "kind": "unordered"
+      },
+      "onFailure": "incomplete_case",
+      "clients": {
+        "kind": "parameter",
+        "name": "subscribers"
+      }
+    },
+    {
+      "id": "ready",
+      "kind": "wait",
+      "predicate": "all_subscribers_ready",
+      "inputs": {},
+      "onFailure": "incomplete_case"
+    },
+    {
+      "id": "lifecycle",
+      "kind": "client_lifecycle",
+      "action": "resume_auth_context",
+      "clients": {
+        "kind": "parameter",
+        "name": "subscribers"
+      },
+      "onFailure": "fail_case"
+    },
+    {
+      "id": "insert-fixture",
+      "kind": "mongo_write",
+      "operation": "insert_one",
+      "selector": {
+        "kind": "fixture_document",
+        "index": 0
+      },
+      "mutation": {
+        "kind": "fixture_document",
+        "index": 0
+      },
+      "expectedTransition": {
+        "kind": "insert"
+      },
+      "onFailure": "fail_case"
+    },
+    {
+      "id": "exercise",
+      "kind": "mongo_write",
+      "operation": "update_one",
+      "selector": {
+        "kind": "fixture_document",
+        "index": 0
+      },
+      "mutation": {
+        "kind": "set",
+        "value": {
+          "kind": "coordinate",
+          "field": "seed"
+        },
+        "path": [
+          "revisionMarker"
+        ]
+      },
+      "expectedTransition": {
+        "kind": "set_field",
+        "value": {
+          "kind": "coordinate",
+          "field": "seed"
+        },
+        "path": [
+          "revisionMarker"
+        ]
+      },
+      "onFailure": "fail_case"
+    },
+    {
+      "id": "converge",
+      "kind": "wait",
+      "predicate": "all_subscribers_converged",
+      "inputs": {},
+      "onFailure": "fail_case"
+    },
+    {
+      "id": "mongo-snapshot",
+      "kind": "snapshot",
+      "producer": "mongodb",
+      "scope": "mongodb",
+      "onFailure": "incomplete_case"
+    },
+    {
+      "id": "ddp-snapshot",
+      "kind": "snapshot",
+      "producer": "ddp_client",
+      "scope": "ddp",
+      "onFailure": "incomplete_case"
+    },
+    {
+      "id": "seal",
+      "kind": "seal_evidence",
+      "onFailure": "incomplete_case"
+    }
+  ],
+  "evidence": {
+    "requiredProducers": [
+      "mongodb",
+      "ddp_client",
+      "meteor_probe"
+    ],
+    "observer": {
+      "kind": "selected",
+      "driver": {
+        "kind": "literal",
+        "value": "changeStreams"
+      }
+    },
+    "transportIdentity": "required",
+    "fault": null,
+    "ledgers": [
+      "mongodb_snapshot",
+      "ddp_snapshot",
+      "observer_selection",
+      "transport_identity",
+      "session_identity"
+    ]
+  },
+  "oracles": [
+    {
+      "id": "mongodb-state",
+      "family": "snapshot_exact",
+      "producer": "mongodb",
+      "expected": {
+        "kind": "step",
+        "stepId": "exercise",
+        "output": "expectedState"
+      },
+      "observed": {
+        "producer": "mongodb",
+        "stepId": "mongo-snapshot",
+        "ledger": "snapshot"
+      },
+      "failureReason": "content_digest_mismatch",
+      "gate": "hard"
+    },
+    {
+      "id": "ddp-state",
+      "family": "snapshot_exact",
+      "producer": "ddp_client",
+      "expected": {
+        "kind": "step",
+        "stepId": "exercise",
+        "output": "expectedState"
+      },
+      "observed": {
+        "producer": "ddp_client",
+        "stepId": "ddp-snapshot",
+        "ledger": "snapshot"
+      },
+      "failureReason": "content_digest_mismatch",
+      "gate": "hard"
+    },
+    {
+      "id": "observer-driver",
+      "family": "observer_identity",
+      "producer": "meteor_probe",
+      "expected": {
+        "kind": "literal",
+        "value": "changeStreams"
+      },
+      "observed": {
+        "producer": "meteor_probe",
+        "stepId": "subscribe",
+        "ledger": "observer_selection"
+      },
+      "failureReason": "observer_identity_mismatch",
+      "gate": "hard"
+    },
+    {
+      "id": "cleanup",
+      "family": "cleanup_complete",
+      "producer": "mongodb",
+      "expected": {
+        "kind": "literal",
+        "value": true
+      },
+      "observed": {
+        "producer": "mongodb",
+        "stepId": "cleanup",
+        "ledger": "cleanup"
+      },
+      "failureReason": "recovery_incomplete",
+      "gate": "hard"
+    },
+    {
+      "id": "transport",
+      "family": "transport_identity",
+      "producer": "meteor_probe",
+      "expected": {
+        "kind": "coordinate",
+        "field": "transport"
+      },
+      "observed": {
+        "producer": "meteor_probe",
+        "stepId": "subscribe",
+        "ledger": "transport_identity"
+      },
+      "failureReason": "transport_identity_mismatch",
+      "gate": "hard"
+    },
+    {
+      "id": "session",
+      "family": "session_identity",
+      "producer": "ddp_client",
+      "expected": {
+        "kind": "step",
+        "stepId": "lifecycle",
+        "output": "expectedSessionIdentity"
+      },
+      "observed": {
+        "producer": "ddp_client",
+        "stepId": "lifecycle",
+        "ledger": "session_identity"
+      },
+      "failureReason": "session_identity_mismatch",
+      "gate": "hard"
+    }
+  ],
+  "diagnostics": [
+    {
+      "kind": "propagation_latency",
+      "fromStep": "exercise"
+    },
+    {
+      "kind": "event_counts"
+    }
+  ],
+  "cleanup": {
+    "kind": "run_scoped",
+    "verifyEmpty": true
+  },
+  "budget": {
+    "maximumSteps": 16,
+    "maximumDocuments": 120,
+    "maximumSubscribers": 12,
+    "maximumPayloadBytes": 15728640,
+    "maximumEvidenceEntries": 10000,
+    "stepTimeoutMs": 30000,
+    "caseTimeoutMs": 180000,
+    "maximumRetries": 0
+  },
+  "sharing": "isolated"
+}

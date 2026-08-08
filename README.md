@@ -13,8 +13,33 @@ A comprehensive benchmarking suite for Meteor applications. It allows you to run
 Clone the repository and install dependencies:
 
 ```bash
-npm install
+just install
 ```
+
+This installs the root harness with system `npm` and installs the task fixture
+and dashboard with Meteor's bundled `meteor npm`, all from their committed
+lockfiles. When Just is unavailable, use `npm ci` at the repository root and
+`meteor npm ci` inside each Meteor application.
+
+## Common commands
+
+The root `justfile` provides discoverable shortcuts for installation, checks,
+local applications, Tailwind generation, and benchmark CLI operations:
+
+```bash
+just --list
+just check
+just bench-list
+just bench reactive-light --tag local
+```
+
+`just check` type-checks the root harness and host contracts, enforces the
+maintained-source inventory, and runs the credential-free root verification
+suite. `just check-all` additionally type-checks every workspace and runs both
+Meteor application suites, so it requires the Meteor CLI. Run `just install`
+before checks so every gate uses workspace-local dependencies. Destructive
+dashboard mutations and legacy remote operations remain explicit low-level
+commands and intentionally have no Just recipes.
 
 ## Usage
 
@@ -42,6 +67,45 @@ node bench.js run --scenario <scenario-name> --app <app-name>
 - `--tag <label>`: Add a tag to the benchmark run.
 - `--meteor-version <v>`: Run against a pinned published release (e.g., `3.1.2`).
 - `--meteor-checkout <path>`: Run against a local Meteor checkout.
+
+### Run a Change-Stream Audit
+
+The reliability flow compiles validated JSON case definitions into a closed
+primitive interpreter. It provisions an owned three-member replica set, two
+Meteor instances, and a loopback DDP proxy; writes deterministic adversarial
+documents directly to MongoDB; and verifies independent MongoDB, DDP,
+observer, transport, fault, and cleanup evidence:
+
+```bash
+just audit
+just audit extreme changeStreams
+```
+
+Start the dashboard with access to the local audit runner:
+
+```sh
+just dashboard
+```
+
+Open `http://localhost:4000/audits`. Audit controls are available without a
+separate API key. The browser can select only the bounded profile, observer
+driver, configured Meteor release, seed, and tag; database targets and
+arbitrary CLI arguments remain server-controlled. Because anyone who can reach
+this page can start or cancel an audit, expose an audit-capable dashboard only
+on a trusted local or otherwise access-controlled network.
+
+The bounded `smoke` profile and `changeStreams` driver are the defaults.
+`extreme` must be selected explicitly. The executor never uses an
+operator-supplied MongoDB target: every audit owns its loopback topology and
+attests teardown before it can pass. The `oplog` observer input remains
+accepted for explicit-order diagnostics, but it cannot produce a passing
+change-stream conformance result unless the declarative catalog contains the
+complete required coordinate set for that order.
+
+Synthetic data is generated locally from a seed. No model or external network
+call is made during the workload. Results retain the normal output/history
+contract; `metrics.change_stream_audit` includes the catalog digest, case
+outcomes, negative-control results, and restoration evidence.
 
 ### Compare Results
 
@@ -118,7 +182,7 @@ The `Runtime Matrix Benchmark` workflow (`.github/workflows/benchmark-runtime-ma
 
 ## Configuration
 
-The framework is configured via `bench.config.js`. You can define:
+The framework is configured via `bench.config.ts`. You can define:
 - `meteorCheckoutPath`: Default path for local Meteor checkout.
 - `defaultApp`: Default app to benchmark.
 - `apps`: Available apps.
@@ -128,8 +192,8 @@ The framework is configured via `bench.config.js`. You can define:
 ## Meteor Source Configuration
 
 You can benchmark different Meteor versions by specifying the source. These are mutually exclusive:
-1. **Local Checkout:** Set `METEOR_CHECKOUT_PATH` env var, use `--meteor-checkout` flag, or configure `meteorCheckoutPath` in `bench.config.js`.
-2. **Pinned Release:** Set `METEOR_RELEASE` env var, use `--meteor-version` flag, or configure `meteorVersion` in `bench.config.js`.
+1. **Local Checkout:** Set `METEOR_CHECKOUT_PATH` env var, use `--meteor-checkout` flag, or configure `meteorCheckoutPath` in `bench.config.ts`.
+2. **Pinned Release:** Set `METEOR_RELEASE` env var, use `--meteor-version` flag, or configure `meteorVersion` in `bench.config.ts`.
 
 ## Project Structure
 

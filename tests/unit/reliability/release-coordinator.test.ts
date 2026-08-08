@@ -1,0 +1,79 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { afterEach, describe, test } from 'node:test';
+import { coordinateReleaseAudit } from '../../../reliability/release-audit/coordinator.js';
+import { validateReleaseAuditArtifact } from '../../../cli/release-audit-validate.js';
+
+const directories: string[] = [];
+const DIGEST = 'a'.repeat(64);
+const RELEASE = {
+  requested: '3.5.1-beta.0',
+  actual: '3.5.1-beta.0',
+  sourceRevision: 'release:3.5.1-beta.0',
+  fixtureRelease: 'METEOR@3.5.1-beta.0',
+  packageVersionsDigest: DIGEST,
+  settingsDigest: DIGEST,
+  harnessRevision: 'b'.repeat(40),
+  harnessDirty: false,
+  executionEnvironment: 'test',
+};
+
+afterEach(() => {
+  for (const directory of directories.splice(0)) {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+describe('release audit coordinator', () => {
+  test('persists an incomplete manifest when required adapters are absent', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'release-coordinator-'));
+    directories.push(root);
+    const executeCase = async () => null;
+    const result = await coordinateReleaseAudit({
+      repositoryRoot: process.cwd(),
+      resultsRoot: root,
+      release: '3.5.1-beta.0',
+      releaseIdentity: RELEASE,
+      topologyScope: ['replica_set'],
+      transportScope: ['sockjs'],
+      seed: 1,
+      executeCase,
+      now: (() => {
+        let value = 1_000;
+        return () => value += 1;
+      })(),
+    });
+
+    assert.equal(result.manifest.status, 'incomplete');
+    assert.equal(result.releaseExecution.state, 'incomplete');
+    assert.equal(fs.existsSync(path.join(result.artifactRoot, 'manifest.json')), true);
+    assert.equal(
+      validateReleaseAuditArtifact(path.join(result.artifactRoot, 'manifest.json')).status,
+      'incomplete',
+    );
+    const events = fs.readFileSync(
+      path.join(result.artifactRoot, 'progress.ndjson'),
+      'utf8',
+    ).trim().split('\n').map((line): { kind: string; sequence: number } => {
+      const parsed: unknown = JSON.parse(line);
+      assert.ok(parsed && typeof parsed === 'object' && 'kind' in parsed && typeof parsed.kind === 'string'
+        && 'sequence' in parsed && typeof parsed.sequence === 'number');
+      return { kind: parsed.kind, sequence: parsed.sequence };
+    });
+    assert.equal(events.at(-1)?.kind, 'audit_completed');
+    assert.deepEqual(
+      events.map(({ sequence }) => sequence),
+      Array.from({ length: events.length }, (_, index) => index + 1),
+    );
+    const manifestPath = path.join(result.artifactRoot, 'manifest.json');
+    const forged = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    forged.status = 'conformant';
+    fs.writeFileSync(manifestPath, `${JSON.stringify(forged, null, 2)}\n`);
+    assert.throws(
+      () => validateReleaseAuditArtifact(manifestPath),
+      /terminal decision|canonical aggregate/u,
+    );
+  });
+});

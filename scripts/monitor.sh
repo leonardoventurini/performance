@@ -168,11 +168,11 @@ npx artillery run "${baseDir}/artillery/${script}" &
 artPid="$!"
 
 # Run CPU and RAM monitoring for meteor app and db
-node "${baseDir}/scripts/helpers/monitor-cpu-ram.js" "${appPid}" "APP" &
-node "${baseDir}/scripts/helpers/monitor-cpu-ram.js" "${dbPid}" "DB" &
+node "${baseDir}/dist/scripts/helpers/monitor-cpu-ram.cjs" "${appPid}" "APP" &
+node "${baseDir}/dist/scripts/helpers/monitor-cpu-ram.cjs" "${dbPid}" "DB" &
 
-cpuRamAppPid="$(getPidByName "${baseDir}/scripts/helpers/monitor-cpu-ram.js ${appPid} APP")"
-cpuRamDbPid="$(getPidByName "${baseDir}/scripts/helpers/monitor-cpu-ram.js ${dbPid} DB")"
+cpuRamAppPid="$(getPidByName "${baseDir}/dist/scripts/helpers/monitor-cpu-ram.cjs ${appPid} APP")"
+cpuRamDbPid="$(getPidByName "${baseDir}/dist/scripts/helpers/monitor-cpu-ram.cjs ${dbPid} DB")"
 
 echo "Monitor CpuRam APP Pid ${cpuRamAppPid}"
 echo "Monitor CpuRam DB Pid ${cpuRamDbPid}"

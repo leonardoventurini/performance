@@ -10,6 +10,9 @@ const { defineConfig } = require('@meteorjs/rspack');
  *
  * Use these flags to adjust your build settings based on environment.
  */
-module.exports = defineConfig(Meteor => {
+/** @type {ReturnType<typeof defineConfig>} */
+const config = defineConfig(_Meteor => {
   return {};
 });
+
+module.exports = config;

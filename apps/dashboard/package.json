@@ -5,6 +5,7 @@
     "start": "meteor run",
     "test": "meteor test --once --driver-package meteortesting:mocha",
     "test-app": "TEST_WATCH=1 meteor test --full-app --driver-package meteortesting:mocha",
+    "typecheck": "tsc -b --pretty false",
     "visualize": "meteor --production --extra-packages bundle-visualizer",
     "tw": "tailwindcss -i _tw/main.tailwind.css -o client/main.css --minify",
     "tw:watch": "tailwindcss -i _tw/main.tailwind.css -o client/main.css --watch"
@@ -24,14 +25,19 @@
     "@rspack/core": "^1.7.1",
     "@rspack/plugin-react-refresh": "^1.4.3",
     "@tailwindcss/cli": "^4.3.0",
-    "tailwindcss": "^4.3.0"
+    "@types/jquery": "^4.0.1",
+    "@types/meteor": "^2.9.11",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^26.1.2",
+    "tailwindcss": "^4.3.0",
+    "typescript": "^7.0.2"
   },
   "meteor": {
     "mainModule": {
-      "client": "client/main.js",
-      "server": "server/main.js"
+      "client": "client/main.ts",
+      "server": "server/main.ts"
     },
-    "testModule": "tests/main.js",
+    "testModule": "tests/main.ts",
     "modern": true
   }
 }

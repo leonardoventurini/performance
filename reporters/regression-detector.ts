@@ -1,0 +1,243 @@
+// Compares two benchmark result files and flags regressions against the
+// thresholds configured in bench.config.ts. Two exports:
+//
+//   compare(baseline, target) → { summary, details }
+//     - Flattens the nested collector results (cpu, memory, gc, event-loop)
+//       into a flat list of metric pairs keyed by a threshold name.
+//     - For each pair: computes delta%, looks up the threshold in
+//       bench.config.ts (warn / fail bands), tags ok/WARN/FAIL.
+//     - Emits explicit skip rows for unsafe pairs (missing on either side,
+//       zero baseline, non-finite target) rather than silently dropping
+//       them — the old silent-drop hid real collector-config drift.
+//     - summary.passed === (failures === 0). Skip and WARN rows do NOT
+//       fail the comparison so a CI bench.js compare exit code only goes
+//       non-zero on threshold-crossing regressions.
+//
+//   toMarkdown(report) → string
+//     - Renders the report as a markdown table with status icons. Skip
+//       rows render `⏭ (<reason>)` so the reader can see which metrics
+//       weren't comparable and why.
+
+import config from '../bench.config.js';
+
+export interface MetricData {
+  metric?: string; name?: string; p99?: number; total_pause_ms?: number; max_pause_ms?: number; count?: number;
+  cpu?: { avg?: number }; memory?: { avg_mb?: number }; major?: { total_ms?: number }; status?: string;
+}
+export interface ComparableResult { tag: string; scenario: string; wall_clock_ms?: number; metrics?: Readonly<Record<string, MetricData>> }
+interface MetricPair { key: string; label?: string; baseVal: number | null | undefined; targetVal: number | null | undefined }
+type SkipReason = 'zero_baseline' | 'missing_target' | 'non_finite';
+interface ComparisonDetail { metric: string; baseline: unknown; target: unknown; delta?: number | null; status: 'ok' | 'WARN' | 'FAIL' | 'skip'; reason?: SkipReason }
+export interface ComparisonReport { summary: { baseline_tag: string; target_tag: string; scenario: string; passed: boolean; warnings: number; failures: number }; details: ComparisonDetail[] }
+
+function compare(baseline: ComparableResult, target: ComparableResult): ComparisonReport {
+  const details: ComparisonDetail[] = [];
+  let warnings = 0;
+  let failures = 0;
+
+  // Seed the comparison list with wall_clock — it lives at the top level of
+  // the result, not under metrics{}, so it's special-cased before we walk
+  // collector outputs below.
+  const metricPairs: MetricPair[] = [
+    { key: 'wall_clock_ms', baseVal: baseline.wall_clock_ms, targetVal: target.wall_clock_ms },
+  ];
+
+  const targetReliability = target.metrics?.change_stream_audit;
+  const isAuditScenario = String(target.scenario || '').startsWith('change-stream-audit-');
+  if (isAuditScenario && targetReliability?.status !== 'passed') {
+    failures += 1;
+    details.push({
+      metric: 'Reliability correctness',
+      baseline: baseline.metrics?.change_stream_audit?.status ?? 'missing',
+      target: targetReliability?.status ?? 'incomplete',
+      delta: null,
+      status: 'FAIL',
+    });
+  }
+
+  // Each collector contributes one entry under target.metrics keyed by its
+  // self-declared `metric` field (app_resources / db_resources / gc /
+  // event_loop_delay). Walk the target's metrics and pull the matching
+  // baseline; if baseline doesn't have that key we skip — typically means
+  // the collector was disabled in the older run, not interesting.
+  for (const [metricName, metricData] of Object.entries(target.metrics || {})) {
+    const baseMetric = (baseline.metrics || {})[metricName];
+    if (!baseMetric) continue;
+
+    if (metricData.cpu) {
+      metricPairs.push({
+        key: 'cpu_avg_percent',
+        label: `${metricData.name} CPU avg`,
+        baseVal: baseMetric.cpu?.avg,
+        targetVal: metricData.cpu.avg,
+      });
+    }
+    if (metricData.memory) {
+      metricPairs.push({
+        key: 'ram_avg_mb',
+        label: `${metricData.name} RAM avg`,
+        baseVal: baseMetric.memory?.avg_mb,
+        targetVal: metricData.memory.avg_mb,
+      });
+    }
+    if (metricData.p99 !== undefined) {
+      metricPairs.push({
+        key: 'event_loop_p99_ms',
+        label: 'Event loop p99',
+        baseVal: baseMetric.p99,
+        targetVal: metricData.p99,
+      });
+    }
+    // GC metrics
+    if (metricData.metric === 'gc' && baseMetric.metric === 'gc') {
+      metricPairs.push({
+        key: 'gc_total_pause_ms',
+        label: 'GC total pause',
+        baseVal: baseMetric.total_pause_ms,
+        targetVal: metricData.total_pause_ms,
+      });
+      metricPairs.push({
+        key: 'gc_max_pause_ms',
+        label: 'GC max pause',
+        baseVal: baseMetric.max_pause_ms,
+        targetVal: metricData.max_pause_ms,
+      });
+      metricPairs.push({
+        key: 'gc_count',
+        label: 'GC count',
+        baseVal: baseMetric.count,
+        targetVal: metricData.count,
+      });
+      metricPairs.push({
+        key: 'gc_major_ms',
+        label: 'GC major (full)',
+        baseVal: baseMetric.major?.total_ms,
+        targetVal: metricData.major?.total_ms,
+      });
+    }
+  }
+
+  for (const { key, label, baseVal, targetVal } of metricPairs) {
+    const metricName = label || key;
+
+    // Missing on either side — the metric simply isn't comparable. Emit a
+    // visible skip row instead of silently dropping it; the old behavior hid
+    // collector-config drift (a metric present in baseline but missing in
+    // target looked like nothing happened).
+    if (baseVal == null || targetVal == null) {
+      details.push({
+        metric: metricName,
+        status: 'skip',
+        reason: 'missing_target',
+        baseline: baseVal ?? null,
+        target: targetVal ?? null,
+      });
+      continue;
+    }
+
+    // Zero baseline — a percentage delta against 0 is mathematically
+    // undefined (any positive target would compute as Infinity). Skip
+    // explicitly rather than emit a misleading number.
+    if (baseVal === 0) {
+      details.push({
+        metric: metricName,
+        status: 'skip',
+        reason: 'zero_baseline',
+        baseline: 0,
+        target: targetVal,
+      });
+      continue;
+    }
+
+    // Non-finite target (NaN/Infinity/-Infinity) — flag explicitly rather
+    // than letting the delta calculation propagate NaN downstream.
+    if (!Number.isFinite(targetVal)) {
+      details.push({
+        metric: metricName,
+        status: 'skip',
+        reason: 'non_finite',
+        baseline: baseVal,
+        target: targetVal,
+      });
+      continue;
+    }
+
+    const delta = ((targetVal - baseVal) / baseVal) * 100;
+    const thresholds: Readonly<Record<string, { warn: number; fail: number }>> = config.thresholds;
+    const threshold = thresholds[key];
+    let status: 'ok' | 'WARN' | 'FAIL' = 'ok';
+
+    if (threshold) {
+      if (delta > threshold.fail) {
+        status = 'FAIL';
+        failures++;
+      } else if (delta > threshold.warn) {
+        status = 'WARN';
+        warnings++;
+      }
+    }
+
+    details.push({
+      metric: metricName,
+      baseline: baseVal,
+      target: targetVal,
+      delta: +delta.toFixed(2),
+      status,
+    });
+  }
+
+  return {
+    summary: {
+      baseline_tag: baseline.tag,
+      target_tag: target.tag,
+      scenario: target.scenario,
+      passed: failures === 0,
+      warnings,
+      failures,
+    },
+    details,
+  };
+}
+
+const SKIP_REASON_TEXT: Record<SkipReason, string> = {
+  zero_baseline: 'baseline was zero',
+  missing_target: 'target metric missing',
+  non_finite: 'target value non-finite',
+};
+
+function toMarkdown(report: ComparisonReport): string {
+  const { summary, details } = report;
+  const icon = summary.passed ? (summary.warnings > 0 ? '⚠️' : '✅') : '❌';
+
+  let md = `## ${icon} Benchmark: ${summary.scenario}\n\n`;
+  md += `**${summary.baseline_tag}** → **${summary.target_tag}**\n\n`;
+
+  if (details.length === 0) {
+    md += `_No metrics compared._\n`;
+    return md;
+  }
+
+  md += `| Metric | Baseline | Target | Delta | Status |\n`;
+  md += `|--------|----------|--------|-------|--------|\n`;
+
+  for (const d of details) {
+    if (d.status === 'skip') {
+      const reasonText = d.reason ? SKIP_REASON_TEXT[d.reason] : 'unknown reason';
+      const baselineCell = d.baseline ?? '';
+      const targetCell = d.target ?? '';
+      md += `| ${d.metric} | ${baselineCell} | ${targetCell} |  | ⏭ (${reasonText}) |\n`;
+      continue;
+    }
+    const deltaStr = d.delta == null ? '' : d.delta > 0 ? `+${d.delta}%` : `${d.delta}%`;
+    const statusIcon = d.status === 'FAIL' ? '❌' : d.status === 'WARN' ? '⚠️' : '✅';
+    md += `| ${d.metric} | ${d.baseline} | ${d.target} | ${deltaStr} | ${statusIcon} |\n`;
+  }
+
+  if (summary.failures > 0) {
+    md += `\n**${summary.failures} regression(s) detected.** Performance threshold exceeded.\n`;
+  }
+
+  return md;
+}
+
+export { compare, toMarkdown };

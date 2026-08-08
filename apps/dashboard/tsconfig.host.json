@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": true,
+    "lib": ["ES2022"],
+    "types": ["node"]
+  },
+  "include": ["rspack.config.js", "types/**/*.d.ts"]
+}

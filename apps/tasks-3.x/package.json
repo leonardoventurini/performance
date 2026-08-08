@@ -3,7 +3,8 @@
   "private": true,
   "scripts": {
     "start": "meteor run",
-    "test": "meteor test --once --driver-package meteortesting:mocha",
+    "typecheck": "tsc --build --pretty false",
+    "test": "meteor test --once --driver-package meteortesting:mocha && meteor test-packages --once --driver-package meteortesting:mocha ./packages/tasks-common ./packages/bench-monitors",
     "test-app": "TEST_WATCH=1 meteor test --full-app --driver-package meteortesting:mocha",
     "visualize": "meteor --production --extra-packages bundle-visualizer"
   },
@@ -15,9 +16,18 @@
   },
   "meteor": {
     "mainModule": {
-      "client": "client/main.jsx",
-      "server": "server/main.js"
+      "client": "client/main.tsx",
+      "server": "server/main.ts"
     },
-    "testModule": "tests/main.js"
-  }
+    "testModule": "tests/main.ts"
+  },
+  "devDependencies": {
+    "@types/meteor": "^2.9.11",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^24.13.3",
+    "@types/react": "^18.3.31",
+    "@types/react-dom": "^18.3.7",
+    "typescript": "^5.9.3"
+  },
+  "overrides": {}
 }

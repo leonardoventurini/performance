@@ -50,6 +50,7 @@
             {{#if hasMongoSection}}<a href="#mongo" class="{{pillClass false}}">Mongo</a>{{/if}}
             {{#if hasObserverSection}}<a href="#observer" class="{{pillClass false}}">Observer</a>{{/if}}
             {{#if hasBuildSection}}<a href="#build" class="{{pillClass false}}">Build</a>{{/if}}
+            {{#if hasReliabilitySection}}<a href="#reliability" class="{{pillClass false}}">Reliability</a>{{/if}}
             {{#if hasMissingSection}}<a href="#missing" class="{{pillClass false}}">Not in run</a>{{/if}}
           </nav>
         </aside>
@@ -87,6 +88,19 @@
                 {{/if}}
                 {{#if hasDdpCompression}}
                   {{> metricCard title="DDP compression (coarse)" tableRows=ddpCompRows tableHeaders=ddpCompHeaders footer="socket.bytesRead/Written vs pre-compression JSON · includes WS framing overhead"}}
+                {{/if}}
+              </div>
+            </section>
+          {{/if}}
+
+          {{#if hasReliabilitySection}}
+            <section id="reliability" class="scroll-mt-6">
+              <h2 class="text-[11px] uppercase tracking-wide text-neutral-500 mb-3">Reliability</h2>
+              <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {{> metricCard title="Change-stream audit" badge=reliabilityBadge rows=reliabilityRows footer="serialized feature evidence + final-state convergence are authoritative"}}
+                {{> metricCard title="Feature evidence" tableRows=reliabilityCapabilityRows tableHeaders=reliabilityCapabilityHeaders footer="unsupported and unaudited features never imply conformance"}}
+                {{#if reliabilityFailureRows.length}}
+                  {{> metricCard title="Correctness failures" rows=reliabilityFailureRows}}
                 {{/if}}
               </div>
             </section>

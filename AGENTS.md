@@ -9,7 +9,7 @@ operations tools and are not called by the CLI, npm, or GitHub Actions.
 The runtime flow is:
 
 1. `bench.js` parses CLI arguments and dispatches through `cli/`.
-2. `cli/run.js` resolves the Meteor source, validates the scenario and app,
+2. `cli/run.ts` resolves the Meteor source, validates the scenario and app,
    selects a driver, and persists the result.
 3. `drivers/` own workload-specific execution for Artillery, scripts, cold
    start, bundle size, and build profiling.
@@ -20,6 +20,17 @@ The runtime flow is:
 6. `reporters/` persist the canonical JSON result and compare it against
    configured regression thresholds.
 
+The `audit` subcommand is a correctness path, not a performance scenario. It
+uses the same process, collector, and result envelope, but
+`metrics.change_stream_audit.status` is authoritative and any non-passing
+status must produce a nonzero CLI exit after the evidence file is persisted.
+`reliability/definitions/` is the sole case, profile, capability, and
+negative-control authoring authority. `reliability/declarative/` validates and
+compiles it; `reliability/runtime/` interprets only closed trusted primitives
+against an owned replica set, two Meteor instances, and the audit proxy. The
+task fixture exposes only the run-scoped `reliability.documents` publication
+and ownership-attested audit methods for this flow.
+
 Preserve the result contract consumed by tests and the dashboard:
 `timestamp`, `tag`, `meteor`, `runtime`, `scenario`, `app`, `wall_clock_ms`,
 and `metrics`. Metric names and nested paths are public contracts; update the
@@ -27,7 +38,8 @@ producer, fixtures, contract tests, comparator, and dashboard together.
 
 Repository areas:
 
-- `apps/tasks-3.x` is the only benchmark target. It is a Meteor 3.0.2 React
+- `apps/tasks-3.x` is the only benchmark target. It is a Meteor 3.5.1-beta.0
+  React
   fixture with app-local packages under `packages/`.
 - `apps/tasks-3.x/packages/tasks-common` owns the task workload and UI.
 - `apps/tasks-3.x/packages/bench-monitors` instruments DDP, observers,
@@ -36,14 +48,14 @@ Repository areas:
 - `apps/dashboard` is a separate Meteor 3.4 Blaze application. It stores runs
   and baselines in MongoDB and renders Runs, Compare, Trends, Detail, and
   Scenario pages with Chart.js and Tailwind CSS.
-- `bench.config.js` is the scenario, app, threshold, port, dashboard, and
+- `bench.config.ts` is the scenario, app, threshold, port, dashboard, and
   results-path authority.
 - `.github/workflows/` runs nightly, PR, transport, and observer/transport
   matrix benchmarks against external Meteor branches.
 - `results/` is ignored generated output. Each run writes the requested output
   and an additional history record under `results/history/`.
 
-Read `README.md`, `bench.config.js`, and `scripts/SCRIPTS.md` before changing
+Read `README.md`, `bench.config.ts`, and `scripts/SCRIPTS.md` before changing
 benchmark behavior. `RUNTIME.md` and portions of `README.md` still describe
 legacy or removed paths; prefer executable code and `scripts/SCRIPTS.md` when
 they disagree.
@@ -52,8 +64,12 @@ they disagree.
 
 - Use Node 24 or newer and npm 10 or newer. Volta pins Node 24.0.0.
 - Use npm; every JavaScript workspace has a committed `package-lock.json`.
+- Use the root `justfile` as the discoverable command surface. Run
+  `just --list` to inspect recipes; the underlying npm, Meteor, Playwright,
+  Tailwind, and benchmark commands remain authoritative.
 - Install root dependencies with `npm ci`.
-- Install an app's dependencies with `npm ci` inside that app.
+- Install a Meteor app's dependencies with `meteor npm ci` inside that app so
+  its npm and Node toolchain match the active Meteor release.
 - The benchmark app's Meteor packages are app-local. Do not restore the old
   top-level `packages/` or `METEOR_PACKAGE_DIRS` wiring.
 - A real benchmark also requires a Meteor CLI or checkout and, depending on
@@ -64,23 +80,30 @@ they disagree.
 Safe root verification:
 
 ```sh
+just check
+```
+
+The equivalent direct commands are:
+
+```sh
 npm ci
 npm test
 node bench.js list
 npx playwright test --list
 for file in scripts/*.sh; do bash -n "$file"; done
-for file in scripts/helpers/*.js; do node --check "$file"; done
+for file in dist/scripts/helpers/*.cjs; do node --check "$file"; done
 ```
 
 `node bench.js list` resolves and inspects the configured Meteor source. The
 root Playwright configuration only discovers or runs tests; it does not start
-an application server.
+an application server. `just check-all` adds both Meteor application suites
+and requires the Meteor CLI.
 
 App-local verification:
 
 ```sh
-(cd apps/tasks-3.x && npm ci && npm test)
-(cd apps/dashboard && npm ci && npm test)
+(cd apps/tasks-3.x && meteor npm ci && meteor npm test)
+(cd apps/dashboard && meteor npm ci && meteor npm test)
 ```
 
 `test-app` in either app is a watch/full-app command, not a one-shot gate.
@@ -117,6 +140,29 @@ node bench.js run \
   does not prove a valid run; inspect workload output and reject any run with
   an Artillery or script error, timeout, incomplete scenario, or missing
   expected metric.
+
+Run a change-stream conformance audit:
+
+```sh
+node bench.js audit \
+  --profile smoke \
+  --observer-driver changeStreams \
+  --meteor-version <release>
+```
+
+- `smoke` is the bounded default; `extreme` requires explicit selection.
+- The audit writes only to `reliabilityDocuments` and scopes every mutation
+  and cleanup by unique `runId` and `caseExecutionId` values.
+- Audit topology is executor-owned and loopback-only. Operator MongoDB URLs
+  are never audit targets.
+- The requested observer must match both the startup probe and per-cursor
+  fallback evidence.
+- Supported operation capabilities require serialized delivery evidence.
+  Burst event counts are diagnostic because DDP may coalesce intermediate
+  current states; exact final state and content digests remain mandatory.
+- Unsupported, fallback-only, and unexercised capabilities must remain
+  explicit in the capability matrix and must never be described as passing.
+- DDP message/frame evidence is mandatory for a passing transport audit.
 
 Offline result operations:
 
@@ -158,7 +204,7 @@ Never use `BENCH_CLEAR_CONFIRM=1` to bypass a deliberate target check.
 - Pass runtime variants through repeated `--env` flags. Important inputs
   include `METEOR_REACTIVITY_ORDER`, `DDP_TRANSPORT`, `DISABLE_SOCKJS`,
   `METEOR_SETTINGS`, `MONGO_OPLOG_URL`, and `SERVER_NODE_OPTIONS`.
-- Browser workloads share `tests/test-helpers.js`. `REMOTE_URL` defaults to
+- Browser workloads share `tests/test-helpers.ts`. `REMOTE_URL` defaults to
   `http://localhost:3000`, and `TASK_COUNT` defaults to 20. Preserve accessible
   labels, selectors, session isolation, and task sequencing when changing the
   fixture UI.
@@ -176,7 +222,7 @@ Never use `BENCH_CLEAR_CONFIRM=1` to bypass a deliberate target check.
 Meteor source precedence is explicit flag, environment, then config:
 
 - Checkout: `--meteor-checkout`, `METEOR_CHECKOUT_PATH`, then
-  `bench.config.js`.
+  `bench.config.ts`.
 - Published release: `--meteor-version`, `METEOR_RELEASE`, then config.
 - When the configured checkout lacks a Meteor binary, resolution falls back to
   the system Meteor installation.
@@ -198,14 +244,28 @@ must inject a real `Meteor.settings.benchApiKey` through private settings.
 Run the dashboard on port 4000 to match the CLI's default DDP endpoint:
 
 ```sh
-(cd apps/dashboard && meteor run --port 4000 --settings settings.json)
+just dashboard
 ```
+
+`just dashboard` sets `BENCH_REPOSITORY_ROOT` to the current repository so the
+`/audits` control plane can launch the canonical root CLI.
+Starting the Meteor app directly leaves audit execution unavailable unless the
+server receives that variable explicitly. Dashboard audit requests are a
+strict subset of CLI inputs: never add browser-controlled environment maps,
+MongoDB URLs, paths, checkout locations, output locations, or raw arguments.
+Keep audit execution single-flight, backgrounded, process-group cancellable,
+and fail closed unless the correlated canonical result passes validation.
+Audit controls intentionally require no application-level API key. Anyone who
+can reach an audit-capable dashboard can start or cancel its single active
+audit, so keep that dashboard on a trusted local or otherwise access-controlled
+network. Never persist or publish child process IDs, repository paths, or
+credentialed database URLs.
 
 Tailwind source lives in `_tw/main.tailwind.css`; `client/main.css` is tracked
 generated output:
 
 ```sh
-(cd apps/dashboard && npm run tw)
+(cd apps/dashboard && meteor npm run tw)
 ```
 
 After template, class, token, or Tailwind changes, regenerate the CSS and
@@ -215,9 +275,10 @@ behavior where relevant. Preserve HTML escaping in detail panels and
 server-only writes to `Runs` and `Baselines`.
 
 Do not describe Galaxy dashboard deployment as verified without fixing and
-testing its contract: `apps/dashboard/galaxy.json` calls `npm run build`, but
-the dashboard package currently declares no `build` script. Its `/health`
-configuration also has no explicit route in the application.
+testing its contract: `apps/dashboard/galaxy.json` calls
+`meteor npm run build`, but the dashboard package currently declares no
+`build` script. Its `/health` configuration also has no explicit route in the
+application.
 
 ## Tests and change matrix
 
@@ -228,8 +289,8 @@ configuration also has no explicit route in the application.
   change.
 - Shared workload or task UI changes: run root tests, both Playwright
   scenarios against a running app, and the task app's Meteor tests.
-- Dashboard API changes: run dashboard Meteor tests and verify DDP
-  authentication, publication limits, direct-write denial, and date/key
+- Dashboard API changes: run dashboard Meteor tests and verify audit-control
+  access behavior, publication limits, direct-write denial, and date/key
   normalization.
 - Dashboard UI or Tailwind changes: regenerate CSS and perform browser
   verification across representative viewports and themes.

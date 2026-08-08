@@ -7,6 +7,9 @@
 node_modules/
 
 # Build / cache
+/dist/
+/.typescript-tools/
+*.tsbuildinfo
 /test-results/
 /playwright-report/
 /blob-report/
@@ -24,3 +27,4 @@ otel/
 
 # Team coordination workspace (out of repo scope)
 .claude/
+.codex/

@@ -44,11 +44,8 @@ jobs:
         with:
           node-version: '24'
 
-      - name: Install dependencies
+      - name: Install root dependencies
         run: npm ci
-
-      - name: Install Playwright browsers
-        run: npx playwright install chromium
 
       # Resolve inputs from workflow_dispatch or repository_dispatch.
       # All ${{ }} values are interpolated into env vars rather than directly
@@ -92,9 +89,25 @@ jobs:
           cd "$METEOR_REPO"
           git fetch --tags --depth 50 origin "$BASELINE" "$BRANCH"
 
-      - name: Install app dependencies
-        run: npm install
+      - name: Install task app dependencies
+        run: '"$METEOR_REPO/meteor" npm ci'
         working-directory: apps/tasks-3.x
+
+      - name: Install dashboard dependencies
+        run: '"$METEOR_REPO/meteor" npm ci'
+        working-directory: apps/dashboard
+
+      - name: Type-check all TypeScript workspaces
+        run: npm run typecheck:all
+
+      - name: Verify maintained source inventory
+        run: npm run test:source-inventory
+
+      - name: Build benchmark harness
+        run: npm run build
+
+      - name: Install Playwright browsers
+        run: npx playwright install chromium
 
       # ─── Run baseline benchmark ───
       - name: Checkout baseline
