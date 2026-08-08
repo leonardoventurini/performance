@@ -415,10 +415,10 @@ logs, credentials, or unrelated workspace changes.
 - [x] Switch package scripts, just recipes, workflows, Artillery YAML,
   dashboard preflight, and documentation to the stable build contract in the
   same rollout; verify: a clean checkout cannot execute stale or missing output.
-- [ ] Run the complete static, unit, integration, browser, application,
+- [x] Run the complete static, unit, integration, browser, application,
   benchmark, and declarative-audit gauntlet; compare canonical artifacts and
   recovery evidence to the baseline; fix every discrepancy before proceeding.
-- [ ] Perform the three independent adversarial reviews, resolve every P0/P1,
+- [x] Perform the three independent adversarial reviews, resolve every P0/P1,
   record the shipped compiler/runtime decision under `decisions/`, inspect the
   clean final diff, and commit the integrated direct rollout with signed
   semantic commits.
@@ -451,3 +451,22 @@ The conversion is complete only when:
 9. generated artifacts remain ignored and the repository contains no parallel
    JavaScript implementation;
 10. the direct rollout is documented in a durable decision after verification.
+
+## Final verification evidence
+
+The direct rollout passed the complete static and emitted-runtime gate: all
+strict compiler projects reported zero diagnostics, the root suite passed
+597/597, build-manifest verification succeeded, and source inventory contained
+exactly the four declared JavaScript hosts. The task application passed its
+2/2 full-app and 12/12 local-package tests, the dashboard passed 16/16 tests,
+both production server builds completed, and both Chromium journeys passed
+against the running task fixture. Root production dependencies audit cleanly;
+the Meteor workspaces retain the documented upstream bundled `qs` advisory.
+
+The canonical declarative smoke audit executed all 87 required coordinates.
+It truthfully completed as `incomplete` with 56 passing and 31 incomplete
+cases, all four recovery attestations true, and 12/13 negative controls
+detected with their exact expected reasons. The sole undetected control remains
+`new_session_claimed_resumed`, whose authenticated DDP fixture is explicitly
+absent from this bounded profile. The normalized outcome therefore preserves
+the pre-conversion baseline contract rather than manufacturing a pass.

@@ -77,21 +77,27 @@ integrated contract.
 ## Verification evidence
 
 - Root solution and host typechecks completed with zero diagnostics; the root
-  Node suite passed after trust-boundary, lifecycle, readiness, and
+  Node suite passed 597/597 after trust-boundary, lifecycle, readiness, and
   build-contract regression additions.
 - Source inventory reported exactly four JavaScript hosts; clean build,
   manifest verification, missing/added/modified input probes, emitted helper
   syntax, launcher listing, and emitted Playwright discovery passed.
-- Task full-app tests passed 2/2, local-package tests passed 10/10, production
+- Task full-app tests passed 2/2, local-package tests passed 12/12, production
   server build passed, and both real Chromium journeys passed against the
   Meteor fixture after exercising reactive and non-reactive task flows.
 - Dashboard tests passed 16/16, strict typecheck and production server build
   passed, and Tailwind regeneration is byte-for-byte deterministic.
 - Workflow YAML, shell syntax, Just contracts, output whitespace, and signed
   commit checks passed.
-- A bounded owned-environment probe authenticated both Meteor backends and
-  attested document, topology, profiler, and network restoration. The complete
-  87-case smoke evidence is recorded separately after the clean canonical run.
+- The canonical smoke audit executed 87/87 required coordinates and retained
+  its truthful `incomplete` status: 56 cases passed, 31 remained incomplete,
+  all document/topology/profiler/network recovery attestations were true, and
+  12/13 negative controls matched their exact expected reasons. Only
+  `new_session_claimed_resumed` remains undetected because this profile has no
+  authenticated DDP fixture, matching the pre-conversion baseline contract.
 - Independent adversarial review found build-freshness, trust-boundary,
   workflow, launcher, Playwright, browser-runtime, collector-lifecycle, and
-  DDP-readiness gaps; each finding was converted into a regression gate.
+  DDP-readiness gaps; each finding was converted into a regression gate. The
+  canonical audit additionally exposed and now guards owner-level teardown,
+  fault-witness decoding, cancellation propagation, EJSON signed-zero
+  normalization, declarative digest identity, and post-fault election health.
