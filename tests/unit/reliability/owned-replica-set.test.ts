@@ -195,3 +195,32 @@ test('recovery restores only the exact audit run before independently attesting 
     'connect', 'count', 'attest:profiler', 'close',
   ]);
 });
+
+test('recovery waits for a healthy election before opening its cleanup client', async () => {
+  const observations: string[] = [];
+  class FakeMongoClient {
+    constructor(_uri: string, _options: Readonly<{ serverSelectionTimeoutMS: number }>) {}
+    async connect() { observations.push('connect'); }
+    db() {
+      return {
+        collection() { return {
+          async deleteMany() { observations.push('delete'); },
+          async countDocuments() { return 0; },
+        }; },
+        async command() { observations.push('profiler'); return {}; },
+      };
+    }
+    async close() { observations.push('close'); }
+  }
+  const replicaSet = new OwnedReplicaSet({
+    auditId: 'audit-1', mongodPath: '/bin/false',
+    rootPath: path.join(os.tmpdir(), 'meteor-audit-rs-test-election-recovery'),
+    mongoClient: FakeMongoClient,
+  });
+  replicaSet.assertLiveOwnership = testMarker;
+  replicaSet.awaitHealthy = async () => { observations.push('healthy'); return {}; };
+
+  await replicaSet.restoreAuditState();
+
+  assert.deepEqual(observations, ['healthy', 'connect', 'delete', 'profiler', 'close']);
+});

@@ -491,6 +491,7 @@ export class OwnedReplicaSet {
   async restoreAuditState(): Promise<void> {
     this.assertLiveOwnership();
     if (this.suspended) await this.resumeAll();
+    else await this.awaitHealthy();
     const client = new this.mongoClient(this.uri, { serverSelectionTimeoutMS: 5_000 });
     try {
       await client.connect();
