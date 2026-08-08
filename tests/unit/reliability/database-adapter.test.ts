@@ -86,6 +86,36 @@ test('database mutation and expected transition are independent paths', async ()
   assert.equal(expectedDocument.counter, 1);
 });
 
+test('expected-model cloning preserves signed zero across updates', async () => {
+  const store = collection();
+  const fixture: DeclarativeFixture = { documents: [{
+    _id: 'run:0', runId: 'run', caseExecutionId: 'case', sequence: 0, revision: 0,
+    adversarial: { scalarBoundaries: { negative: -0 } },
+  }] };
+  const adapter = createDatabaseAdapter({ collection: store, fixture });
+  const resolve = (value: unknown): unknown => value && typeof value === 'object'
+    && Reflect.get(value, 'kind') === 'literal' ? Reflect.get(value, 'value') : value;
+  await adapter.write({
+    step: {
+      operation: 'insert_one', selector: { index: 0 }, mutation: { kind: 'fixture_document' },
+      expectedTransition: { kind: 'insert' },
+    },
+    resolve,
+  });
+  await adapter.write({
+    step: {
+      operation: 'update_one', selector: { index: 0 },
+      mutation: { kind: 'set', path: ['marker'], value: { kind: 'literal', value: true } },
+      expectedTransition: { kind: 'set_field', path: ['marker'], value: { kind: 'literal', value: true } },
+    },
+    resolve,
+  });
+
+  const expected = adapter.expectedSnapshot()[0];
+  assert.ok(expected);
+  assert.equal(Object.is(Reflect.get(Reflect.get(expected, 'adversarial'), 'scalarBoundaries').negative, -0), true);
+});
+
 test('cleanup proves no run-scoped documents remain', async () => {
   const store = collection();
   store.documents.set('one', {

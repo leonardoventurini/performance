@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 
-import { Binary, BSON, ObjectId } from 'mongodb';
+import { Binary, ObjectId } from 'mongodb';
 import type { Document } from 'mongodb';
 
 import type {
@@ -62,19 +62,30 @@ export interface ReliabilityCollection {
 }
 
 function cloneValue(value: unknown): unknown {
-  return BSON.EJSON.deserialize(BSON.EJSON.serialize(value));
+  if (value === null || typeof value !== 'object') return value;
+  if (value instanceof Date) return new Date(value.getTime());
+  if (value instanceof ObjectId) return new ObjectId(value.toHexString());
+  if (value instanceof Binary) {
+    return new Binary(Buffer.from(value.buffer.subarray(0, value.position)), value.sub_type);
+  }
+  if (ArrayBuffer.isView(value)) return structuredClone(value);
+  if (Array.isArray(value)) return value.map(cloneValue);
+  return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, cloneValue(child)]));
 }
 
 function cloneDocument(document: ReliabilityDocument): ReliabilityDocument {
-  const cloned = BSON.deserialize(BSON.serialize(document));
+  const cloned = cloneValue(document);
+  if (!cloned || typeof cloned !== 'object' || Array.isArray(cloned)) {
+    throw new TypeError('reliability document clone is invalid');
+  }
   return {
     ...cloned,
-    _id: String(cloned._id),
-    runId: String(cloned.runId),
-    caseExecutionId: String(cloned.caseExecutionId),
-    sequence: Number(cloned.sequence),
-    revision: Number(cloned.revision),
-    ...(typeof cloned.payload === 'string' ? { payload: cloned.payload } : {}),
+    _id: String(Reflect.get(cloned, '_id')),
+    runId: String(Reflect.get(cloned, 'runId')),
+    caseExecutionId: String(Reflect.get(cloned, 'caseExecutionId')),
+    sequence: Number(Reflect.get(cloned, 'sequence')),
+    revision: Number(Reflect.get(cloned, 'revision')),
+    ...(typeof Reflect.get(cloned, 'payload') === 'string' ? { payload: Reflect.get(cloned, 'payload') } : {}),
   };
 }
 
