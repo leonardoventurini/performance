@@ -10,7 +10,9 @@ import {
 import {
   RELEASE_CAPABILITY_CONTRACT_DIGEST,
   RELEASE_CAPABILITY_REGISTRY,
+  RELEASE_CASE_CONTRACTS,
 } from '../../../reliability/release-audit/capability-registry.js';
+import { loadDeclarativeAuditCatalog } from '../../../reliability/declarative/catalog.js';
 import { resolveReleaseAuditMatrix } from '../../../reliability/release-audit/matrix.js';
 
 const SHA = 'a'.repeat(64);
@@ -172,6 +174,17 @@ test('registry includes every exact capability explicitly named by the spec', ()
     );
   }
   assert.equal(ids.size, RELEASE_CAPABILITY_REGISTRY.length);
+});
+
+test('case registry preserves each validated declarative definition digest', () => {
+  const catalog = loadDeclarativeAuditCatalog();
+  for (const definition of catalog.cases) {
+    assert.equal(
+      RELEASE_CASE_CONTRACTS[definition.id]?.definitionDigest,
+      contractDigest(definition),
+      definition.id,
+    );
+  }
 });
 
 test('matrix resolver covers every applicable required capability coordinate', () => {

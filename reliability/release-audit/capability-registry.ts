@@ -105,11 +105,11 @@ export interface ReleaseCaseContract extends UnknownRecord {
   readonly fallbackFrom?: string;
 }
 
-function releaseCaseContract(definition: CaseContractSource): ReleaseCaseContract {
+function releaseCaseContract(definition: CaseContractSource, definitionDigest: string): ReleaseCaseContract {
   const observer = observerContract(definition.evidence.observer);
   const contract: ReleaseCaseContract = {
     caseId: definition.id,
-    definitionDigest: contractDigest(definition),
+    definitionDigest,
     expectation: capabilityExpectation(definition.id),
     requiredOracleProducers: Object.freeze([...definition.evidence.requiredProducers]),
     requiresObserverEvidence: true,
@@ -125,7 +125,10 @@ function releaseCaseContract(definition: CaseContractSource): ReleaseCaseContrac
 
 /** Exact aggregation contracts projected from each validated case definition. */
 const caseContracts: Record<string, ReleaseCaseContract> = {};
-for (const definition of catalog.cases.map(caseSource)) caseContracts[definition.id] = releaseCaseContract(definition);
+for (const catalogDefinition of catalog.cases) {
+  const definition = caseSource(catalogDefinition);
+  caseContracts[definition.id] = releaseCaseContract(definition, contractDigest(catalogDefinition));
+}
 export const RELEASE_CASE_CONTRACTS: Readonly<Record<string, ReleaseCaseContract | undefined>> = Object.freeze(caseContracts);
 
 export const REQUIRED_NEGATIVE_CONTROLS = Object.freeze(catalog.negativeControls.map(negativeControl).map((control) => Object.freeze({
