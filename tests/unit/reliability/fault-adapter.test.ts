@@ -30,7 +30,7 @@ test('restoreAll rejects false restoration witnesses and retains active state', 
     resume: async () => undefined,
     call: async (_method: string, parameters: readonly unknown[]) => {
       const operation = Reflect.get(parameters[0] as object, 'operation');
-      return operation === 'activate' ? { engaged: true } : { restored: false };
+      return operation === 'activate' ? { activated: true } : { restored: false };
     },
   };
   const faults = createFaultAdapter({
@@ -52,7 +52,7 @@ test('asymmetric activation restores successful targets before rejecting', async
     call: async (_method: string, parameters: readonly unknown[]) => {
       const operation = String(Reflect.get(parameters[0] as object, 'operation'));
       calls.push(`first:${operation}`);
-      return operation === 'activate' ? { engaged: true } : { restored: true };
+      return operation === 'activate' ? { activated: true } : { restored: true };
     },
   };
   const second = {
@@ -74,5 +74,24 @@ test('asymmetric activation restores successful targets before rejecting', async
     /second backend failed/,
   );
   assert.deepEqual(calls, ['first:activate', 'second:activate', 'first:restore']);
+  assert.equal(faults.state.has('fault'), false);
+});
+
+test('activation rejects a lifecycle status witness without an activation attestation', async () => {
+  const client = {
+    state: 'connected',
+    resume: async () => undefined,
+    call: async () => ({ engaged: true }),
+  };
+  const faults = createFaultAdapter({
+    environment: { replicaSet: { stepDownPrimary: async () => undefined } },
+    clients: { clients: [], faultControlClients: async () => [client] },
+    runId: 'run', caseExecutionId: 'case', ownershipToken: 'token',
+  });
+
+  await assert.rejects(
+    faults.execute('watch_setup_pause', 'activate', { step: { faultId: 'fault' } }),
+    /did not attest activation/u,
+  );
   assert.equal(faults.state.has('fault'), false);
 });

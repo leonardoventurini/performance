@@ -20,7 +20,7 @@ interface FaultReplicaSet {
 
 interface FaultEnvironment { readonly replicaSet: FaultReplicaSet }
 
-interface FaultStatus { readonly engaged?: boolean; readonly restored?: boolean }
+interface FaultStatus { readonly activated?: boolean; readonly engaged?: boolean; readonly restored?: boolean }
 interface TrackedFault {
   readonly controller: string;
   readonly recovery: Promise<Readonly<{ restored: boolean; error?: unknown }>> | null;
@@ -59,6 +59,7 @@ export function createFaultAdapter({ environment, clients, runId, caseExecutionI
     }]);
     if (!result || typeof result !== 'object') throw new Error('fault controller returned an invalid witness');
     return {
+      ...(typeof Reflect.get(result, 'activated') === 'boolean' ? { activated: Reflect.get(result, 'activated') === true } : {}),
       ...(typeof Reflect.get(result, 'engaged') === 'boolean' ? { engaged: Reflect.get(result, 'engaged') === true } : {}),
       ...(typeof Reflect.get(result, 'restored') === 'boolean' ? { restored: Reflect.get(result, 'restored') === true } : {}),
     };
@@ -73,7 +74,7 @@ export function createFaultAdapter({ environment, clients, runId, caseExecutionI
     try {
       for (const client of await clients.faultControlClients()) {
         const witness = await invoke(client, controller, 'activate', faultId);
-        if (witness.engaged !== true) throw new Error('fault controller did not attest activation');
+        if (witness.activated !== true) throw new Error('fault controller did not attest activation');
         activated.push(client);
       }
     } catch (activationError) {
