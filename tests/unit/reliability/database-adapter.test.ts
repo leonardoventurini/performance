@@ -86,7 +86,7 @@ test('database mutation and expected transition are independent paths', async ()
   assert.equal(expectedDocument.counter, 1);
 });
 
-test('expected-model cloning preserves signed zero across updates', async () => {
+test('expected-model cloning matches EJSON signed-zero wire semantics', async () => {
   const store = collection();
   const fixture: DeclarativeFixture = { documents: [{
     _id: 'run:0', runId: 'run', caseExecutionId: 'case', sequence: 0, revision: 0,
@@ -113,7 +113,7 @@ test('expected-model cloning preserves signed zero across updates', async () => 
 
   const expected = adapter.expectedSnapshot()[0];
   assert.ok(expected);
-  assert.equal(Object.is(Reflect.get(Reflect.get(expected, 'adversarial'), 'scalarBoundaries').negative, -0), true);
+  assert.equal(Object.is(Reflect.get(Reflect.get(expected, 'adversarial'), 'scalarBoundaries').negative, -0), false);
 });
 
 test('cleanup proves no run-scoped documents remain', async () => {

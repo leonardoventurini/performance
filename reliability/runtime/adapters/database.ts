@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 
-import { Binary, ObjectId } from 'mongodb';
+import { Binary, BSON, ObjectId } from 'mongodb';
 import type { Document } from 'mongodb';
 
 import type {
@@ -62,15 +62,7 @@ export interface ReliabilityCollection {
 }
 
 function cloneValue(value: unknown): unknown {
-  if (value === null || typeof value !== 'object') return value;
-  if (value instanceof Date) return new Date(value.getTime());
-  if (value instanceof ObjectId) return new ObjectId(value.toHexString());
-  if (value instanceof Binary) {
-    return new Binary(Buffer.from(value.buffer.subarray(0, value.position)), value.sub_type);
-  }
-  if (ArrayBuffer.isView(value)) return structuredClone(value);
-  if (Array.isArray(value)) return value.map(cloneValue);
-  return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, cloneValue(child)]));
+  return BSON.EJSON.deserialize(BSON.EJSON.serialize(value));
 }
 
 function cloneDocument(document: ReliabilityDocument): ReliabilityDocument {
